@@ -30,6 +30,7 @@ final class VettingServiceProbe {
         String root=props.getVetting().getServiceProbeDirectory();
         boolean configured=!JsonUtils.isBlankText(root);
         VettingServiceProbe probe=new VettingServiceProbe(configured,configured?"service-"+UUID.randomUUID():null,runId,projectId);
+        probe.summary("service_run_started",map("fullArtifactProbe",configured));
         if(!configured)return probe;
         long started=System.nanoTime();
         try {
@@ -55,6 +56,7 @@ final class VettingServiceProbe {
     synchronized long overheadNanos(){return observerNanos;}
     synchronized Map<String,Object> reference(String phase){Map<String,Object> value=references.get(phase);return value==null?null:new LinkedHashMap<>(value);}
     static Map<String,Object> map(Object... pairs){return DocumentParseProbe.map(pairs);}
+    void summary(String phase,Map<String,?> scalars){VettingReviewProbe.logSummary("service",runId,operationId,0,null,phase,scalars);}
 
     /** Values are built only when configured and serialized immediately before mutable business objects advance. */
     synchronized void observe(String phase,Supplier<Object> observations) {
@@ -77,11 +79,13 @@ final class VettingServiceProbe {
     }
     void elapsed(String phase,long started,long overheadBefore,String boundary,boolean completed){
         long inclusive=System.nanoTime()-started,overhead=overheadNanos()-overheadBefore;
+        summary(phase,map("completed",completed,"wallNanos",Math.max(0,inclusive-overhead),"inclusiveWallNanos",inclusive));
         observe("phase_timing",()->map("stage",phase,"completed",completed,"wallNanos",Math.max(0,inclusive-overhead),
                 "inclusiveWallNanos",inclusive,"probeOverheadNanos",overhead,"seconds",Math.max(0,inclusive-overhead)/1_000_000_000.0,
                 "boundary",boundary,"clock","System.nanoTime; stages may be nested and are not additive"));
     }
     void originalFailure(String phase,Throwable original){
+        summary(phase,map("outcome","failed","failureKind",original==null?"unknown":original.getClass().getSimpleName()));
         if(!configured)return;
         attachObserverFailures(original);
         observe(phase,()->map("originalFailure",failureTree(original),"observerFailureCount",observerFailureCount(),
@@ -102,7 +106,7 @@ final class VettingServiceProbe {
                 "cause",tree(value.getCause(),visited),"suppressed",suppressed);
     }
     synchronized void finish(String status,Throwable original){
-        if(!configured||finished)return;finished=true;attachObserverFailures(original);
+        if(finished)return;finished=true;summary("service_run_finished",map("status",status,"observerFailures",observerFailureCount()));if(!configured)return;attachObserverFailures(original);
         observe("service_lifecycle_terminal",()->map("status",status,"terminalStatusMeaning","Lifecycle operation outcome; not proof an external participating transaction committed","originalFailure",failureTree(original),
                 "observerFailures",observerFailures.stream().map(VettingServiceProbe::failureTree).collect(java.util.stream.Collectors.toList()),
                 "observerFailureCount",observerFailures.size(),"semanticQualityAccepted",null));

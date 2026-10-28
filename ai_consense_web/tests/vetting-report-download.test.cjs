@@ -99,6 +99,15 @@ async function run() {
   responseBlob = json({ code: 4091, message: 'Source set changed', data: null })
   await assert.rejects(vettingApi.exportReport('project-A', 'report.json', 'json', () => { invalidPrepared = true; return true }), /Source set changed/)
   assert.equal(invalidPrepared, false, 'The prepared-link path cannot bypass the original JSON/error validator')
+  for (const marker of [false, 'true']) await reject({ ...report(), job: { id: 'job-1', status: 'FAILED', partialResults: marker } }, /report|报告/)
+  await reject({ ...report(), partialResults: true, job: { id: 'job-1', status: 'FAILED' } }, /report|报告/)
+  const partial = { ...report(), job: { id: 'job-1', status: 'FAILED', partialResults: true } }
+  for (const change of [{ project: { id: 'another-project' } }, { language: 'zh-Hans' }, { sourceRunId: 'another-run' },
+    { sourceReportSnapshotId: 'invalid' }, { diagnostics: { ...report().diagnostics, sourceRunId: 'another-run' } }]) await reject({ ...partial, ...change }, /report|报告/)
+  responseBlob = json(partial)
+  const beforePartial = downloadCount
+  await vettingApi.exportReport('project-A', 'partial-report.json', 'json')
+  assert.equal(downloadCount, beforePartial + 1, 'Only a strictly marked failed partial report passes the existing identity guards')
   console.log('PASS: English v2 JSON/PDF/DOCX download; invalid schema, language, presentation flag, project/run/snapshot references, envelopes, malformed JSON and JSON on binary endpoints are rejected')
 }
 run().catch(error => { console.error(error); process.exitCode = 1 })

@@ -68,6 +68,9 @@ final class AdvisoryHarness {
             + "Omit uncertainty sections when no actual affected gap or missing_evidence check remains; do not emit empty uncertainty placeholders. In explicit reference_only interpretation, absent project adoption is a disclosed scope limit, not an adoption gap, missingReason or clarification. Other genuinely missing source editions, amendments and necessary facts remain gaps. "
             + "A gap belongs to its section's affected determination. clarifications is an array of needed gap enums; the application renders necessary questions. missingReason is one gap enum or empty, never free prose. "
             + "For each requested conclusion, assess whether the supplied source text is sufficient; if a necessary provision or continuation is missing, retain supported conclusions and name the closest existing gap enum in missingReason, clarifications or the affected uncertainty section. "
+            + "A descriptive question about selected tender text asks what that text says or how its stated procedure works; it does not by itself ask whether that text has been adopted, whether a party has complied, or whether an actual project entitlement has arisen. A fully supported descriptive answer may be grounded=true without inventing those additional determinations or their gaps. Keep its requested project_contract basis and cite the selected tender text; do not convert it to reference_only. Explain unrelated checks as not_applicable while preserving all conditions and exceptions relevant to the described rule. "
+            + "Actual project applicability, entitlement, post-contract rights, compliance and concrete deadlines still require their supporting provisions and necessary facts when the question or the answer makes those determinations. Selected-source metadata alone cannot prove them. Standard-only explanations retain the existing incorporation and reference-only restrictions. Missing text needed for the requested description remains a gap; do not erase a declared gap or relabel a failed check to make an answer complete. "
+            + "Do not add a diagram task or select T6 merely because the described procedure has steps; use T6 when the user actually requests a diagram or flowchart. "
             + "Start with the supplied text. Request extra source material only when necessary by returning evidenceRequests (at most four): {citation:\"[1]\",kind:\"clause\"|\"adjacent\"|\"table\",clause:\"exact missing clause identifier or empty\",reason:\"the specific missing support\"}. Each citation selects one supplied source revision and role; clause requests must name the exact identifier in that source, adjacent requests obtain nearby text, and table requests obtain the cited table's observed context. Do not request whole files or duplicate text already supplied. Use [] or omit evidenceRequests when the text suffices; retain independently supported analysis when another conclusion needs more evidence. Requests are lookup instructions, never evidence or proof that the requested material exists. "
             + "Do not invent additional hypothetical facts. User factual premises remain explicitly unverified; where more assumptions are necessary, report the affected gap and ask for the needed fact. "
             + "EVERY section, including each analysis, flowchart and uncertainty section after the opening, has its OWN required checks array with exactly R1..R10 records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. Never rely on the opening section's checks for later sections. "
@@ -457,9 +460,9 @@ final class AdvisoryHarness {
                 +". Use it for every section, explanation, missing-evidence reason and clarification. The source's language and prior answers do not override this request.";
     }
     static String rejectionClarification(String language) {
-        return copy(language,"Some requested conclusions or the flowchart could not be verified. Confirm the applicable provisions, amendments, dates and missing facts before relying on them.",
-                "部分所问结论或流程图尚无法核实。请先确认适用条文、修订、日期和缺失事实，再据此作判断。",
-                "部分所問結論或流程圖尚無法核實。請先確認適用條文、修訂、日期和缺失事實，再據此作判斷。");
+        return copy(language,"Some parts of the requested answer could not be verified. Any supported analysis shown remains limited to its cited evidence; the unverified parts are not confirmed.",
+                "所问答案的部分内容尚无法核实。已显示的有据分析仅限于其引用证据，未核实部分仍未获确认。",
+                "所問答案的部分內容尚無法核實。已顯示的有據分析僅限於其引用證據，未核實部分仍未獲確認。");
     }
     private static String gapLabel(String gap,String language) {
         String label=GAPS.get(gap);if(label==null)throw invalid("Unknown evidence gap");
@@ -484,12 +487,12 @@ final class AdvisoryHarness {
         if("limits".equals(section.kind)) {
             out.append(copy(language,"Evidence limits and assumptions","资料界限与假设","資料界限與假設")).append("\n\n")
                     .append(referenceOnly?copy(language,"Standard reference explanation; project adoption is not established.","本次按固定标准参考解释，不确认项目采用。","本次按固定標準參考解釋，不確認項目採用。")
-                            :copy(language,"Selected project sources; incorporation, edition and rights require the cited support below.","本次按所选项目资料范围核查；具体采用、版本和权利须由下文真实引用分别支持。","本次按所選項目資料範圍核查；具體採用、版本和權利須由下文真實引用分別支持。"))
+                            :copy(language,"This answer uses the selected project sources. Only gaps affecting the requested answer are identified below.","本次回答使用所选项目资料，仅在下文列出影响所问内容的证据缺口。","本次回答使用所選項目資料，僅在下文列出影響所問內容的證據缺口。"))
                     .append("\n\n").append(copy(language,"Source identity was checked; verified facts and interpretations are stated with citations below. Availability alone does not establish applicability.","来源已按本次请求核对身份；有据事实与合同解释见下文逐项引用，来源存在不证明条款适用。","來源已按本次請求核對身份；有據事實與合同解釋見下文逐項引用，來源存在不證明條款適用。"))
                     .append("\n\n").append(copy(language,"User question and background (unverified statements):","用户问句及背景（未经证实的陈述）：","用戶問句及背景（未經證實的陳述）：")).append("\n> ")
                     .append(question.replace("\n","\n> "));
             for(String stated:background)out.append("\n> ").append(stated.replace("\n","\n> "));
-            out.append("\n\n").append(copy(language,"No additional factual assumptions are introduced. Any factual premises supplied by you remain conditional and do not prove adoption, deadline start events or entitlement.","不增加额外事实假设。您提供的事实前提仍为待核条件，不证明采用、期限起算或权利成立。","不增加額外事實假設。您提供的事實前提仍為待核條件，不證明採用、期限起算或權利成立。"));
+            out.append("\n\n").append(copy(language,"No additional factual assumptions are introduced. Any factual premises supplied by you remain unverified unless supported by the cited evidence.","不增加额外事实假设。您提供的事实前提仍未获核实，除非有下文引用证据支持。","不增加額外事實假設。您提供的事實前提仍未獲核實，除非有下文引用證據支持。"));
         }
         for(String gap:gaps(section))out.append(out.length()==0?"":"\n\n").append(missing(gap,language));
         return out.toString();

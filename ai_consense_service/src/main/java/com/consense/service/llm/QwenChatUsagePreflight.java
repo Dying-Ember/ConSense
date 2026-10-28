@@ -142,9 +142,11 @@ public final class QwenChatUsagePreflight {
             QwenGenerationLedger.Reservation reservation=ledger.reserve(context.id,identity.getConfigurationSha256(),phase,in.getSerializedInputSha256(),false);
             int probeRequestBytes=request.bytes.getProbeJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
             String raw=null;boolean terminal=false;
+            OpenAiLlmClient.QwenResponseTelemetry telemetry=new OpenAiLlmClient.QwenResponseTelemetry("preflight",1,false);boolean observed=false;
             try {
                 current(guard);ledger.dispatch(reservation);raw=client.usageProbe(request.bytes,cancel);current(guard);
                 JsonNode envelope=strict(raw),choice=envelope.path("choices").path(0),usage=envelope.path("usage");
+                telemetry.observe(envelope,false);
                 if(!"chat.completion".equals(envelope.path("object").asText())||!identity.getModel().equals(envelope.path("model").asText())||envelope.hasNonNull("error")
                         ||!envelope.path("choices").isArray()||envelope.path("choices").size()!=1||!choice.isObject()
                         ||!choice.path("index").isIntegralNumber()||!choice.path("index").canConvertToInt()||choice.path("index").intValue()!=0
@@ -166,8 +168,9 @@ public final class QwenChatUsagePreflight {
                 // Reuse token accounting only after the paid receipt and exit guards have succeeded.
                 if(Arrays.asList("provider_estimated_fit","over_budget").contains(checkEstimate(in,out,new VettingInputBudget.Result()).getStatus())&&context.observations.size()<limits.preflights)
                     context.observations.put(in.getSerializedInputSha256(),JsonUtils.write(out));
-                return out;
-            }catch(RuntimeException error){if(!terminal){Map<String,Object> failure=new LinkedHashMap<>();failure.put("failureKind",QwenChatClient.safeUsageFailureKind(error));failure.put("requestSha256",in.getQwenWire().getPreflightEntitySha256());failure.put("probeRequestBytes",probeRequestBytes);if(raw!=null)failure.put("responseSha256",hash(raw));ledger.unknown(reservation,failure);}throw error;}
+                observed=true;return out;
+            }catch(RuntimeException error){if(!terminal){Map<String,Object> failure=new LinkedHashMap<>();failure.put("failureKind",QwenChatClient.safeUsageFailureKind(error));failure.put("requestSha256",in.getQwenWire().getPreflightEntitySha256());failure.put("probeRequestBytes",probeRequestBytes);if(raw!=null)failure.put("responseSha256",hash(raw));ledger.unknown(reservation,failure);}throw error;
+            }finally{telemetry.finish(observed);}
         }
         public VettingInputBudget.Result observe(PreparedRequest request,String phase,Runnable guard,Consumer<Runnable> cancel) {
             return VettingInputBudget.check(request.input,in->observe(in,phase,guard,cancel));

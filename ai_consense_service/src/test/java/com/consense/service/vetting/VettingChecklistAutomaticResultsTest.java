@@ -28,6 +28,70 @@ class VettingChecklistAutomaticResultsTest {
         record("APP-I-001","fulfilled");result.remove("promptPolicy");
         assertEquals("not_assessed",groups().get(0).getStatus());
     }
+    @Test void excludedMembersDoNotInventAnEvidenceShortageForUnassessedContractRequirements() {
+        assertEquals(42,groups().stream().filter(g->"not_assessed".equals(g.getStatus())).count());
+        assertEquals(2,groups().stream().filter(g->"out_of_scope".equals(g.getStatus())).count());
+        assertEquals(0,groups().stream().filter(g->"insufficient_evidence".equals(g.getStatus())).count());
+        assertEquals(67,groups().stream().mapToInt(g->g.getSubItemAssessments().size()).sum());
+        for(String id:Arrays.asList("CK-033","CK-036")){
+            AutomaticGroupVO group=find(id);assertFalse(group.isComplete());assertEquals("",group.getSymbol());
+            assertTrue(group.getReason().contains("excluded requirements"));
+            assertTrue(group.getSubItemAssessments().stream().anyMatch(r->"out_of_scope".equals(r.getStatus())));
+        }
+        assertTrue(VettingChecklistAutomaticResults.completeGroupBases(groups()).isEmpty());
+    }
+    @Test void assessedContractPortionNeverCompletesOrTicksAGroupWithExcludedMembers() {
+        record("APP-I-045","fulfilled");closeScope("APP-I-045","chunk-a");
+        AutomaticGroupVO group=find("CK-033");
+        assertEquals("insufficient_evidence",group.getStatus());assertFalse(group.isComplete());assertEquals("",group.getSymbol());
+        assertEquals("fulfilled",group.getSubItemAssessments().get(0).getStatus());
+        assertEquals("out_of_scope",group.getSubItemAssessments().get(1).getStatus());
+        assertTrue(group.getReason().contains("no whole-group completion is claimed"));
+        assertFalse(VettingChecklistAutomaticResults.completeGroupBases(groups()).containsKey("APP-I-045"));
+        assertFalse(VettingChecklistAutomaticResults.completeGroupBases(groups()).containsKey("APP-I-046"));
+        ((ObjectNode)packet.path("checklistAssessments").get(0)).put("status","not_fulfilled").put("issueTypeCode","REQ");
+        group=find("CK-033");assertEquals("not_fulfilled",group.getStatus());assertFalse(group.isComplete());
+        assertEquals(1,group.getSubItemAssessments().get(0).getAssessments().size());
+    }
+    @Test void directionalTopicsCannotPublishAssessmentsForUnassignedRequirements() {
+        ObjectNode topic=(ObjectNode)coverage.path("semanticTopics").get(0);topic.put("reviewKind","checklist_direction");
+        topic.putArray("referenceIds").add("APP-I-011");
+        record("APP-I-001","not_fulfilled");
+        assertEquals("insufficient_evidence",find("CK-001").getStatus());
+        assertTrue(find("CK-001").getReason().contains("assigned requirement"));
+        assertEquals(0,find("CK-001").getSubItemAssessments().get(0).getAssessments().size());
+        ((ArrayNode)packet.path("checklistAssessments")).removeAll();
+        record("APP-I-011","fulfilled");closeScope("APP-I-011","chunk-a");
+        assertEquals("fulfilled",find("CK-007").getStatus());
+        topic.putArray("referenceIds");assertEquals("insufficient_evidence",find("CK-007").getStatus());
+        topic.putObject("referenceIds").put("unexpected","APP-I-011");assertEquals("insufficient_evidence",find("CK-007").getStatus());
+    }
+    @Test void crossRoundTransportAndEmptySynthesisNeverInventRequirementCompletion() {
+        record("APP-I-011","fulfilled");closeScope("APP-I-011","chunk-a","chunk-b");
+        ObjectNode supplement=packet.deepCopy();supplement.put("packetId","packet-b").put("sourceSnapshotSha256",VettingCorpus.hash("second source packet"));
+        supplement.putArray("submittedChunkIds").add("chunk-b");
+        ObjectNode check=(ObjectNode)supplement.path("checklistAssessments").get(0);
+        check.put("packetId","packet-b").put("sourceSnapshotSha256",supplement.path("sourceSnapshotSha256").asText());
+        check.putArray("evidenceChunkIds").add("chunk-b");
+        ObjectNode quote=(ObjectNode)check.path("evidence").get(0);
+        quote.put("packetId","packet-b").put("packetSourceSnapshotSha256",supplement.path("sourceSnapshotSha256").asText());
+        quote.set("canonicalEvidence",pointer("chunk-b"));
+        ArrayNode packets=(ArrayNode)coverage.path("semanticTopics").get(0).path("packetAudits");packets.add(supplement);
+        assertEquals("insufficient_evidence",find("CK-007").getStatus());
+        assertEquals(2,find("CK-007").getSubItemAssessments().get(0).getAssessments().size());
+        ObjectNode emptySynthesis=supplement.deepCopy();emptySynthesis.put("packetId","packet-c").put("status","completed_empty");
+        emptySynthesis.putArray("submittedChunkIds").add("chunk-a").add("chunk-b");emptySynthesis.putArray("checklistAssessments");packets.add(emptySynthesis);
+        assertEquals("insufficient_evidence",find("CK-007").getStatus());assertFalse(find("CK-007").isComplete());
+    }
+    @Test void aLaterPositiveDoesNotEraseAnUnresolvedRequirementNeed() {
+        record("APP-I-011","insufficient_evidence").put("reason","The qualification in the named counterpart is still needed.");
+        record("APP-I-011","fulfilled");closeScope("APP-I-011","chunk-a");
+        AutomaticGroupVO group=find("CK-007");
+        assertEquals("insufficient_evidence",group.getStatus());assertFalse(group.isComplete());
+        assertEquals(2,group.getSubItemAssessments().get(0).getAssessments().size());
+        assertTrue(group.getSubItemAssessments().get(0).getAssessments().stream()
+                .anyMatch(row->row.path("reason").asText().contains("counterpart is still needed")));
+    }
     @Test void sourceAndFrozenPacketIdentityAuthorizeOnlyTheActualRecordedSuggestion() {
         record("APP-I-011","fulfilled");closeScope("APP-I-011","chunk-a");
         AutomaticGroupVO first=find("CK-007");
@@ -35,6 +99,22 @@ class VettingChecklistAutomaticResultsTest {
         assertEquals(1,first.getSubItemAssessments().get(0).getAssessments().size());
         assertEquals("not_assessed",groups().get(1).getStatus());
         assertEquals("not_assessed",VettingChecklistAutomaticResults.aggregate("FAILED",coverage,result).get(6).getStatus());
+    }
+    @Test void committedFailedPartialRunKeepsOnlyBoundCompletedPacketAssessmentsVisible() {
+        record("APP-I-001","not_fulfilled");
+        assertEquals("not_assessed",VettingChecklistAutomaticResults.aggregate("FAILED",coverage,result).get(0).getStatus());
+        result.put("partialResults","true");
+        assertEquals("not_assessed",VettingChecklistAutomaticResults.aggregate("FAILED",coverage,result).get(0).getStatus(),"A textual marker cannot unlock historical failed records");
+        result.put("partialResults",true);
+        ObjectNode failed=packet.deepCopy();failed.put("packetId","failed-model-call").put("status","failed");
+        ((ObjectNode)failed.path("checklistAssessments").get(0)).put("itemId","APP-I-002");
+        ((ArrayNode)coverage.path("semanticTopics").get(0).path("packetAudits")).add(failed);
+        List<AutomaticGroupVO> partial=VettingChecklistAutomaticResults.aggregate("FAILED",coverage,result);
+        assertEquals("not_fulfilled",partial.get(0).getStatus());assertEquals(1,partial.get(0).getSubItemAssessments().get(0).getAssessments().size());
+        assertTrue(partial.get(0).getReason().contains("review run failed"));
+        assertEquals(0,partial.stream().flatMap(group->group.getSubItemAssessments().stream()).filter(item->"APP-I-002".equals(item.getItemId())).findFirst().get().getAssessments().size());
+        result.put("partialResults",false);
+        assertEquals("not_assessed",VettingChecklistAutomaticResults.aggregate("FAILED",coverage,result).get(0).getStatus());
     }
     @Test void forgedPolicySnapshotQuoteAndMissingExecutionCannotProduceTicksOrCrosses() {
         ObjectNode row=record("APP-I-001","not_fulfilled");

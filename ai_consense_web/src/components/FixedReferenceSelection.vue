@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { fixedReferenceApi, slLibraryApi, type FixedReferenceSelectionStatus, type SlLibraryStatus } from '@/api'
+import { slEditionLabel } from '@/api/slEditionLabel'
 import type { FixedBaselineEvidence, FixedBaselineEvidenceAddress, FixedBaselineSourceUnit } from '@/api/fixedBaselineEvidence'
 import AppModal from './AppModal.vue'
 const FixedEvidencePanel = defineAsyncComponent(() => import('./FixedBaselineEvidencePanel.vue'))
@@ -23,15 +24,7 @@ const scopeKey = computed(() => JSON.stringify([props.projectId, props.module, s
 const searchReady = computed(() => !!props.projectId && configured.value && !!status.value && !!saved.value.length && library.value?.retrievalAvailable === true && !loading.value && !saving.value && !error.value && !libraryError.value)
 const selectedPointer = computed(() => selectedHit.value && resultScope.value === scopeKey.value ? evidencePointer(selectedHit.value) : null)
 const panelLocale = computed(() => props.locale === 'en' || props.locale === 'zh-Hant' ? props.locale : 'zh-Hans')
-const officialEditionLabels: Record<string, string> = {
-  'sl2022-original': 'SL2022 Original',
-  'sl2022-batch01': 'SL2022 Batch 1',
-  'sl2022-batch02-rev1': 'SL2022 Batch 2 revision 1',
-  'sl2022-batch03': 'SL2022 Batch 3',
-  'sl2022-batch04': 'SL2022 Batch 4',
-  'sl2026-original': 'SL2026 Original'
-}
-const editionLabel = (source: { editionId: string; label?: string }) => officialEditionLabels[source.editionId] || source.label || library.value?.versions.find(version => version.editionId === source.editionId)?.label
+const editionLabel = (source: { editionId: string; label?: string }) => slEditionLabel(source.editionId) || source.label || library.value?.versions.find(version => version.editionId === source.editionId)?.label
   || (source.editionId.startsWith('legacy:') ? label('Legacy SL reference', '历史 SL 参考', '歷史 SL 參考') : source.editionId.replace(/[_-]+/g, ' '))
 const count = (value: number | null | undefined) => typeof value === 'number' && Number.isInteger(value) && value >= 0 ? String(value) : label('Unknown', '未知', '未知')
 const progressKnown = computed(() => typeof library.value?.job.processedPages === 'number' && typeof library.value.job.totalPages === 'number'
@@ -212,35 +205,22 @@ onBeforeUnmount(() => { disposed = true; ++generation; clearPoll(); clearSearch(
 </script>
 
 <template>
-  <div class="fixed-reference-selection" data-sl-editions>
-    <button type="button" class="btn" data-sl-library-open @click="showLibrary">{{ title }}</button>
-    <span class="small edition-summary" data-sl-saved-scope>
-      {{ staleSelection ? label('Needs reconfirmation:', '需重新确认：', '需重新確認：') : label('Saved:', '已保存：', '已儲存：') }}
-      {{ staleSelection ? status?.selection?.slSources.map(editionLabel).join(' · ') : saved.length ? saved.map(editionLabel).join(' · ') : label('No SL edition selected', '尚未选择 SL 版本', '尚未選擇 SL 版本') }}
-    </span>
-    <span v-if="active" class="small" role="status">{{ stateLabel(library?.job.status) }} · {{ stateLabel(library?.job.stage) }}</span>
+  <section class="fixed-reference-selection" data-sl-editions>
+    <div class="edition-overview">
+      <strong>{{ label('SL editions for this project', '本项目的 SL 版本', '本項目的 SL 版本') }}</strong>
+      <p class="edition-summary" data-sl-saved-scope>
+        <template v-if="loading && !status">{{ label('Checking saved editions…', '正在读取已保存版本…', '正在讀取已儲存版本…') }}</template>
+        <template v-else-if="!status">{{ label('Edition status unavailable', '版本状态暂不可用', '版本狀態暫不可用') }}</template>
+        <template v-else>{{ staleSelection ? label('Needs reconfirmation:', '需重新确认：', '需重新確認：') : label('Saved:', '已保存：', '已儲存：') }}
+          {{ staleSelection ? status?.selection?.slSources.map(editionLabel).join(' · ') : saved.length ? saved.map(editionLabel).join(' · ') : label('No SL edition selected', '尚未选择 SL 版本', '尚未選擇 SL 版本') }}</template>
+      </p>
+      <p class="small muted">{{ label('Saved editions set the SL retrieval scope for Vetting and Advice. Confirm which editions apply to the project.', '已保存版本决定审查与咨询的 SL 检索范围，项目实际采用的版本仍需确认。', '已儲存版本決定審查與諮詢的 SL 檢索範圍，項目實際採用的版本仍需確認。') }}</p>
+      <p v-if="error && status" class="small" role="alert">{{ label('Could not refresh the saved scope; the displayed editions may be out of date.', '无法刷新已保存范围，所显示版本可能已过时。', '無法重新整理已儲存範圍，顯示的版本可能已過時。') }}</p>
+      <span v-if="active" class="small" role="status">{{ stateLabel(library?.job.status) }} · {{ stateLabel(library?.job.stage) }}</span>
+    </div>
+    <button type="button" class="btn soft" data-sl-library-open @click="showLibrary">{{ label('Choose editions and search', '选择版本与检索', '選擇版本與檢索') }}</button>
     <AppModal v-if="open" :open="open" :title="title" wide @close="closeLibrary">
       <p>{{ label('Saved editions define the SL retrieval scope for new Vetting reviews and Advice questions in this project. This does not establish project adoption.', '已保存版本定义本项目新审查与咨询的 SL 检索范围；这不证明项目已采用。', '已儲存版本定義本項目新審查與諮詢的 SL 檢索範圍；這不證明項目已採用。') }}</p>
-      <div class="row">
-        <button type="button" class="btn" data-sl-library-refresh :disabled="loading || saving || building" @click="refresh">{{ label('Refresh status', '刷新状态', '重新整理狀態') }}</button>
-        <button type="button" class="btn" data-sl-library-build :disabled="building || active || !library || library.job.status === 'unconfigured'" @click="build">{{ label('Build all official SL technical sources', '建立全部官方 SL 技术资料库', '建立全部官方 SL 技術資料庫') }}</button>
-      </div>
-      <div v-if="library" class="library-progress" role="status" data-sl-library-progress>
-        <strong>{{ stateLabel(library.job.status) }}</strong><span v-if="library.job.stage"> · {{ stateLabel(library.job.stage) }}</span>
-        <span v-if="library.job.currentEdition"> · {{ editionLabel({ editionId: library.job.currentEdition }) }}</span>
-        <p v-if="active || progressKnown">{{ label('Processed pages', '已处理页数', '已處理頁數') }}: {{ count(library.job.processedPages) }} / {{ count(library.job.totalPages) }}</p>
-        <progress v-if="progressKnown" :value="library.job.processedPages!" :max="library.job.totalPages!" />
-        <p v-if="library.job.message">{{ library.job.message }}</p>
-        <p>{{ library.retrievalAvailable ? label('Library retrieval available', '资料库检索已可用', '資料庫檢索已可用') : label('Library retrieval is not ready', '资料库检索尚未就绪', '資料庫檢索尚未就緒') }}</p>
-      </div>
-      <p v-if="libraryError" role="alert">{{ libraryError }}</p>
-      <p v-if="buildError" role="alert">{{ buildError }}</p>
-      <div v-if="library?.versions.length" class="table-wrap">
-        <table data-sl-library-catalog>
-          <thead><tr><th>{{ label('Official SL edition', '官方 SL 版本', '官方 SL 版本') }}</th><th>{{ label('Technical pages', '技术页数', '技術頁數') }}</th><th>{{ label('Read pages', '已读取页数', '已讀取頁數') }}</th><th>{{ label('Clauses', '条款数', '條款數') }}</th><th>{{ label('Indexed chunks', '索引块数', '索引區塊數') }}</th><th>{{ label('Status', '状态', '狀態') }}</th></tr></thead>
-          <tbody><tr v-for="version in library.versions" :key="version.editionId"><td>{{ editionLabel(version) }}</td><td>{{ count(version.technicalPages) }}</td><td>{{ count(version.parsedPages) }}</td><td>{{ count(version.clauseCount) }}</td><td>{{ count(version.indexedChunks) }}</td><td>{{ stateLabel(version.status) }}</td></tr></tbody>
-        </table>
-      </div>
       <h4>{{ label('Project retrieval editions', '本项目检索版本', '本項目檢索版本') }}</h4>
       <p v-if="loading" role="status">{{ label('Loading…', '读取中…', '讀取中…') }}</p>
       <template v-if="status">
@@ -271,13 +251,35 @@ onBeforeUnmount(() => { disposed = true; ++generation; clearPoll(); clearSearch(
         </article>
         <FixedEvidencePanel v-if="selectedPointer" :key="selectedPointer.parentId" :pointer="selectedPointer" :locale="panelLocale" />
       </section>
+      <div class="row">
+        <button type="button" class="btn" data-sl-library-refresh :disabled="loading || saving || building" @click="refresh">{{ label('Refresh status', '刷新状态', '重新整理狀態') }}</button>
+        <button type="button" class="btn" data-sl-library-build :disabled="building || active || !library || library.job.status === 'unconfigured'" @click="build">{{ label('Build all official SL technical sources', '建立全部官方 SL 技术资料库', '建立全部官方 SL 技術資料庫') }}</button>
+      </div>
+      <div v-if="library" class="library-progress" role="status" data-sl-library-progress>
+        <strong>{{ stateLabel(library.job.status) }}</strong><span v-if="library.job.stage"> · {{ stateLabel(library.job.stage) }}</span>
+        <span v-if="library.job.currentEdition"> · {{ editionLabel({ editionId: library.job.currentEdition }) }}</span>
+        <p v-if="active || progressKnown">{{ label('Processed pages', '已处理页数', '已處理頁數') }}: {{ count(library.job.processedPages) }} / {{ count(library.job.totalPages) }}</p>
+        <progress v-if="progressKnown" :value="library.job.processedPages!" :max="library.job.totalPages!" />
+        <p v-if="library.job.message">{{ library.job.message }}</p>
+        <p>{{ library.retrievalAvailable ? label('Library retrieval available', '资料库检索已可用', '資料庫檢索已可用') : label('Library retrieval is not ready', '资料库检索尚未就绪', '資料庫檢索尚未就緒') }}</p>
+      </div>
+      <p v-if="libraryError" role="alert">{{ libraryError }}</p>
+      <p v-if="buildError" role="alert">{{ buildError }}</p>
+      <div v-if="library?.versions.length" class="table-wrap">
+        <table data-sl-library-catalog>
+          <thead><tr><th>{{ label('Official SL edition', '官方 SL 版本', '官方 SL 版本') }}</th><th>{{ label('Technical pages', '技术页数', '技術頁數') }}</th><th>{{ label('Read pages', '已读取页数', '已讀取頁數') }}</th><th>{{ label('Clauses', '条款数', '條款數') }}</th><th>{{ label('Indexed chunks', '索引块数', '索引區塊數') }}</th><th>{{ label('Status', '状态', '狀態') }}</th></tr></thead>
+          <tbody><tr v-for="version in library.versions" :key="version.editionId"><td>{{ editionLabel(version) }}</td><td>{{ count(version.technicalPages) }}</td><td>{{ count(version.parsedPages) }}</td><td>{{ count(version.clauseCount) }}</td><td>{{ count(version.indexedChunks) }}</td><td>{{ stateLabel(version.status) }}</td></tr></tbody>
+        </table>
+      </div>
     </AppModal>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.fixed-reference-selection { display: grid; gap: 3px; min-width: 0; max-width: 22rem; }
-.edition-summary { overflow-wrap: anywhere; color: var(--muted); }
+.fixed-reference-selection { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-bottom: 18px; padding: 15px 18px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); background: var(--surface); }
+.edition-overview { min-width: 0; flex: 1 1 20rem; }
+.edition-summary { margin: 5px 0; overflow-wrap: anywhere; }
+.edition-overview p:last-of-type { margin: 0; }
 .edition-choice { display: flex; align-items: flex-start; gap: .5rem; margin-block: .6rem; }
 .library-progress { margin-block: 1rem; }
 .library-progress p { margin-block: .4rem; }

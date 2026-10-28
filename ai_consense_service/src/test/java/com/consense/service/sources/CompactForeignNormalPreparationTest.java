@@ -80,6 +80,7 @@ class CompactForeignNormalPreparationTest {
             ((ObjectNode)snapshot.path("projectionIdentity")).put("projectionCodeSha256",CompactNormalPreparationTest.Wire.hash("foreign code"));((ObjectNode)snapshot.path("projectionIdentity")).put("observationManifestSha256",CompactNormalPreparationTest.Wire.hash("foreign manifest"));
             snapshot.putObject("manifest").set("sourceBinding",snapshot.remove("sourceBinding"));snapshot.put("authoredBody","AUTHORED body is streamed, never retained by admission. ".repeat(1024));raw=JsonUtils.write(snapshot);stampRaw();
             doAnswer(call->Collections.singletonList(CompactNormalPreparationTest.Wire.metadata(foreign))).when(wire.bindings).findCompactByDocument(eq("authored-compact"),eq(1L),any());
+            when(wire.bindings.findCompactHistoriesForSelected(anyString(),anyList(),any())).thenAnswer(call->Arrays.asList(CompactNormalPreparationTest.Wire.metadata(foreign),CompactNormalPreparationTest.Wire.metadata(own)));
             when(wire.bindings.findCompactByDocumentBefore(eq("authored-compact"),eq(1L),eq(2L),any())).thenReturn(Collections.singletonList(CompactNormalPreparationTest.Wire.metadata(own)));
             when(wire.bindings.findCompactById(anyLong())).thenAnswer(call->{long id=call.getArgument(0);return Optional.of(CompactNormalPreparationTest.Wire.metadata(id==1?own:foreign));});
         }

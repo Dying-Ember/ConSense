@@ -31,6 +31,47 @@ class AdviceQwenWireObservationTest {
     private static final String SECRET="AUTHORED-QWEN-SECRET",SOURCE=VettingCorpus.hash("AUTHORED SOURCE");
     private static final String USER="完整原题☃\nDeclared ownership for this alias (source observations): {\"clauseId\":null,\"ownerStatus\":\"unknown\"}\nComplete source with  two spaces.\n";
 
+    @Test void compactDrawingUsesTheSealedQwenBudgetAndPublishesAnExplicitUnverifiedDraft() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("compact-drawing")),true,true);
+        f.answers.add("{\"tool\":\"draw_flowchart\",\"nodes\":[{\"id\":\"start\",\"label\":\"Written request\"},{\"id\":\"end\",\"label\":\"Decision issued\"}],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"label\":\"Within 14 days of receipt\"}],\"citations\":[\"[1]\"]}");
+        AdviceService.AnswerRecord answer;
+        try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:drawing",()->{})){
+            answer=ReflectionTestUtils.invokeMethod(f.service,"completeAdvice",AdviceFlowchartTool.INSTRUCTION,USER,null,null,f.operation,SOURCE,(Runnable)()->{},f.publication,"Please draw a flowchart","draft",false);
+            assertNotNull(answer);assertFalse(answer.isGrounded());assertEquals("T6",answer.getQuestionType());assertTrue(f.sections.isEmpty());
+            ReflectionTestUtils.invokeMethod(f.publication,"publishValidated");
+        }
+        assertEquals(1,f.sections.size());assertTrue(f.sections.get(0).contains("```mermaid\nflowchart TD"));
+        assertTrue(f.sections.get(0).contains("not independently verified"));assertTrue(f.sections.get(0).contains("Sources consulted (not independent validation): [1]"));
+        assertEquals(2,f.bodies.size());assertFalse(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
+        VettingInputBudget.Input input=boundInput(attempts(f.directory).get(0));
+        assertTrue(input.getSchema().path("properties").has("tool"));assertFalse(input.getSchema().path("properties").has("sections"));
+        verify(f.ledger).reserve(anyString(),anyString(),eq("draft-preflight-0"),anyString(),eq(false));
+        verify(f.ledger).reserve(anyString(),anyString(),eq("draft-answer-0"),anyString(),eq(true));
+    }
+
+    @Test void drawingRejectsUnknownAliasesAndUsesOneCompactRepairWithoutPublishingBadOutput() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("drawing-repair")),false,true);
+        String call="{\"tool\":\"draw_flowchart\",\"nodes\":[{\"id\":\"start\",\"label\":\"Start\"},{\"id\":\"end\",\"label\":\"End\"}],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"label\":\"\"}],\"citations\":[\"[1]\"]}";
+        f.answers.add(call.replace("[1]","[99]"));f.answers.add(call);
+        try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:drawing-repair",()->{})){
+            AdviceService.AnswerRecord answer=ReflectionTestUtils.invokeMethod(f.service,"completeAdvice",AdviceFlowchartTool.INSTRUCTION,USER,null,null,f.operation,SOURCE,(Runnable)()->{},f.publication,"Draw a flowchart","draft",false);
+            assertNotNull(answer);assertFalse(answer.isGrounded());assertTrue(f.sections.isEmpty());
+            ReflectionTestUtils.invokeMethod(f.publication,"publishValidated");
+        }
+        assertEquals(4,f.bodies.size());assertEquals(1,f.sections.size());assertFalse(f.sections.get(0).contains("[99]"));
+        String repair=JsonUtils.parse(f.bodies.get(3)).path("messages").get(1).path("content").asText();
+        assertTrue(repair.contains("Correct the draw_flowchart JSON"));assertFalse(repair.contains("full complete answer"));
+    }
+
+    @Test void drawingStillRejectsSourceChangeAfterGenerationBeforePublication() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("drawing-stale-source")),false,false);
+        Runnable guard=()->{if(f.bodies.size()>=2)throw new com.consense.common.BizException(4204,"AUTHORED source changed");};
+        try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:drawing-stale",guard)){
+            com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->ReflectionTestUtils.invokeMethod(f.service,"completeAdvice",AdviceFlowchartTool.INSTRUCTION,USER,null,null,f.operation,SOURCE,guard,f.publication,"Draw a flowchart","draft",false));
+            assertEquals(4204,rejected.getCode());assertTrue(f.sections.isEmpty());assertNull(ReflectionTestUtils.getField(f.publication,"draftFlowchart"));
+        }
+    }
+
     @Test void draftAndSupplementUseDistinctPaidPhasesAndPublishOnlyValidatedSections() throws Exception {
         Fixture f=new Fixture(Files.createDirectory(root.resolve("unpublished-draft")),false,true);
         try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:advice-wire",()->{})){

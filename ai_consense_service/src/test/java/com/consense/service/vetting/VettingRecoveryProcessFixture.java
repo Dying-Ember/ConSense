@@ -73,7 +73,7 @@ public final class VettingRecoveryProcessFixture {
     public static class Fixture {
         @Bean @Primary EnglishFileOutput fixtureEnglishFiles(){
             EnglishFileOutput output=mock(EnglishFileOutput.class);
-            when(output.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
+            when(output.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
             when(output.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<byte[]>getArgument(0).clone();});
             return output;
         }

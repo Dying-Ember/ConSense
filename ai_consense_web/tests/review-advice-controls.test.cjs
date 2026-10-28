@@ -42,14 +42,14 @@ function findAll(node, predicate) { return [...(predicate(node) ? [node] : []), 
 async function flushCanonical() { for (let i = 0; i < 12; i++) { await new Promise(resolve => setImmediate(resolve)); await settle() } }
 
 async function harness({ stale = false, currentSources = [source], sourceGate, evidenceGate, initialView = 'vetting', importedProject, storageDenied = false,
-  canonicalEvidence, adviceMessages = [], browserCrypto = require('node:crypto').webcrypto, respondOverride, canonicalRespond, answerRendererBoundaries = {} } = {}) {
-  const requests = [], stored = new Map(), canonicalRequests = [], createdUrls = [], revokedUrls = []
+  canonicalEvidence, adviceMessages = [], browserCrypto = require('node:crypto').webcrypto, respondOverride, canonicalRespond, answerRendererBoundaries = {}, sessionStore } = {}) {
+  const requests = [], stored = sessionStore ?? new Map(), canonicalRequests = [], createdUrls = [], revokedUrls = []
   for (const message of adviceMessages) for (const citation of message.sources ?? []) if (citation.canonicalEvidence?.length && citation.sourceRole === undefined) citation.sourceRole = 'tender'
   const currentEvidence = canonicalEvidence ? { ...evidence, items: evidence.items.map(item => ({ ...item,
     documentId: String(canonicalEvidence.documentId), fileName: canonicalEvidence.sourceFilename,
     sourceHash: canonicalEvidence.javaParsedSourceHash, originalSourceSha256: canonicalEvidence.originalSourceSha256, canonicalEvidence })) } : evidence
   const sessionStorage = {
-    getItem: key => stored.get(key) ?? null,
+    getItem: key => { if (storageDenied) throw new Error('Storage denied'); return stored.get(key) ?? null },
     setItem: (key, value) => { if (storageDenied) throw new Error('Storage denied'); stored.set(key, value) },
     removeItem: key => stored.delete(key)
   }
@@ -335,6 +335,25 @@ test('real Vetting evidence mapping retains the optional canonical pointer and o
     assert.equal(h.revokedUrls.length, 3)
   } finally { h.dispose() }
   assert.deepEqual(h.revokedUrls.sort(), h.createdUrls.sort())
+})
+
+test('long cited passages start with an honest short preview and offer the complete original passage', async () => {
+  const passage = 'Opening paragraph.\n' + 'Long source sentence. '.repeat(100) + '\nLater supporting paragraph.'
+  const citation = { evidenceId: '[1]', fileLabel: 'AUTHORED GCC', pageNo: 'P1', anchor: '17.1', content: passage, score: 0.9 }
+  const message = { id: 7, role: 'assistant', title: localized('Reply'), content: localized('Analysis [1]'), citations: ['[1]'], sources: [citation] }
+  const h = await harness({ initialView: 'advice', adviceMessages: [message] })
+  try {
+    find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await settle()
+    const preview = () => find(h.root, node => node.props?.class === 'sv-para').props.innerHTML
+    assert.match(preview(), /Opening paragraph/)
+    assert.doesNotMatch(preview(), /Later supporting paragraph/)
+    assert.match(text(h.root), /exact supporting sentences have not been identified/i)
+    await button(h, 'Show complete passage').props.onClick(); await settle()
+    assert.match(preview(), /Later supporting paragraph/)
+    await button(h, 'Show shorter preview').props.onClick(); await settle()
+    assert.doesNotMatch(preview(), /Later supporting paragraph/)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
 })
 
 test('real Advice citation displays every explicit canonical member and complete table assets on LAN without auto-asking', async () => {
@@ -885,8 +904,9 @@ test('real Advice view displays a fenced flowchart, retains prose and citations,
   const graph = 'flowchart TD\n A["Start [1]"] --> B["Finish [1]"]'
   let renders = 0
   const sanitize = require('dompurify')(new (require('jsdom').JSDOM)('').window)
-  const h = await harness({ initialView: 'advice', adviceMessages: [{ id: 9, role: 'assistant', title: localized('Procedure'),
-    content: localized('Before [1]\n```mermaid\n' + graph + '\n```\nAfter [1]'), citations: ['[1]'], sources: [], basisScope: 'reference_only' }],
+  const h = await harness({ initialView: 'advice', adviceMessages: [{ id: 9, role: 'assistant', title: localized('Draft flowchart - not independently verified'),
+    content: localized('Before [1]\n```mermaid\n' + graph + '\n```\nAfter [1]'), citations: ['[1]'], sources: [], basisScope: 'insufficient',
+    modelIdentity: { model: 'qwen3.8-27b', profileId: 'internal-profile', provider: 'qwen-chat-completions', identityScope: 'configured_profile' } }],
     answerRendererBoundaries: {
       mermaid: { __esModule: true, default: { initialize() {}, async render(_id, source) { assert.equal(source.trim(), graph.trim()); renders++; return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200"><text>Start [1]</text><script>run()</script></svg>' } } } },
       dompurify: { __esModule: true, default: sanitize }
@@ -898,6 +918,10 @@ test('real Advice view displays a fenced flowchart, retains prose and citations,
     assert.ok(graphic, 'The assistant answer must include a graphic, not just Mermaid source as paragraph text; renders=' + renders + '; rendered=' + text(h.root))
     assert.doesNotMatch(graphic.props.innerHTML, /script|run\(\)/)
     assert.match(text(h.root), /Before \[1\]/); assert.match(text(h.root), /After \[1\]/)
+    assert.match(text(h.root), /Recorded model: qwen3\.8-27b/)
+    assert.doesNotMatch(text(h.root), /internal-profile|qwen-chat-completions|Configured profile|independently attested/)
+    assert.match(text(h.root), /Draft flowchart - not independently verified/)
+    assert.match(text(h.root), /Evidence is insufficient for the complete requested conclusion/)
     assert.equal(renders, 1)
     assert.ok(find(h.root, node => node.tag === 'button' && node.props.class === 'citation' && text(node) === '[1]'))
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
@@ -1005,6 +1029,154 @@ test('Advice ordinary context and session options use project and localized busi
   } finally { h.dispose() }
 })
 
+test('refresh restores the selected saved advice conversation and its original scope', async () => {
+  const sessionStore = new Map()
+  const reply = ({ method, url }) => {
+    if (method === 'get' && url.endsWith('/sessions')) return sessions
+    if (url.endsWith('/messages?sessionId=session-B')) return [{ sessionId: 'session-B', role: 'assistant', id: 20, title: localized('Saved'), content: localized('SAVED ANSWER'), citations: [], sources: [], basisScope: 'reference_only' }]
+  }
+  const first = await harness({ initialView: 'advice', respondOverride: reply, sessionStore })
+  try { sessionSelect(first).props['onUpdate:modelValue']('session-B'); await settle(); assert.match(text(first.root), /SAVED ANSWER/) }
+  finally { first.dispose() }
+  const reopened = await harness({ initialView: 'advice', respondOverride: reply, sessionStore })
+  try {
+    await settle()
+    assert.match(text(reopened.root), /SAVED ANSWER/)
+    assert.match(text(reopened.root), /Fixed standard interpretation/)
+    assert.ok(reopened.requests.some(request => request.url.endsWith('/messages?sessionId=session-B')))
+    assert.equal(reopened.requests.some(request => request.method !== 'get'), false)
+  } finally { reopened.dispose() }
+})
+
+test('accidental scope change can return to the saved conversation and unsent draft without writing', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ method, url }) => {
+    if (method === 'get' && url.endsWith('/sessions')) return sessions
+    if (url.endsWith('/messages?sessionId=session-A')) return [{ sessionId: 'session-A', role: 'assistant', id: 20, content: localized('SAVED ANSWER'), citations: [], sources: [] }]
+  } })
+  try {
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Unsent follow-up'); await settle()
+    button(h, 'Change reference scope').props.onClick(); await settle()
+    assert.equal(button(h, 'Clear chat').props.disabled, true)
+    await button(h, 'Clear chat').props.onClick(); await settle()
+    assert.equal(find(h.root, node => node.tag === 'textarea').value, '')
+    const cancel = button(h, 'Return to previous conversation')
+    assert.ok(cancel)
+    cancel.props.onClick(); await settle()
+    assert.match(text(h.root), /SAVED ANSWER/)
+    assert.equal(button(h, 'Return to previous conversation'), undefined)
+    assert.equal(find(h.root, node => node.tag === 'textarea').value, 'Unsent follow-up')
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('accidental clear asks for confirmation and cancellation preserves messages without stopping or deleting', async () => {
+  const h = await harness({ initialView: 'advice', adviceMessages: [{ role: 'assistant', id: 20, content: localized('KEEP THIS ANSWER'), citations: [], sources: [] }] })
+  try {
+    await button(h, 'Clear chat').props.onClick(); await settle()
+    const modal = find(h.root, node => node.tag === 'div' && node.props.role === 'dialog' && /Clear this conversation/.test(text(node)))
+    assert.ok(modal)
+    assert.match(text(modal), /cannot be undone/i)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+    find(modal, node => node.tag === 'button' && text(node) === 'Cancel').props.onClick(); await settle()
+    assert.match(text(h.root), /KEEP THIS ANSWER/)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('a stale clear confirmation cannot delete a conversation after switching sessions', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/sessions') ? sessions : undefined })
+  try {
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    await button(h, 'Clear chat').props.onClick(); await settle()
+    const confirm = button(h, 'Clear saved messages')
+    assert.ok(confirm)
+    sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
+    assert.equal(button(h, 'Clear saved messages'), undefined)
+    await confirm.props.onClick(); await settle()
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('session restoration rejects stale or other-project IDs and tolerates unavailable browser storage', async () => {
+  for (const [saved, denied] of [['deleted-session', false], ['other-project-session', false], ['session-B', true]]) {
+    const sessionStore = new Map([['consense.advice.session.project-A', saved]])
+    const h = await harness({ initialView: 'advice', sessionStore, storageDenied: denied, respondOverride: ({ method, url }) => {
+      if (method === 'get' && url.endsWith('/sessions')) return [...sessions, { ...sessions[1], id: 'other-project-session', projectId: 'project-B' }]
+    } })
+    try {
+      assert.equal(h.requests.some(request => request.url.includes('/messages?sessionId=')), false)
+      sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+      assert.ok(h.requests.some(request => request.url.endsWith('/messages?sessionId=session-A')))
+    } finally { h.dispose() }
+  }
+})
+
+test('a pending saved-session restore cannot override a user-selected scope or a Vetting handoff', async () => {
+  const gate = deferred(), sessionStore = new Map([['consense.advice.session.project-A', 'session-B']])
+  const h = await harness({ initialView: 'advice', sessionStore, respondOverride: ({ url }) => url.endsWith('/sessions') ? gate.promise : undefined })
+  try {
+    const basis = find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'reference_only'))
+    basis.props['onUpdate:modelValue']('reference_only'); await settle()
+    gate.resolve(sessions); await settle()
+    assert.equal(h.requests.some(request => request.url.endsWith('/messages?sessionId=session-B')), false)
+  } finally { h.dispose() }
+  const imported = await harness({ initialView: 'advice', importedProject: 'project-A', sessionStore,
+    respondOverride: ({ url }) => url.endsWith('/sessions') ? sessions : undefined })
+  try {
+    assert.equal(imported.requests.some(request => request.url.endsWith('/messages?sessionId=session-B')), false)
+    assert.match(find(imported.root, node => node.tag === 'textarea').value, /Verify clause A1/)
+  } finally { imported.dispose() }
+})
+
+test('switching projects restores each projects saved session without overwriting its scope', async () => {
+  const sessionStore = new Map([['consense.advice.session.project-A', 'session-B'], ['consense.advice.session.project-B', 'session-C']])
+  const h = await harness({ initialView: 'advice', sessionStore, respondOverride: ({ url }) => {
+    if (url === '/advice/project-A/sessions') return sessions
+    if (url === '/advice/project-B/sessions') return [{ ...sessions[0], id: 'session-C', projectId: 'project-B' }]
+    if (url.includes('/messages?sessionId=')) return [{ role: 'assistant', id: 30, content: localized(url.includes('session-C') ? 'PROJECT B ANSWER' : 'PROJECT A ANSWER'), citations: [], sources: [] }]
+  } })
+  try {
+    assert.match(text(h.root), /PROJECT A ANSWER/)
+    await h.store.switchProject('project-B'); await settle()
+    assert.match(text(h.root), /PROJECT B ANSWER/)
+    assert.doesNotMatch(text(h.root), /PROJECT A ANSWER/)
+    await h.store.switchProject('project-A'); await settle()
+    assert.match(text(h.root), /PROJECT A ANSWER/)
+    assert.doesNotMatch(text(h.root), /PROJECT B ANSWER/)
+  } finally { h.dispose() }
+})
+
+test('changing the reference scope starts a clearly separated conversation without old or legacy answers', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ method, url }) => {
+    if (method === 'get' && url.endsWith('/sessions')) return sessions
+    if (url.endsWith('/messages?sessionId=session-A')) return [{ sessionId: 'session-A', role: 'assistant', id: 20, title: localized('Old'), content: localized('OLD SCOPE ANSWER'), citations: [], sources: [] }]
+    if (url.endsWith('/messages')) return [{ role: 'assistant', id: 21, title: localized('Legacy'), content: localized('LEGACY ANSWER'), citations: [], sources: [] }]
+  } })
+  try {
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    assert.match(text(h.root), /OLD SCOPE ANSWER/)
+    const before = h.requests.filter(request => request.method !== 'get').length
+    const change = button(h, 'Change reference scope')
+    assert.ok(change, 'The current conversation exposes a clear scope-change action')
+    change.props.onClick(); await settle()
+    assert.doesNotMatch(text(h.root), /OLD SCOPE ANSWER|LEGACY ANSWER/)
+    assert.match(text(h.root), /previous conversation remains saved/i)
+    const basis = find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'reference_only'))
+    assert.equal(basis.props.disabled, false)
+    basis.props['onUpdate:modelValue']('reference_only'); await settle()
+    assert.equal(h.requests.filter(request => request.method !== 'get').length, before)
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Explain this standard'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle()
+    const created = h.requests.find(request => request.method === 'post' && request.url.endsWith('/sessions'))
+    const asked = h.requests.find(request => request.url.endsWith('/ask/stream'))
+    assert.equal(created.body.basisScope, 'reference_only')
+    assert.equal(asked.body.sessionId, 'session-1')
+    assert.equal(asked.body.basisScope, 'reference_only')
+    assert.doesNotMatch(text(h.root), /OLD SCOPE ANSWER|LEGACY ANSWER/)
+  } finally { h.dispose() }
+})
+
 test('explicit session switch binds scope/basis and isolates late answer and history without submitting a model call', async () => {
   const oldMessages = deferred(), oldAsk = deferred()
   let messageReads = 0
@@ -1086,6 +1258,7 @@ test('clear current session invalidates an in-flight response and leaves other s
     find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Old question'); await settle()
     const asking = button(h, 'Ask').props.onClick(); await settle()
     await button(h, 'Clear chat').props.onClick(); await settle()
+    await button(h, 'Clear saved messages').props.onClick(); await settle()
     assert.equal(h.requests.find(request => request.method === 'delete').url, '/advice/project-A/messages?sessionId=session-A')
     const stop = h.requests.find(request => request.url.includes('/stop?'))
     assert.ok(stop); assert.match(stop.url, /sessionId=session-A$/)
@@ -1238,7 +1411,7 @@ test('late successful review cannot replace a newer report or remove the retaine
     reviewRemarks(h).props['onUpdate:modelValue']('Draft still under review'); await settle()
     const saving = button(h, 'Save review record').props.onClick(); await settle()
     current = { ...finding, runId: 'run-2', generatedRevisionSha256: 'b'.repeat(64), reviewRemarks: 'New report has its own remarks' }
-    find(h.root, node => node.tag === 'input' && node.props.type === 'search').props['onUpdate:modelValue']('A1')
+    find(find(h.root, node => node.tag === 'div' && node.props.class === 'toolbar'), node => node.tag === 'input' && node.props.type === 'search').props['onUpdate:modelValue']('A1')
     await settle(); await new Promise(resolve => setTimeout(resolve, 260)); await settle()
     assert.match(text(h.root), /report or source version changed/i)
     pending.resolve({ ...finding, reviewRemarks: 'Draft still under review' }); await saving; await settle()
@@ -1262,7 +1435,7 @@ test('late status success cannot overwrite the currently selected newer report',
     await openFinding(h)
     const saving = button(h, 'Mark handled').props.onClick(); await settle()
     current = { ...finding, runId: 'run-2', generatedRevisionSha256: 'c'.repeat(64), title: localized('New report finding') }
-    find(h.root, node => node.tag === 'input' && node.props.type === 'search').props['onUpdate:modelValue']('A1')
+    find(find(h.root, node => node.tag === 'div' && node.props.class === 'toolbar'), node => node.tag === 'input' && node.props.type === 'search').props['onUpdate:modelValue']('A1')
     await settle(); await new Promise(resolve => setTimeout(resolve, 260)); await settle()
     await openFinding(h)
     pending.resolve({ ...finding, status: 'Handled' }); await saving; await settle()

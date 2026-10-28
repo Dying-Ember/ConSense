@@ -89,6 +89,22 @@ test('rendered fixed panel displays full table and unknown adoption, only reads 
   } finally { app.unmount() }
 })
 
+test('SL evidence presents the edition and original page in readable form', async () => {
+  const editionId = 'sl2022-batch02-rev1', pointer = { ...address, sourceFamily: 'SL', editionId, pageNo: 1932, originalPageNos: [1932] }
+  const source = evidence(); source.fileLabel = editionId; source.sourceFamily = 'SL'; source.pageNo = 1932; source.tableArtifact = null
+  source.payload.fixedBaselineEditionId = editionId; delete source.payload.tableArtifact
+  const loaded = loadVue(path.join(__dirname, '../src/components/FixedBaselineEvidencePanel.vue'), { globals: { ...globals,
+    URL: { revokeObjectURL() {} }, fetch: async () => envelope(source)
+  }, boundaries: { '@noble/hashes/sha256': require('@noble/hashes/sha256') } })
+  const host = renderer(), app = host.createApp({ render: () => vue.h(loaded.default, { pointer, locale: 'en' }) })
+  app.mount(host.root); await waitFor(() => text(host.root).includes('Literal complete standard'))
+  try {
+    const visible = node => node.tag === 'details' && !node.props?.open ? (node.children ?? []).filter(child => child.tag === 'summary').map(visible).join(' ') : node.text || (node.children ?? []).map(visible).join(' ')
+    assert.match(visible(host.root), /SL2022 Batch 2 revision 1/); assert.match(visible(host.root), /Original page: 1932/)
+    assert.ok(!visible(host.root).includes(editionId)); assert.ok(!visible(host.root).includes(pointer.baselineVersion))
+  } finally { app.unmount() }
+})
+
 test('late fixed evidence cannot replace a newly selected source and aborts before any assets', async () => {
   const pending = deferred(), calls = []
   const loaded = loadVue(path.join(__dirname, '../src/components/FixedBaselineEvidencePanel.vue'), { globals: { ...globals, URL: { revokeObjectURL() {} }, fetch: async (url, options) => { calls.push({ url, options }); return calls.length === 1 ? pending.promise : new Response('', { status: 404 }) } }, boundaries: { '@noble/hashes/sha256': require('@noble/hashes/sha256') } })

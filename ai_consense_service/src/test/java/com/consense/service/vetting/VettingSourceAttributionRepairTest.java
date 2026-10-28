@@ -49,6 +49,14 @@ class VettingSourceAttributionRepairTest {
             assertEquals(2,r.getActualGatewayCallCount());assertTrue(packet(r).getAttempts().get(0).getValidationReason().contains("unsupported_source_clause_attribution"));
         }
     }
+    @Test void aLiteralDeletionDoesNotTurnTheNextCommaSeparatedStatementIntoClauseOwnership() {
+        Fixture f=new Fixture();f.replace(f.a,"Clauses 1.08 to 1.55 inclusive of Section 1 are deleted from the specification.");
+        ObjectNode record=f.record(false);record.put("comment","The source deletes Clauses 1.08 to 1.55 of Section 1, but does not state which parts of the Works are subject to the specification.");
+        Map<String,Chunk> byId=new LinkedHashMap<>();for(Chunk chunk:f.corpus)byId.put(chunk.getId(),chunk);
+        assertTrue(VettingSourceAttribution.reasons(JsonUtils.readList(JsonUtils.write(Collections.singletonList(record)),VettingSemanticReview.Record.class),byId).isEmpty());
+        record.put("comment","Clause 1.08 of the specification requires two signed paper copies.");
+        assertFalse(VettingSourceAttribution.reasons(JsonUtils.readList(JsonUtils.write(Collections.singletonList(record)),VettingSemanticReview.Record.class),byId).isEmpty());
+    }
 
     @Test void verifiedSourceClauseAndHeadingBindingsPermitTheExplicitAttribution() {
         Fixture f=new Fixture();f.a.setClauseId("SCT1");f.a.setClauseHeadingLocation("body/3/paragraph");f.b.setClauseId("SCT2");f.b.setClauseHeadingLocation("body/5/paragraph");

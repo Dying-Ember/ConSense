@@ -137,6 +137,13 @@ class VettingReaderReportPresentationTest {
         String word=wordText(new VettingReportWriter().docx(project(),Collections.singletonList(finding),null,"en"));
         assertTrue(word.contains("Evidence awaiting location"));assertFalse(word.contains("Evidence partly located"));
     }
+    @Test void englishReportNamesTheSelectedStandardEditionWhenItsFilenameWasNotSaved() throws Exception {
+        FindingVO finding=candidate();FindingEvidence reference=new FindingEvidence("reference","fixed:1","SL",null,"1932","DRA2.W1920.A","Reference text.",true,"fixed",null);
+        reference.setFixedBaselineEvidence(JsonUtils.parse("{\"sourceFamily\":\"SL\",\"editionId\":\"sl2022-batch02-rev1\",\"pageNo\":1932}"));
+        List<FindingEvidence> evidence=new ArrayList<>(finding.getEvidence());evidence.add(reference);finding.setEvidence(evidence);String before=JsonUtils.write(finding);
+        String word=wordText(new VettingReportWriter().docx(project(),Collections.singletonList(finding),null,"en"));
+        assertTrue(word.contains("SL2022 Batch 2 revision 1"));assertEquals(before,JsonUtils.write(finding));
+    }
     @Test void everySourcePositionAndExistingReviewedClauseIsRetainedWithoutUpgradingItsUnknownNeighbour() throws Exception {
         FindingVO finding=candidate();FindingEvidence first=finding.getEvidence().get(0);first.setPageNo("P7");
         FindingEvidence second=JsonUtils.read(JsonUtils.write(first),FindingEvidence.class);second.setAnchor("body/6/paragraph");second.setPageNo("P8");second.setClauseId("SCT7.2");

@@ -186,6 +186,7 @@ class CompactNormalPreparationTest {
                 .thenThrow(new AssertionError("Full stored snapshot repository read before native preparation"));
             when(bindings.findById(anyLong())).thenThrow(new AssertionError("Full stored snapshot entity read before native preparation"));
             when(bindings.findCompactByDocument(anyString(),anyLong(),any())).thenAnswer(call->{CanonicalSourceBinding row=rows.get(call.getArgument(1));return row==null?Collections.emptyList():Collections.singletonList(metadata(row));});
+            when(bindings.findCompactHistoriesForSelected(anyString(),anyList(),any())).thenAnswer(call->rows.values().stream().map(Wire::metadata).collect(java.util.stream.Collectors.toList()));
             when(bindings.findCompactById(anyLong())).thenAnswer(call->Optional.ofNullable(rows.get(call.getArgument(0))).map(Wire::metadata));
             when(reader.currentModuleMetadata("authored-compact","vetting")).thenAnswer(call->stamps);
             when(reader.currentVettingMetadata("authored-compact")).thenAnswer(call->stamps);

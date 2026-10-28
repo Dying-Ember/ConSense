@@ -41,6 +41,7 @@ class CanonicalBindingFrameComparisonTest {
         Fixture fixture=new Fixture("{}");fixture.original.setSnapshotBytesSha256(com.consense.common.Utf8.sha256("{}"));fixture.original.setSnapshotContentSha256(fixture.original.getSnapshotBytesSha256());
         fixture.current.set(copy(fixture.original));
         when(fixture.repository.findCompactByDocument(anyString(),anyLong(),any())).thenAnswer(call->Collections.singletonList(metadata(fixture.current.get())));
+        when(fixture.repository.findCompactHistoriesForSelected(anyString(),anyList(),any())).thenAnswer(call->Collections.singletonList(metadata(fixture.current.get())));
         com.consense.domain.SourceDocument source=new com.consense.domain.SourceDocument();source.setId(22L);source.setProjectId("frame-project");
         when(fixture.reader.currentStamp("frame-project",22L,"vetting")).thenReturn(source);
         when(fixture.reader.currentVettingMetadata("frame-project")).thenReturn(Collections.singletonMap(22L,source));
@@ -50,7 +51,7 @@ class CanonicalBindingFrameComparisonTest {
         CanonicalEvidenceService.CompactBindingScope scope=fixture.service.compactBindings(fixture.frame,Collections.singletonList(source));
         assertNull(scope.bindings().get(0).getSnapshotJson());clearInvocations(fixture.repository,fixture.backend,fixture.reader);
         for(int i=0;i<5;i++)fixture.service.assertCompactCurrent(scope);
-        verify(fixture.repository,times(5)).findCompactByDocument(anyString(),anyLong(),any());verify(fixture.repository,never()).findByProjectIdAndDocumentIdOrderByIdDesc(anyString(),anyLong(),any());verifyNoInteractions(fixture.backend);
+        verify(fixture.repository,times(5)).findCompactHistoriesForSelected(anyString(),anyList(),any());verify(fixture.repository,never()).findCompactByDocument(anyString(),anyLong(),any());verify(fixture.repository,never()).findByProjectIdAndDocumentIdOrderByIdDesc(anyString(),anyLong(),any());verifyNoInteractions(fixture.backend);
         fixture.current.get().setSnapshotContentSha256(com.consense.common.Utf8.sha256("{\"changed\":true}"));assertThrows(CanonicalEvidenceException.class,()->fixture.service.assertCompactCurrent(scope));
         fixture.current.set(copy(fixture.original));fixture.current.get().setId(12L);when(fixture.repository.findCompactByDocumentBefore(anyString(),anyLong(),anyLong(),any())).thenReturn(Collections.singletonList(metadata(fixture.original)));
         assertThrows(CanonicalEvidenceException.class,()->fixture.service.assertCompactCurrent(scope));

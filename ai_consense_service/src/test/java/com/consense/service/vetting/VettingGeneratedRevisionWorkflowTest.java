@@ -46,13 +46,13 @@ class VettingGeneratedRevisionWorkflowTest {
     @MockBean EnglishFileOutput englishFiles;
     @BeforeEach void resetFixture() {
         props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(20);
-        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
     }
 
     @Test void sevenClassesPersistFilterCountAndExportAsInternalMetadata() throws Exception {
         SourceDocument doc=source();String project=doc.getProjectId();
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
             Result all=new Result();all.setModel("fixture-only");
             for(VettingIssueType type:VettingIssueType.values()) {
                 Candidate c=result(doc,"").getCandidates().get(0);c.setRuleId("fixture-"+type.getGroup());c.setType(type.getGroup());all.getCandidates().add(c);
@@ -80,7 +80,7 @@ class VettingGeneratedRevisionWorkflowTest {
     @ParameterizedTest @ValueSource(strings={"subDimension","factBasis","pendingFacts","suggestedAction","checklistItemIds"})
     void changedCompetitionRationaleCannotInheritAnEarlierHumanDecision(String field) throws Exception {
         SourceDocument doc=source();String project=doc.getProjectId();AtomicReference<Boolean> changed=new AtomicReference<>(false);
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
             Result value=result(doc,"");BusinessDetailsVO business=value.getCandidates().get(0).getBusinessDetails();
             if(changed.get())switch(field){case "subDimension":business.setSubDimension("Changed authored dimension");break;case "factBasis":business.setFactBasis("Changed authored source rationale");break;case "pendingFacts":business.setPendingFacts(Collections.singletonList("Confirm authored scope"));break;case "suggestedAction":business.setSuggestedAction("amend");break;default:business.setChecklistItemIds(Collections.singletonList("APP-I-026"));}
             return value;
@@ -95,7 +95,7 @@ class VettingGeneratedRevisionWorkflowTest {
     @ValueSource(strings={"comment","title","impact","suggestion","severity","type"})
     void changedGeneratedObservationDoesNotInheritAnEarlierHumanDecision(String changedField) throws Exception {
         SourceDocument doc=source();String project=doc.getProjectId();AtomicReference<String> variant=new AtomicReference<>("");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class)))
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class)))
                 .thenAnswer(call->result(doc,variant.get()));
         FindingVO first=run(project);VettingHumanReviewFixture.updateStatus(service,project,first.getCode(),"Handled");
         FindingVO reviewed=VettingHumanReviewFixture.updateReview(service,project,first.getCode(),new ReviewUpdateRequest(" old manual \r\n原文😀 "," old action ",false));
@@ -124,7 +124,7 @@ class VettingGeneratedRevisionWorkflowTest {
 
     @Test void returningToAnExactEarlierRevisionPreservesThatRevisionsHistory() throws Exception {
         SourceDocument doc=source();String project=doc.getProjectId();AtomicReference<String> variant=new AtomicReference<>("");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,variant.get()));
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,variant.get()));
         FindingVO original=run(project);VettingHumanReviewFixture.updateStatus(service,project,original.getCode(),"Handled");
         FindingVO manual=VettingHumanReviewFixture.updateReview(service,project,original.getCode(),new ReviewUpdateRequest(" Original version only ",null,false));
         variant.set("comment");FindingVO second=run(project);assertNotEquals(original.getCode(),second.getCode());
@@ -136,7 +136,7 @@ class VettingGeneratedRevisionWorkflowTest {
 
     @Test void incompleteLegacyGeneratedContentDoesNotCertifyANewObservation() throws Exception {
         SourceDocument doc=source();String project=doc.getProjectId();
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,""));
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,""));
         FindingVO original=run(project);VettingHumanReviewFixture.updateStatus(service,project,original.getCode(),"Handled");
         VettingHumanReviewFixture.updateReview(service,project,original.getCode(),new ReviewUpdateRequest(" Legacy manual ",null,null));
         VettingFinding legacy=findings.findByProjectIdAndCode(project,original.getCode()).orElseThrow(AssertionError::new);

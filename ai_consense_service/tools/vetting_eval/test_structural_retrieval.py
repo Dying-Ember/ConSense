@@ -1,8 +1,13 @@
 """Source-only fixtures and explicit fake scorer; no model/vector/network calls."""
 import copy
+import hashlib
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+import structural_retrieval
 from structural_retrieval import StructuralRecipe, compare, plan
+from retrieval_source_units import SourceUnits
 from test_retrieval_source_units import parent
 from test_token_windows import CharacterTokenizer
 from token_windows import WindowError, WindowRecipe, verify_window_coverage, windows
@@ -133,6 +138,70 @@ class StructuralRetrievalTests(unittest.TestCase):
         self.assertEqual(result['baseline']['actualScores'], [0.7] * len(calls[0]))
         self.assertTrue(result['sameQueryAndCandidatePool'])
         self.assertFalse(result['qualityImprovementEstablished'])
+
+    def test_rerank_prepares_only_candidate_closures_without_changing_model_input(self):
+        head = parent('head', 'body:1', 'Heading', 'A1', 'body/1')
+        tail = parent('tail', 'body:2', 'The condition remains applicable.', 'A1', 'body/1')
+        head['authoredMetadata'] = 'first observed member'
+        tail['authoredMetadata'] = 'later observed member'
+        others = [parent('other-' + str(i), 'other:' + str(i), 'Unrelated text ' + str(i)) for i in range(100)]
+        corpus = [head, tail] + others
+        catalog = structural_retrieval._catalog
+        with patch.object(structural_retrieval, '_catalog', lambda parents, *unused: catalog(parents)):
+            baseline = compare('q', [tail], corpus, self.tokenizer, self.identity, self.short, self.recipe,
+                               lambda pairs: [0.5 for _ in pairs])
+        original = SourceUnits.resolve
+        resolved = []
+        def observe(instance, source):
+            resolved.append(source['id'])
+            return original(instance, source)
+        with patch.object(SourceUnits, 'resolve', observe):
+            actual = compare('q', [tail], corpus, self.tokenizer, self.identity, self.short, self.recipe,
+                             lambda pairs: [0.5 for _ in pairs])
+        self.assertEqual(baseline, actual)
+        self.assertEqual({'head', 'tail'}, set(resolved))
+
+    def test_candidate_closures_match_full_catalog_for_hierarchy_and_shared_notes(self):
+        from test_typed_parent_hierarchy_context import corpus as hierarchy
+        from test_shared_note_group_red import shared
+        catalog = structural_retrieval._catalog
+        recipe = StructuralRecipe('dual-structure-v1', 128, 128, False)
+        for corpus in (hierarchy(), shared()):
+            selections = [[item] for item in corpus] + [[corpus[-1], corpus[0]], list(reversed(corpus))]
+            for selected in selections:
+                with self.subTest(seeds=[item['id'] for item in selected]):
+                    with patch.object(structural_retrieval, '_catalog', lambda parents, *unused: catalog(parents)):
+                        before = compare('q', selected, corpus, self.tokenizer, self.identity, self.short, recipe,
+                                         lambda pairs: [0.5 for _ in pairs])
+                    after = compare('q', selected, corpus, self.tokenizer, self.identity, self.short, recipe,
+                                    lambda pairs: [0.5 for _ in pairs])
+                    self.assertEqual(before, after)
+
+    def test_selected_rerank_source_adapter_is_exact(self):
+        import portable_index_signature as adapter
+        current = Path(structural_retrieval.__file__).read_text(encoding='utf-8')
+        selection = """    if seeds is None:
+        selected = parents
+    else:
+        required = set()
+        for seed in seeds:
+            observed = catalog._resolve_observed(seed)
+            required.update(observed['requiredMemberIds'] or [seed['id']])
+        selected = [parent for parent in parents if parent['id'] in required]
+    for parent in selected:
+"""
+        self.assertEqual(1, current.count(selection))
+        previous = current.replace(selection, '    for parent in parents:\n')
+        previous = previous.replace('def _catalog(parents, seeds=None):', 'def _catalog(parents):')
+        previous = previous.replace('_catalog(all_parents, candidates)', '_catalog(all_parents)')
+        adapter.computation_proof('structural_retrieval.py', previous, current)
+        def signature(source, newline):
+            raw = source.replace('\n', newline).encode()
+            return {'signatureVersion': 6, 'algorithms': {'structural_retrieval.py': hashlib.sha256(raw).hexdigest()}}
+        self.assertTrue(any(adapter.transport_candidate(signature(previous, old), signature(current, new))
+                            for old in ('\n', '\r\n') for new in ('\n', '\r\n')))
+        with self.assertRaises(WindowError):
+            adapter.computation_proof('structural_retrieval.py', previous, current + '\nUNREVIEWED_CHANGE = True\n')
 
     def test_non_strict_unknown_is_explicitly_labelled_not_unrecorded_fallback(self):
         p = copy.deepcopy(self.corpus[0])

@@ -156,6 +156,13 @@ class RequestEvidence:
         elif stage == 'source-window-plan':
             payload = {key: value for key, value in payload.items() if key != 'windowBindings'}
             payload['recording'] = 'summary_only; complete windows remain in index metadata'
+        elif stage == 'parent-bm25-candidates':
+            scores = payload.get('allScopeScores', [])
+            selected = set(payload.get('orderedCandidateIds', []))
+            payload = {key: value for key, value in payload.items() if key != 'allScopeScores'}
+            payload.update(scoredScopeCount=len(scores),
+                           candidateScores=[row for row in scores if row['id'] in selected],
+                           recording='selected_candidates_only')
         elif stage == 'source-unit-closure':
             payload = {'policy': payload.get('policy'),
                 'units': [_unit_summary(value) for value in payload.get('units', [])],

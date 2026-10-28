@@ -14,6 +14,7 @@ final class FixedVettingReferences {
     private String projectId,selectionIdentity;
     private final Map<String, SearchHit> hits = new LinkedHashMap<>();
     private final Map<String, String> views = new LinkedHashMap<>();
+    private final Set<String> slIds = new LinkedHashSet<>();
 
     private FixedVettingReferences(FixedBaselineRetrievalClient client, List<SearchHit> selected) {
         this.client = client;
@@ -29,14 +30,25 @@ final class FixedVettingReferences {
             if (hits.putIfAbsent(view.getId(), hit) != null)
                 throw new IllegalArgumentException("Duplicate fixed reference ID");
             views.put(view.getId(), JsonUtils.write(view));
+            if("SL".equals(evidence.getSourceFamily()))slIds.add(view.getId());
         }
     }
 
     static FixedVettingReferences empty() { return new FixedVettingReferences(null, Collections.emptyList()); }
     static FixedVettingReferences retrieve(FixedBaselineRetrievalClient client,String projectId,String topic,int limit) {
+        return retrieve(client,projectId,Collections.singletonList(topic),limit);
+    }
+    static FixedVettingReferences retrieve(FixedBaselineRetrievalClient client,String projectId,List<String> queries,int limit) {
         if(client==null||!client.enabled())return empty();
         String identity=JsonUtils.write(client.projectSelection(projectId));
-        FixedVettingReferences result=new FixedVettingReferences(client,client.searchForProject(projectId,"vetting",topic,limit));
+        Map<String,SearchHit> selected=new LinkedHashMap<>();
+        for(String query:queries){
+            for(SearchHit hit:VettingReviewDirections.searchWithFallback(query,part->{
+                if(!Objects.equals(identity,JsonUtils.write(client.projectSelection(projectId))))throw new IllegalStateException("Fixed reference editions changed during this review");
+                return client.searchForProject(projectId,"vetting",part,limit);
+            }))selected.putIfAbsent(hit.getId(),hit);
+        }
+        FixedVettingReferences result=new FixedVettingReferences(client,new ArrayList<>(selected.values()));
         result.projectId=projectId;result.selectionIdentity=identity;result.assertSelectionCurrent();return result;
     }
     private void assertSelectionCurrent() {
@@ -48,6 +60,10 @@ final class FixedVettingReferences {
 
     List<Chunk> chunks() {
         return views.values().stream().map(json -> JsonUtils.read(json, Chunk.class)).collect(Collectors.toList());
+    }
+    /** Only the verified source family can establish that a retrieved reference belongs to SL. */
+    List<Chunk> slChunks() {
+        return views.entrySet().stream().filter(entry->slIds.contains(entry.getKey())).map(entry->JsonUtils.read(entry.getValue(),Chunk.class)).collect(Collectors.toList());
     }
     List<Chunk> topicCorpus(List<Chunk> project) {
         List<Chunk> result = new ArrayList<>(project);

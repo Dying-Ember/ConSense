@@ -20,26 +20,34 @@ public final class VettingChecklistAutomaticResults {
 
     public static List<AutomaticGroupVO> aggregate(String runStatus,JsonNode coverage,JsonNode result) {
         String policy=result==null?"":result.path("promptPolicy").path("sha256").asText();
-        Map<String,List<JsonNode>> accepted=new LinkedHashMap<>();Set<String> rejected=new HashSet<>(),unclosedPositive=new HashSet<>();
-        if("COMPLETED".equals(runStatus)&&sha(policy)&&coverage!=null) {
-            for(JsonNode topic:coverage.path("semanticTopics"))for(JsonNode packet:topic.path("packetAudits"))
+        boolean partial="FAILED".equals(runStatus)&&result!=null&&result.path("partialResults").isBoolean()&&result.path("partialResults").booleanValue();
+        boolean published="COMPLETED".equals(runStatus)||partial;
+        Map<String,List<JsonNode>> accepted=new LinkedHashMap<>(),history=new LinkedHashMap<>();Set<String> rejected=new HashSet<>(),unclosedPositive=new HashSet<>();
+        if(published&&sha(policy)&&coverage!=null) {
+            for(JsonNode topic:coverage.path("semanticTopics")) {
+                VettingEvidenceNeedResolution.Result resolution=VettingEvidenceNeedResolution.resolve(topic.path("packetAudits"),policy);
+                for(JsonNode packet:topic.path("packetAudits"))
                 for(JsonNode record:packet.path("checklistAssessments")) {
                     String id=record.path("itemId").asText();
-                    if(valid(packet,record,policy)) {
-                        accepted.computeIfAbsent(id,k->new ArrayList<>()).add(record.deepCopy());
+                    if(assigned(topic,id)&&valid(packet,record,policy)) {
+                        JsonNode saved=record.deepCopy();history.computeIfAbsent(id,k->new ArrayList<>()).add(saved);
+                        List<String> evidenceIds=new ArrayList<>();record.path("evidenceChunkIds").forEach(value->evidenceIds.add(value.asText()));
+                        if("insufficient_evidence".equals(record.path("status").asText())&&resolution.supersedesChecklist(packet.path("packetId").asText(),id,record.path("reason").asText(),evidenceIds))continue;
+                        accepted.computeIfAbsent(id,k->new ArrayList<>()).add(saved);
                         if(Arrays.asList("fulfilled","not_applicable").contains(record.path("status").asText())&&!positiveScopeClosed(coverage,packet,record))unclosedPositive.add(id);
                     }
                     else rejected.add(id);
                 }
+            }
         }
         Map<String,AutomaticItemVO> rows=new LinkedHashMap<>();
         for(VettingChecklistCatalog.Item item:VettingChecklistCatalog.items()) {
             List<JsonNode> records=accepted.getOrDefault(item.getId(),Collections.emptyList());
             String status="not_assessed",reason="No verified model countercheck was recorded for this requirement.";
             Set<String> states=records.stream().map(r->r.path("status").asText()).collect(Collectors.toCollection(LinkedHashSet::new));
-            if(!"COMPLETED".equals(runStatus))reason="The review run has not completed.";
+            if(!published)reason="The review run has not completed.";
             else if(!sha(policy))reason="The run has no frozen checklist policy identity.";
-            else if(rejected.contains(item.getId())) {status="insufficient_evidence";reason="A packet assessment could not be bound to the frozen policy, packet or quoted evidence.";}
+            else if(rejected.contains(item.getId())) {status="insufficient_evidence";reason="A packet assessment could not be bound to the assigned requirement, frozen policy, packet or quoted evidence.";}
             else if(states.size()>1) {status="insufficient_evidence";reason="Packet assessments conflict; all recorded decisions are retained for review.";}
             else if(states.size()==1) {status=states.iterator().next();reason=records.stream().map(r->("not_fulfilled".equals(r.path("status").asText())?"["+r.path("issueTypeCode").asText()+"] ":"")+r.path("reason").asText()).distinct().collect(Collectors.joining("\n"));}
             if(unclosedPositive.contains(item.getId())&&Arrays.asList("fulfilled","not_applicable").contains(status)) {
@@ -51,26 +59,36 @@ public final class VettingChecklistAutomaticResults {
                 reason="The model recorded "+status+", but the requirement's independent source field roles, same-object relation or complete scope remain unverified.\n"+reason;
                 status="insufficient_evidence";
             }
+            if(partial)reason+="\nThe review run failed. This records only accepted source packets; unfinished requirements remain unreviewed.";
             if("pricing_document_excluded".equals(item.getReviewScope())) {status="out_of_scope";reason=item.getScopeNote();}
             else if("mixed_contract_pricing".equals(item.getReviewScope())) {
                 reason+=(reason.isEmpty()?"":"\n")+item.getScopeNote();
                 if("fulfilled".equals(status)||"not_applicable".equals(status))status="insufficient_evidence";
             }
-            rows.put(item.getId(),new AutomaticItemVO(item.getId(),status,reason,records));
+            rows.put(item.getId(),new AutomaticItemVO(item.getId(),status,reason,history.getOrDefault(item.getId(),Collections.emptyList())));
         }
         List<AutomaticGroupVO> groups=new ArrayList<>();
         for(VettingChecklistCatalog.LogicalGroup group:VettingChecklistCatalog.logicalGroups()) {
             List<AutomaticItemVO> members=group.getSourceItemIds().stream().map(rows::get).collect(Collectors.toList());
+            List<AutomaticItemVO> inScope=members.stream().filter(r->!"out_of_scope".equals(r.getStatus())).collect(Collectors.toList());
             boolean complete=members.stream().allMatch(r->Arrays.asList("fulfilled","not_fulfilled","not_applicable").contains(r.getStatus()));
             String state=members.stream().anyMatch(r->"not_fulfilled".equals(r.getStatus()))?"not_fulfilled"
                     :members.stream().allMatch(r->"out_of_scope".equals(r.getStatus()))?"out_of_scope"
                     :complete?(members.stream().allMatch(r->"not_applicable".equals(r.getStatus()))?"not_applicable":"fulfilled")
-                    :members.stream().allMatch(r->"not_assessed".equals(r.getStatus()))?"not_assessed":"insufficient_evidence";
+                    :inScope.stream().allMatch(r->"not_assessed".equals(r.getStatus()))?"not_assessed":"insufficient_evidence";
             String symbol="fulfilled".equals(state)?"\u2713":"not_fulfilled".equals(state)?"\u2717":"";
             String reason=members.stream().map(r->r.getItemId()+": "+r.getReason()).collect(Collectors.joining("\n"));
+            if(!inScope.isEmpty()&&inScope.size()!=members.size())reason="This group contains excluded requirements. Only its in-scope members can be assessed; no whole-group completion is claimed.\n"+reason;
             groups.add(new AutomaticGroupVO(group.getId(),state,symbol,reason,complete,group.getSourceItemIds(),members));
         }
         return groups;
+    }
+
+    private static boolean assigned(JsonNode topic,String itemId) {
+        if(!"checklist_direction".equals(topic.path("reviewKind").asText()))return true;
+        JsonNode ids=topic.path("referenceIds");if(!ids.isArray())return false;
+        for(JsonNode assigned:ids)if(assigned.isTextual()&&itemId.equals(assigned.asText()))return true;
+        return false;
     }
 
     static Map<String,JsonNode> completeGroupBases(List<AutomaticGroupVO> groups) {
@@ -82,7 +100,7 @@ public final class VettingChecklistAutomaticResults {
         return result;
     }
 
-    private static boolean valid(JsonNode packet,JsonNode record,String policy) {
+    static boolean valid(JsonNode packet,JsonNode record,String policy) {
         String packetId=packet.path("packetId").asText(),snapshot=packet.path("sourceSnapshotSha256").asText();
         if(!packet.path("actualGatewayCallStarted").asBoolean()||!Arrays.asList("completed","completed_empty","completed_with_rejections").contains(packet.path("status").asText())
                 ||JsonUtils.isBlankText(packetId)||!sha(snapshot)||!"pm-checklist-packet-v1".equals(record.path("producerVersion").asText())

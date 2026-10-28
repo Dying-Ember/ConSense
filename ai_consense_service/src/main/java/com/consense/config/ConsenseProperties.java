@@ -42,7 +42,8 @@ public class ConsenseProperties {
     /** Finite paid-generation admission caps; reaching any ceiling rejects further dispatch. */
     @Data public static class QwenUsagePreflight {
         private boolean enabled=true;
-        private int vettingMaxPreflights=68,vettingMaxAnswers=34,vettingMaxTotal=102;
+        // Allow 27 directions an initial and a supplement, each with one repair, under a finite ceiling.
+        private int vettingMaxPreflights=216,vettingMaxAnswers=108,vettingMaxTotal=324;
         private long actionLifetimeMs=7200000;
     }
 
@@ -157,6 +158,8 @@ public class ConsenseProperties {
         /** First-time corpus embedding/indexing can take much longer than one query. */
         private long retrievalIndexTimeoutMs = 1_800_000;
         private int semanticTopics = 17;
+        /** Scheduling window only; consumption is bounded to 1-120 minutes. */
+        private int semanticRunMinutes = 55;
         private int semanticContextChars = 10000;
         /** Optional bounded literal-reference expansion; does not imply full contract coverage. */
         private int semanticContextExpansionChars = 20000;

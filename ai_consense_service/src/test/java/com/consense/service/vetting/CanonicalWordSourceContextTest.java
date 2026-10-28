@@ -68,6 +68,16 @@ class CanonicalWordSourceContextTest {
         Map<String,JsonNode> borrowed=Collections.singletonMap(target.getCanonicalChunkId(),origin.getNativeWordSourceScopesContext());
         assertThrows(IllegalArgumentException.class,()->new OerModelMaterial.Request(null,borrowed).project(target,second,"tender"));
     }
+    @Test void sharedWordSelectionIndexKeepsEachSelectedClauseContextUnchanged()throws Exception{
+        SourceDocument source=source();JsonNode graph=NormalSourceCandidateGraph.requireBound(source);CanonicalSourceBinding binding=binding(source);
+        ObjectNode snapshot=JsonUtils.mapper().createObjectNode();snapshot.put("schema",NormalObservedContract.SCHEMA);snapshot.putObject("manifest").set("candidateGraph",graph);
+        Method single=CanonicalEvidenceService.class.getDeclaredMethod("wordSourceScopeContext",CanonicalSourceBinding.class,JsonNode.class,JsonNode.class);single.setAccessible(true);
+        Method shared=CanonicalEvidenceService.class.getDeclaredMethod("wordSourceScopeContext",CanonicalSourceBinding.class,JsonNode.class,JsonNode.class,NormalSourceCandidateGraph.SelectionIndex.class);shared.setAccessible(true);
+        NormalSourceCandidateGraph.SelectionIndex index=new NormalSourceCandidateGraph.SelectionIndex(graph);
+        for(String text:Arrays.asList("1. Body first clause","2. Body second clause")){
+            JsonNode chunk=canonical(graph,unit(graph,text));assertEquals(single.invoke(null,binding,snapshot,chunk),shared.invoke(null,binding,snapshot,chunk,index));
+        }
+    }
 
     static SourceDocument source()throws Exception{
         OcrClient ocr=mock(OcrClient.class);byte[] bytes;

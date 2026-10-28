@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { fetchFixedEvidence, fetchFixedEvidenceGroup, fetchFixedOriginal, fetchFixedTable } from '@/api/fixedBaselineEvidence'
+import { slEditionLabel } from '@/api/slEditionLabel'
 import type { FixedBaselineEvidenceAddress, FixedBaselineEvidence, FixedBaselineSourceUnit } from '@/api/fixedBaselineEvidence'
 const PdfPreview = defineAsyncComponent(() => import('@/components/DraftingPdfPreview.vue'))
 const props = withDefaults(defineProps<{ pointer: FixedBaselineEvidenceAddress; locale?: 'zh-Hans' | 'zh-Hant' | 'en' }>(), { locale: 'zh-Hans' })
@@ -9,6 +10,7 @@ const words = {
   note: ['标准依据；项目采用尚未确认。开发基准质量、限定条件及法律归属保持未确认。', '標準依據；項目採用尚未確認。開發基準品質、限定條件及法律歸屬保持未確認。', 'Standard reference; project adoption is unconfirmed. Development source quality, qualifiers and legal ownership remain unverified.'],
   original: ['读取完整原 PDF', '讀取完整原 PDF', 'Read the complete original PDF'],
   originalPage: ['打开引用原页', '開啟引用原頁', 'Open cited original page'],
+  page: ['原页', '原頁', 'Original page'], slReference: ['SL 参考版本未确认', 'SL 參考版本未確認', 'SL reference (edition unconfirmed)'],
   group: ['完整来源成员组', '完整來源成員組', 'Complete source member group'],
   required: ['必要成员', '必要成員', 'Required members'], present: ['已回取成员', '已回取成員', 'Retrieved members'], missing: ['缺失成员／资产', '缺失成員／資產', 'Missing members / assets'],
   groupUnknown: ['成员／限定关系未确认。缺失项不能当作完整依据；其余回取成员仍保留。', '成員／限定關係未確認。缺失項不能當作完整依據；其餘回取成員仍保留。', 'Member and qualifier relations remain unverified. Missing items are not complete evidence; other retrieved members remain available.'],
@@ -22,6 +24,10 @@ const words = {
   verified: ['原 PDF 字节 SHA-256 已核对。', '原 PDF 位元組 SHA-256 已核對。', 'Original PDF byte SHA-256 verified.']
 } as const
 const label = (key: keyof typeof words) => words[key][props.locale === 'en' ? 2 : props.locale === 'zh-Hant' ? 1 : 0]
+function sourceName(source?: FixedBaselineEvidence | null) {
+  const id = typeof source?.payload.fixedBaselineEditionId === 'string' ? source.payload.fixedBaselineEditionId : props.pointer.editionId
+  return slEditionLabel(id) || (source?.fileLabel && source.fileLabel !== id ? source.fileLabel : props.pointer.sourceFamily === 'SL' ? label('slReference') : props.pointer.sourceFamily)
+}
 const evidence = ref<FixedBaselineEvidence | null>(null), table = ref<unknown>(null), original = ref(''), loading = ref(false), originalLoading = ref(false), error = ref(''), assetError = ref('')
 const sourceUnit = ref<FixedBaselineSourceUnit | null>(null), group = ref<Awaited<ReturnType<typeof fetchFixedEvidenceGroup>> | null>(null)
 const matrix = computed(() => {
@@ -70,12 +76,12 @@ onBeforeUnmount(() => { ++epoch; cleanup() })
   <section class="fixed-evidence-panel canonical-evidence-panel" aria-live="polite">
     <h4>{{ label('title') }}</h4>
     <p class="warning-note">{{ label('note') }}</p>
-    <p class="small">{{ pointer.sourceFamily }} · {{ pointer.baselineVersion }} · {{ pointer.originalPageNos?.join(', ') || pointer.pageNo }}</p>
+    <p class="small">{{ sourceName() }} · {{ label('page') }}: {{ pointer.originalPageNos?.join(', ') || pointer.pageNo }}</p>
     <p v-if="loading" role="status">{{ label('loading') }}</p>
     <p v-if="error" role="alert">{{ displayError }}</p>
     <button type="button" class="btn" :disabled="loading" @click="load">{{ label('retry') }}</button>
     <template v-if="evidence">
-      <strong>{{ evidence.fileLabel }}<template v-if="evidence.payload.fixedBaselineEditionId"> · {{ evidence.payload.fixedBaselineEditionId }}</template></strong>
+      <strong>{{ sourceName(evidence) }}</strong>
       <div><button type="button" class="btn" :disabled="originalLoading" @click="openOriginal">{{ originalLoading ? label('loading') : label('original') }}</button></div>
       <p v-if="assetError" role="alert">{{ assetError }}</p>
       <pre>{{ evidence.content }}</pre>
@@ -86,12 +92,13 @@ onBeforeUnmount(() => { ++epoch; cleanup() })
         <p>{{ label('present') }}: {{ group?.members.length ?? 'unknown' }}</p>
         <p v-if="group?.missingMemberIds.length || group?.missingAssetIds.length" role="alert">{{ label('missing') }}: {{ (group?.missingMemberIds.length ?? 0) + (group?.missingAssetIds.length ?? 0) }}</p>
         <p class="warning-note">{{ label('groupUnknown') }}</p>
-        <article v-for="member in group?.members ?? []" :key="member.evidence.id"><strong>{{ member.evidence.fileLabel }} · {{ member.evidence.pageNo }}</strong><pre>{{ member.evidence.content }}</pre></article>
+        <article v-for="member in group?.members ?? []" :key="member.evidence.id"><strong>{{ sourceName(member.evidence) }} · {{ label('page') }}: {{ member.evidence.pageNo }}</strong><pre>{{ member.evidence.content }}</pre></article>
       </div>
-      <template v-if="original"><p>{{ label('verified') }}</p><a class="btn" :href="`${original}#page=${pointer.originalPageNos?.[0] || pointer.pageNo}`" target="_blank" rel="noopener noreferrer">{{ label('originalPage') }}</a><PdfPreview :source="original" :initial-page="pointer.originalPageNos?.[0] || pointer.pageNo" :title="evidence.fileLabel" :locale="locale" /></template>
+      <template v-if="original"><p>{{ label('verified') }}</p><a class="btn" :href="`${original}#page=${pointer.originalPageNos?.[0] || pointer.pageNo}`" target="_blank" rel="noopener noreferrer">{{ label('originalPage') }}</a><PdfPreview :source="original" :initial-page="pointer.originalPageNos?.[0] || pointer.pageNo" :title="sourceName(evidence)" :locale="locale" /></template>
     </template>
     <details class="evidence-technical-details">
       <summary>{{ label('technical') }}</summary>
+      <p class="mono small">{{ pointer.baselineVersion }}</p>
       <p class="mono small">{{ pointer.manifestSha256 }}</p>
       <p class="mono small">SHA-256: {{ pointer.originalSourceSha256 }}</p>
       <template v-if="evidence">

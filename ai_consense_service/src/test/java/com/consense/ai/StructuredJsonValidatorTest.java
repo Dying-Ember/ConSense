@@ -1,5 +1,10 @@
 package com.consense.ai;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
+import ch.qos.logback.core.read.ListAppender;
 import com.consense.common.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -8,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
 import java.util.*;
@@ -288,6 +294,52 @@ class StructuredJsonValidatorTest {
         assertTrue(new AiGateway(provider("[]")).completeStructuredJsonList("system","source",JsonNode.class,unrestrictedItems).isEmpty());
         assertThrows(StructuredOutputValidationException.class,()->new AiGateway(provider("[[1]]")).completeStructuredJsonList("system","source",JsonNode.class,unrestrictedItems));
         assertThrows(StructuredOutputValidationException.class,()->new AiGateway(provider("[null]")).completeStructuredJsonList("system","source",JsonNode.class,unrestrictedItems));
+    }
+
+    @Test void parsedRootDiagnosticDistinguishesEmptyArrayAndObjectWithoutLoggingContentOrSchema() {
+        Logger logger=(Logger)LoggerFactory.getLogger(StructuredJsonValidator.class);
+        Level previous=logger.getLevel();ListAppender<ILoggingEvent> trace=new ListAppender<>();
+        trace.start();logger.addAppender(trace);logger.setLevel(Level.INFO);
+        try {
+            StructuredJsonValidator.Schema schema=StructuredJsonValidator.compile(JsonUtils.parse("{\"type\":\"array\",\"minItems\":0,\"maxItems\":2,\"items\":{\"type\":\"object\",\"properties\":{\"SCHEMA_SENTINEL\":{\"type\":\"string\"}},\"additionalProperties\":false}}"));
+            assertTrue(StructuredJsonValidator.decode("[]",JsonNode.class,schema).isEmpty());
+            assertEquals(SCHEMA_MISMATCH,assertThrows(StructuredOutputValidationException.class,
+                    ()->StructuredJsonValidator.decode("{}",JsonNode.class,schema)).getReason());
+            assertEquals(1,StructuredJsonValidator.decode("[{\"SCHEMA_SENTINEL\":\"SOURCE_SENTINEL\"}]",JsonNode.class,schema).size());
+            assertEquals(SCHEMA_MISMATCH,assertThrows(StructuredOutputValidationException.class,
+                    ()->StructuredJsonValidator.decode("\"MODEL_SENTINEL\"",JsonNode.class,schema)).getReason());
+            assertEquals(INVALID_JSON,assertThrows(StructuredOutputValidationException.class,
+                    ()->StructuredJsonValidator.decode("{MODEL_SENTINEL",JsonNode.class,schema)).getReason());
+            assertEquals(4,trace.list.size());
+            assertTrue(trace.list.get(0).getFormattedMessage().contains("rootType=ARRAY arrayItems=0"));
+            assertTrue(trace.list.get(0).getFormattedMessage().contains("rejectionReason=none"));
+            assertTrue(trace.list.get(1).getFormattedMessage().contains("rootType=OBJECT arrayItems=-1"));
+            assertTrue(trace.list.get(1).getFormattedMessage().contains("rejectionReason=SCHEMA_MISMATCH"));
+            assertTrue(trace.list.get(2).getFormattedMessage().contains("rootType=ARRAY arrayItems=1"));
+            assertTrue(trace.list.get(3).getFormattedMessage().contains("rootType=STRING arrayItems=-1"));
+            for(ILoggingEvent event:trace.list) {
+                String message=event.getFormattedMessage();assertEquals(Level.INFO,event.getLevel());
+                assertTrue(message.contains("expectedMinItems=0 expectedMaxItems=2"));
+                assertTrue(message.contains("threadId="+Thread.currentThread().getId()));assertTrue(message.length()<300);
+                for(String secret:List.of("SCHEMA_SENTINEL","SOURCE_SENTINEL","MODEL_SENTINEL"))assertFalse(message.contains(secret));
+                assertNull(event.getThrowableProxy());
+                for(Object argument:event.getArgumentArray())assertTrue(argument instanceof String||argument instanceof Number);
+            }
+        } finally {logger.detachAppender(trace);logger.setLevel(previous);}
+    }
+
+    @Test void throwingRootDiagnosticSinkCannotChangeDecodedRowsOrRejectionReason() {
+        Logger logger=(Logger)LoggerFactory.getLogger(StructuredJsonValidator.class);Level previous=logger.getLevel();
+        AppenderBase<ILoggingEvent> broken=new AppenderBase<ILoggingEvent>() {
+            @Override protected void append(ILoggingEvent event) {throw new AssertionError("Logging sink failed");}
+        };
+        broken.start();logger.addAppender(broken);logger.setLevel(Level.INFO);
+        try {
+            StructuredJsonValidator.Schema schema=StructuredJsonValidator.compile(JsonUtils.parse("{\"type\":\"array\"}"));
+            assertTrue(StructuredJsonValidator.decode("[]",JsonNode.class,schema).isEmpty());
+            assertEquals(SCHEMA_MISMATCH,assertThrows(StructuredOutputValidationException.class,
+                    ()->StructuredJsonValidator.decode("{}",JsonNode.class,schema)).getReason());
+        } finally {logger.detachAppender(broken);logger.setLevel(previous);}
     }
 
     @Test void ordinaryListRetainsWrapperFenceExtractionAndRetryCompatibility() {

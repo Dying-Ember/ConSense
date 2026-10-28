@@ -56,7 +56,7 @@ class StructuralRecipe:
         return asdict(self)
 
 
-def _catalog(parents):
+def _catalog(parents, seeds=None):
     """Reassemble exact overlapping source ranges, never concatenate duplicates."""
     catalog = SourceUnits(parents)
     units, bindings = {}, {}
@@ -65,7 +65,15 @@ def _catalog(parents):
         for part in parent.get('parts', []):
             source_order.setdefault((parent.get('documentId'), parent.get('sourceHash'),
                                      part.get('blockId')), len(source_order))
-    for parent in parents:
+    if seeds is None:
+        selected = parents
+    else:
+        required = set()
+        for seed in seeds:
+            observed = catalog._resolve_observed(seed)
+            required.update(observed['requiredMemberIds'] or [seed['id']])
+        selected = [parent for parent in parents if parent['id'] in required]
+    for parent in selected:
         resolved = catalog.resolve(parent)
         binding = {'unitId': resolved['unitId'], 'status': resolved['status'], 'reason': resolved['reason']}
         hierarchy = resolved.get('hierarchyContext')
@@ -237,7 +245,7 @@ def compare(query, candidates, all_parents, tokenizer, tokenizer_identity, short
          'DUPLICATE_CANDIDATE', 'Canonical parents and frozen candidate pool must have unique IDs')
     fail(all(p['id'] in by_id and p == by_id[p['id']] for p in candidates),
          'CANDIDATE_PAYLOAD_MISMATCH', 'Frozen candidate differs from canonical source')
-    units, bindings = _catalog(all_parents)
+    units, bindings = _catalog(all_parents, candidates)
     unavailable = [{'parentId': p['id'], **bindings[p['id']]} for p in candidates
                    if bindings[p['id']]['status'] != 'complete_observed_unit']
     fail(not recipe.strict_context or not unavailable, 'STRUCTURAL_CONTEXT_UNAVAILABLE',

@@ -113,6 +113,17 @@ def semantic_unit_template(unit):
             and key not in ('members', 'originIds', 'sourceIdentity', 'headingLocation')}
 
 
+def deferred_semantic_unit(source):
+    """A source-bound unknown transport group, never an observed closure."""
+    reason = 'additional_source_context_deferred'
+    return {'unitId': digest({'source': source, 'reason': reason}),
+        'documentId': source['documentId'], 'kind': 'unknown', 'status': 'unknown',
+        'reason': reason, 'requiredMemberIds': [], 'blockIds': [], 'clauseId': None,
+        'derivedMembersCanBecomeOrigins': False, 'memberScores': None,
+        'qualifiersComplete': 'unknown', 'semanticScopeVerified': False,
+        'legalClosureVerified': False}
+
+
 def semantic_unit(unit, projection_sha256, *, member_projector=None):
     """Project the existing resolver result; never introduce a second closure."""
     def project(row):
@@ -653,6 +664,20 @@ class SourceUnits:
         return observed
 
 
+def _unowned_page_text_key(catalog, parent):
+    pages, text = parent.get('physicalPages'), parent.get('content')
+    if (parent.get('clauseId') or parent.get('clauseHeadingLocation')
+            or not isinstance(pages, list) or len(pages) != 1
+            or type(pages[0]) is not int or pages[0] <= 0
+            or not isinstance(text, str) or not text.strip() or len(text) > 160
+            or not re.fullmatch('[0-9a-f]{64}', parent.get('originalSourceSha256', ''))):
+        return None
+    try:
+        return catalog.source(parent), parent['originalSourceSha256'], ' '.join(text.split())
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 def select_source_units(parents, reranked_hits, limit, *, hierarchy_context=True):
     """Keep only actually reranked seeds, with at most K reliable unique units.
 
@@ -668,6 +693,13 @@ def select_source_units(parents, reranked_hits, limit, *, hierarchy_context=True
     selected, units, used, skipped = [], [], {}, []
     if type(limit) is not int or limit < 0 or len({h['id'] for h in reranked_hits}) != len(reranked_hits):
         raise ValueError('invalid_limit_or_duplicate_reranked_seed')
+    page_texts, text_keys, used_texts, repeated = defaultdict(set), {}, {}, []
+    for hit in reranked_hits:
+        parent = catalog.parents.get(hit['id'])
+        key = _unowned_page_text_key(catalog, parent) if parent is not None else None
+        if key is not None:
+            text_keys[hit['id']] = key
+            page_texts[key].add(parent['physicalPages'][0])
     for rank, hit in enumerate(reranked_hits, 1):
         if type(hit.get('score')) not in (int, float) or not math.isfinite(hit['score']):
             raise ValueError('reranked_seed_score_not_finite_number')
@@ -681,6 +713,14 @@ def select_source_units(parents, reranked_hits, limit, *, hierarchy_context=True
             continue
         if len(selected) >= limit:
             break
+        key = text_keys.get(hit['id'])
+        # Diversify query seeds only; every repeated source occurrence remains unchanged and addressable.
+        if key is not None and len(page_texts[key]) >= 3:
+            if key in used_texts:
+                repeated.append({'id': hit['id'], 'selectionOrdinal': rank, 'score': hit['score'],
+                                 'selectedSeedId': used_texts[key], 'reason': 'same_source_repeated_page_text'})
+                continue
+            used_texts[key] = hit['id']
         used[unit['unitId']] = hit['id']
         selected.append(copy.deepcopy(hit))
         unit['originalRerankOrdinal'], unit['seedScore'] = rank, hit['score']
@@ -690,5 +730,7 @@ def select_source_units(parents, reranked_hits, limit, *, hierarchy_context=True
                       'originalHitIds': [h['id'] for h in selected], 'units': units,
                       'rawParentTopKIds': [h['id'] for h in reranked_hits[:limit]],
                       'skippedDuplicateUnitSeeds': skipped, 'derivedMembersCanBecomeOrigins': False,
+                      'skippedRepeatedPageTextSeeds': repeated,
+                      'repeatedPageTextPolicy': 'same-source-short-unowned-page-text-one-seed-v1',
                       'memberOrder': 'canonical_parent_id_lexical', 'qualifiersComplete': 'unknown',
                       'semanticScopeVerified': False}

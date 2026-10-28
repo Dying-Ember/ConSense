@@ -28,13 +28,31 @@ class EnglishFileOutputTest {
     final List<String> submittedTexts=new ArrayList<>();
     final List<Integer> batchSizes=new ArrayList<>();
     final List<JsonNode> submittedSchemas=new ArrayList<>();
+    final List<String> submittedSystems=new ArrayList<>();
     final Set<Integer> emptyCalls=new HashSet<>();
+    final Map<Integer,String> rawResponses=new HashMap<>();
+    boolean reverseFirstResponse;
     final AtomicInteger calls=new AtomicInteger();
+    @Test void lightweightCountsExposeTrustedCacheAndBatchLimitWithoutText(){
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(EnglishFileOutput.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> trace=new ch.qos.logback.core.read.ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            EnglishFileOutput exporter=output();String known="APP SENTINEL trusted sentence",dynamic="SOURCE SENTINEL private sentence";
+            JsonNode input=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(known).add(dynamic));
+            assertEquals(input,exporter.json(input,"SECRET REFERENCE",()->{},Set.of(known)));assertEquals(input,exporter.json(input,"SECRET REFERENCE",()->{},Set.of(known)));
+            ArrayNode notes=JsonUtils.mapper().createArrayNode();for(int i=0;i<769;i++)notes.add("Private unrelated sentence "+i);
+            assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().set("notes",notes),"PRIVATE SNAPSHOT",()->{}));
+            String logs=trace.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).collect(java.util.stream.Collectors.joining("\n"));
+            assertTrue(logs.contains("trustedSegments=1"));assertTrue(logs.contains("outcome=whole_hit"));assertTrue(logs.contains("outcome=batch_limit_exceeded"));assertTrue(logs.contains("batchCount=25"));assertTrue(logs.contains("batchLimit=24"));assertEquals(1,calls.get());
+            for(String forbidden:List.of(known,dynamic,"SECRET REFERENCE","PRIVATE SNAPSHOT","Private unrelated sentence"))assertFalse(logs.contains(forbidden));
+        }finally{logger.detachAppender(trace);}
+    }
     EnglishFileOutput output(){
         ConsenseProperties props=new ConsenseProperties();props.setStorageRoot(root.toString());when(client.available()).thenReturn(true);
         doAnswer(call->{
-            int callNumber=calls.incrementAndGet();submittedSchemas.add(call.<JsonNode>getArgument(1).deepCopy());List<LlmClient.ChatTurn> turns=call.getArgument(0);JsonNode input=JsonUtils.parse(turns.get(1).getContent());batchSizes.add(input.size());if(emptyCalls.contains(callNumber))return "[]";ArrayNode answer=JsonUtils.mapper().createArrayNode();
+            int callNumber=calls.incrementAndGet();submittedSchemas.add(call.<JsonNode>getArgument(1).deepCopy());List<LlmClient.ChatTurn> turns=call.getArgument(0);submittedSystems.add(turns.get(0).getContent());JsonNode input=JsonUtils.parse(turns.get(1).getContent());batchSizes.add(input.size());if(rawResponses.containsKey(callNumber))return rawResponses.get(callNumber);if(emptyCalls.contains(callNumber))return "[]";ArrayNode answer=JsonUtils.mapper().createArrayNode();
             for(JsonNode item:input){String text=item.path("text").asText();submittedTexts.add(text);boolean changed=translated.containsKey(text);String language=languages.getOrDefault(text,changed?"zh":"en");if(calls.get()>1)language=recheckedLanguages.getOrDefault(text,language);answer.addObject().put("id",item.path("id").asText()).put("sourceLanguage",language).put("translated",changed?1:0).put("text",changed?translated.get(text):"");}
+            if(reverseFirstResponse&&callNumber==1){ArrayNode reversed=JsonUtils.mapper().createArrayNode();for(int i=answer.size()-1;i>=0;i--)reversed.add(answer.get(i));answer=reversed;}
             return JsonUtils.write(answer);
         }).when(client).chatStructured(anyList(),any());return new EnglishFileOutput(new AiGateway(client),new QwenChatUsagePreflight(props,null),props);
     }
@@ -57,6 +75,21 @@ class EnglishFileOutputTest {
         translated.put("Bonjour, paiement dans 14 jours.","Hello, payment is due within 14 days.");
         languages.put("Bonjour, paiement dans 14 jours.","fr");
         assertEquals("English translation: Hello, payment is due within 14 days.",output().text("Bonjour, paiement dans 14 jours.","snapshot:french",()->{}));
+    }
+    @Test void jsonAppProvenanceSkipsOnlyExactEnglishWhileSourceHumanAndSuffixTextKeepLanguageReview(){
+        String known="The source review is incomplete.",french=known+" Annexe francaise a verifier.",quote="\u8bf7\u572814\u5929\u5185\u4ed8\u6b3e\u3002",spanish="El pago vence en 14 dias.";
+        translated.put(french,known+" French appendix to check.");languages.put(french,"fr");translated.put(quote,"Please pay within 14 days.");translated.put(spanish,"Payment is due within 14 days.");languages.put(spanish,"es");
+        JsonNode source=JsonUtils.mapper().createObjectNode().put("displayQuote",quote).put("reviewRemarks",spanish).put("title","Dynamic English finding title").set("notes",JsonUtils.mapper().createArrayNode().add(known).add(french));
+        String before=JsonUtils.write(source);JsonNode result=output().json(source,"snapshot:json-exact-app-provenance",()->{},Set.of(known));
+        assertFalse(submittedTexts.contains(known));assertTrue(submittedTexts.containsAll(List.of(french,quote,spanish,"Dynamic English finding title")));
+        assertEquals(known,result.path("notes").get(0).asText());assertTrue(result.path("notes").get(1).asText().startsWith("English translation:"));assertTrue(result.path("displayQuote").asText().startsWith("English translation:"));assertEquals(before,JsonUtils.write(source));
+    }
+    @Test void jsonAppProvenanceDoesNotRelaxForeignLatinOrMechanicalFieldGuards(){
+        String french="Bonjour, paiement dans 14 jours.";languages.put(french,"fr");EnglishFileOutput exporter=output();
+        assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().put("note",french),"snapshot:trusted-foreign-latin",()->{},Set.of("Known English label")));
+        assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().put("anchor","\u672a\u77e5\u5b9a\u4f4d"),"snapshot:trusted-mechanical",()->{},Set.of("Known English label")));
+        assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().put("note","Known English label"),"snapshot:invalid-provenance",()->{},Set.of("\u672a\u77e5\u6587\u5b57")));
+        assertEquals(1,calls.get(),"Only the dynamic French reader text reaches the model; no invalid provenance or mechanical field is admitted");
     }
     @Test void foreignLatinNoOpDecisionCannotProduceOrCacheAnEnglishFile()throws Exception{
         String french="Bonjour, paiement dans 14 jours.";languages.put(french,"fr");
@@ -169,7 +202,7 @@ class EnglishFileOutputTest {
             assertThrows(BizException.class,()->exporter.text(prose,"snapshot:"+prose,()->{}));
         assertEquals(references.size()+8,calls.get(),"prose remains subject to the language retry and strict gate");
     }
-    @Test void oneEmptyBatchIsSplitOnceAndAllReportSegmentsRemainChecked() throws Exception {
+    @Test void oneEmptyBatchGetsOneClassificationRepairAndAllReportSegmentsRemainChecked() throws Exception {
         emptyCalls.add(2);ArrayNode notes=JsonUtils.mapper().createArrayNode();
         for(int i=0;i<192;i++)notes.add("English report segment "+i);
         String foreign="认证后 14 天付款。";notes.add(foreign);translated.put(foreign,"Payment is due 14 days after certification.");
@@ -177,16 +210,39 @@ class EnglishFileOutputTest {
         JsonNode result=exporter.json(source,"snapshot:full-report-empty-batch",()->{});
         for(int i=0;i<192;i++)assertEquals(notes.get(i),result.path("notes").get(i));
         assertEquals("English translation: Payment is due 14 days after certification.",result.path("notes").get(192).asText());
-        assertEquals(List.of(32,32,16,16,32,32,32,32,1),batchSizes);
-        assertEquals(9,calls.get());assertEquals(result,exporter.json(source,"snapshot:full-report-empty-batch",()->{}));assertEquals(9,calls.get());
+        assertEquals(List.of(32,32,32,32,32,32,32,1),batchSizes);
+        assertTrue(submittedSystems.get(2).contains("The previous response omitted required classification records"));
+        assertEquals(8,calls.get());assertEquals(result,exporter.json(source,"snapshot:full-report-empty-batch",()->{}));assertEquals(8,calls.get());
     }
-    @Test void aSecondEmptySplitCannotProduceOrCacheAnIncompleteReport() throws Exception {
+    @Test void aSecondEmptyResultCannotProduceOrCacheAnIncompleteReport() throws Exception {
         emptyCalls.addAll(List.of(2,3));ArrayNode notes=JsonUtils.mapper().createArrayNode();
         for(int i=0;i<65;i++)notes.add("English report segment "+i);
         JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);
-        assertThrows(BizException.class,()->output().json(source,"snapshot:repeated-empty-batch",()->{}));
-        assertEquals(List.of(32,32,16),batchSizes);
+        BizException failure=assertThrows(BizException.class,()->output().json(source,"snapshot:repeated-empty-batch",()->{}));
+        assertTrue(failure.getMessage().contains("language check returned an incomplete result"));
+        assertEquals(List.of(32,32,32),batchSizes);
         assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
+    }
+    @Test void emptyObjectIsClarifiedOnceWithoutAssumingAnyLanguage(){
+        rawResponses.put(1,"{}");String source="Bonjour, paiement dans 14 jours.";translated.put(source,"Hello, payment is due within 14 days.");
+        assertEquals("English translation: Hello, payment is due within 14 days.",output().text(source,"snapshot:empty-object",()->{}));
+        assertEquals(List.of(1,1),batchSizes);assertEquals(2,calls.get());
+    }
+    @Test void clarificationDoesNotPermitDuplicateOrForeignUntranslatedRecords(){
+        emptyCalls.add(1);String source="Bonjour, paiement dans 14 jours.";languages.put(source,"fr");
+        assertThrows(BizException.class,()->output().text(source,"snapshot:foreign-after-empty",()->{}));assertEquals(2,calls.get());
+    }
+    @Test void classificationRepairStillRejectsDuplicateIds(){
+        emptyCalls.add(1);rawResponses.put(2,"[{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"},{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"}]");
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add("First English sentence").add("Second English sentence"));
+        assertThrows(BizException.class,()->output().json(source,"snapshot:duplicate-after-empty",()->{}));assertEquals(2,calls.get());
+    }
+    @Test void uncertainLanguageRecheckMergesByIdWhenInitialRowsAreReordered(){
+        reverseFirstResponse=true;String heading="Payment period",foreign="Bonjour, paiement dans 14 jours.";
+        languages.put(heading,"und");recheckedLanguages.put(heading,"en");translated.put(foreign,"Hello, payment is due within 14 days.");
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(heading).add(foreign));
+        JsonNode result=output().json(source,"snapshot:reordered-classifications",()->{});
+        assertEquals(heading,result.path("notes").get(0).asText());assertEquals("English translation: Hello, payment is due within 14 days.",result.path("notes").get(1).asText());assertEquals(List.of(2,1),batchSizes);
     }
     @Test void numericLeadingAsciiIdentifiersRemainLiteralButUndeterminedProseStillFailsClosed(){
         String timestamp="2026-10-25T10:34:36Z",reference="1.A",prose="14 jours de paiement",wordWithDigit="1Bonjour";

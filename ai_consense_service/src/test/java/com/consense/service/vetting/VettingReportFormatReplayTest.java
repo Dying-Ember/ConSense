@@ -37,7 +37,8 @@ class VettingReportFormatReplayTest {
             assertEquals("1.1",table.getRow(2).getCell(0).getText());
             assertEquals(5,table.getRow(2).getTableCells().size());
             assertTrue(table.getRow(2).getCell(0).getWidth()>=690,"Serials such as 3.10 must fit without splitting");
-            for(XWPFTableRow row:table.getRows())assertTrue(row.isCantSplitRow(),"Rows that fit on a fresh page must stay together");
+            for(XWPFTableRow header:table.getRows().subList(0,2))assertTrue(header.isCantSplitRow(),"Repeated merged headers stay cohesive");
+            for(XWPFTableRow row:table.getRows().subList(2,table.getNumberOfRows()))assertFalse(row.isCantSplitRow(),"Business rows may flow across pages without clipping long comments");
             for(XWPFTableCell cell:table.getRow(2).getTableCells()){
                 assertFalse(cell.getCTTc().getTcPr().isSetGridSpan(),"Body must not inherit merged header spans");
                 assertFalse(cell.getCTTc().getTcPr().isSetVMerge(),"Body must not inherit vertical header merges");
@@ -49,6 +50,25 @@ class VettingReportFormatReplayTest {
             new PDFTextStripper(){@Override protected void writeString(String text,List<TextPosition> positions)throws java.io.IOException{if(text.contains("FONT11SENTINEL"))for(TextPosition p:positions)sizes.add(p.getFontSizeInPt());super.writeString(text,positions);}}.getText(pdf);
         }
         assertFalse(sizes.isEmpty());assertTrue(sizes.stream().allMatch(size->Math.abs(size-11)<0.01f),"Native PDF comment body must use 11pt");
+    }
+    @Test void longBusinessCommentsAndChecklistNotesRemainCompleteInSplittableRows()throws Exception {
+        VettingSampleReportAlignmentTest fixture=new VettingSampleReportAlignmentTest();
+        java.lang.reflect.Method method=VettingSampleReportAlignmentTest.class.getDeclaredMethod("finding",String.class,String.class,String.class,String.class);method.setAccessible(true);
+        FindingVO finding=(FindingVO)method.invoke(fixture,"PRE","Authored full report.docx","PRE.B7.070","PRE/5");
+        String comment="LONG-COMMENT-START\n"+repeat("The complete contractual observation, conditions and proposed review action must remain readable. ",70)+"\nLONG-COMMENT-END";
+        String note="LONG-HUMAN-NOTE-START\n"+repeat("Preserve this independent human explanation without shortening it. ",50)+"\nLONG-HUMAN-NOTE-END";
+        finding.setBody(com.consense.common.LocalizedText.same(comment));finding.setReviewRemarks(note);String before=JsonUtils.write(finding);
+        Project project=new Project();project.setNameEn("Authored long-row report");
+        try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(new VettingReportWriter().docx(project,List.of(finding),null,"en",null,List.of(new VettingChecklistCatalog.Result("APP-I-001","not_fulfilled",note)),new HashSet<>())))){
+            XWPFTable comments=word.getTables().stream().filter(t->t.getNumberOfRows()>2&&t.getRow(1).getTableCells().size()==5&&"Comments".equals(t.getRow(1).getCell(3).getText())).findFirst().orElseThrow();
+            XWPFTableRow row=comments.getRows().stream().filter(r->r.getTableCells().size()==5&&r.getCell(3).getText().contains("LONG-COMMENT-START")).findFirst().orElseThrow();
+            assertFalse(row.isCantSplitRow());assertTrue(row.getCell(3).getText().contains(comment));assertTrue(row.getCell(4).getText().contains(note));
+            assertTrue(comments.getRow(0).isCantSplitRow());assertTrue(comments.getRow(1).isCantSplitRow());assertTrue(comments.getRow(0).isRepeatHeader());assertTrue(comments.getRow(1).isRepeatHeader());
+            XWPFTable checklist=word.getTables().stream().filter(t->t.getRow(0).getTableCells().size()==3&&"Description".equals(t.getRow(0).getCell(1).getText())&&t.getText().contains("LONG-HUMAN-NOTE-START")).findFirst().orElseThrow();
+            XWPFTableRow countercheck=checklist.getRows().stream().filter(r->r.getCell(2).getText().contains("LONG-HUMAN-NOTE-START")).findFirst().orElseThrow();
+            assertFalse(countercheck.isCantSplitRow());assertTrue(countercheck.getCell(2).getText().contains(note));assertTrue(checklist.getRow(0).isCantSplitRow());
+        }
+        assertEquals(before,JsonUtils.write(finding));
     }
     @Test void sourcePositionsStayLiteralWhileOnlyExactBodyParagraphPathsBecomeReadable() throws Exception {
         VettingSampleReportAlignmentTest fixture=new VettingSampleReportAlignmentTest();

@@ -62,7 +62,8 @@ class VettingFixedBaselineIntegrationTest {
         VettingSemanticReview.Result result=review.review("project",Collections.singletonList(tender),"en",(n,s)->{});
         assertTrue(result.getCandidates().isEmpty(),"Fixed references alone and unconfirmed project adoption cannot establish a project defect");
         assertEquals(1,result.getActualGatewayCallCount());
-        assertTrue(result.getReviewedChunkIds().contains(fixture.standard.getId()));
+        assertTrue(result.getReviewedChunkIds().isEmpty(),"Rejected findings and a pending evidence need do not complete review of the submitted standard");
+        assertTrue(result.getTopicAudits().get(0).getPacketAudits().get(0).getSubmittedChunkIds().contains(fixture.standard.getId()));
         assertEquals(2,result.getTopicAudits().get(0).getRejectedRecords());
         JsonNode savedPointer=result.getTopicAudits().get(0).getPacketAudits().get(0).getFixedBaselineEvidence().get(0);
         assertEquals("fixed_development_baseline",savedPointer.path("evidenceBackend").asText());assertEquals(fixture.standard.getId(),savedPointer.path("parentId").asText());

@@ -45,7 +45,11 @@ class CanonicalEvidenceServiceTest {
     private int remoteCalls;
 
     @Test void registeredReviewedSourcesDoNotRequireNormalParserInputsOrPublication(){
-        register("vetting");assertNull(document.getParseCoverageJson());assertEquals("[]",document.getStructuredContentJson());
+        CanonicalSourceBinding binding=register("vetting");binding.setSnapshotContentSha256(binding.getSnapshotBytesSha256());
+        CanonicalSourceBindingRepository.CompactMetadata compact=mock(CanonicalSourceBindingRepository.CompactMetadata.class,call->CanonicalSourceBinding.class.getMethod(call.getMethod().getName()).invoke(binding));
+        when(bindings.findCompactByDocument(eq("project-a"),eq(11L),any())).thenReturn(Collections.singletonList(compact));
+        when(bindings.findCompactById(binding.getId())).thenReturn(Optional.of(compact));
+        assertNull(document.getParseCoverageJson());assertEquals("[]",document.getStructuredContentJson());
         int before=remoteCalls;
         assertNull(service.prepareNormalCandidate("project-a",11L,"vetting"));
         assertNull(service.prepareNormalCandidate("project-a",11L,"advisory"));
@@ -134,6 +138,19 @@ class CanonicalEvidenceServiceTest {
         assertEquals(Arrays.asList(3,4,5),pointers.get(1).getPhysicalPages());assertEquals(before,remoteCalls);
         verify(documents,never()).findById(11L);verify(documents,times(1)).findVerificationMetadataById(11L);verify(documents,times(1)).findCatalogMetadataByProjectId("project-a");
         document.setTextContent("new parsed revision");assertReason("CANONICAL_SOURCE_STALE",()->service.pointers("project-a",11L,address(),"advisory"));
+    }
+    @Test void selected_pointers_read_one_source_for_multiple_units_and_reject_stale_evidence(){
+        register("vetting");
+        EvidencePointer heading=service.pointer("project-a",11L,address(),"heading","vetting");
+        EvidencePointer table=service.pointer("project-a",11L,address(),"table","vetting");
+        clearInvocations(documents,bindings);
+        Map<String,EvidencePointer> selected=service.selectedPointers("project-a",11L,address(),Arrays.asList("heading","table"),"vetting");
+        assertEquals(JsonUtils.write(heading),JsonUtils.write(selected.get("heading")));
+        assertEquals(JsonUtils.write(table),JsonUtils.write(selected.get("table")));
+        verify(documents,times(3)).findVerificationMetadataById(11L);
+        assertReason("CANONICAL_UNIT_UNAVAILABLE",()->service.selectedPointers("project-a",11L,address(),Arrays.asList("heading","missing"),"vetting"));
+        document.setTextContent("new parsed revision");
+        assertReason("CANONICAL_SOURCE_STALE",()->service.selectedPointers("project-a",11L,address(),Arrays.asList("heading","table"),"vetting"));
     }
     @Test void changed_parser_revision_invalidates_before_asset_http() {
         register("vetting");int before=remoteCalls;document.setTextContent("changed parsed revision");

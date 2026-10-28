@@ -39,11 +39,11 @@ class VettingPackageIdentityWorkflowTest {
     @MockBean StorageService storage;
     @MockBean EnglishFileOutput englishFiles;
     @BeforeEach void setup()throws Exception {
-        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);
         when(storage.matchesStoredBytes(eq("AUTHORED_STORAGE"),anyString())).thenReturn(true);
-        authority("PKG-1","INPUT");when(semantic.reviewWithProgress(isNull(),anyString(),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(empty());
+        authority("PKG-1","INPUT");when(semantic.reviewWithProgress(anyString(),anyString(),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(empty());
     }
     private void authority(String number,String audit)throws Exception {when(drafting.packageIdentitySnapshot(anyString())).thenAnswer(call->{JsonNode authority=VettingPackageIdentityLifecycleTest.authority(number,"AUTHORED adopted title",audit);((com.fasterxml.jackson.databind.node.ObjectNode)authority.path("core")).put("projectId",call.<String>getArgument(0));return VettingPackageIdentityLifecycleTest.resolverSnapshot(authority);});}
     private Result empty(){Result result=new Result();result.setModel("AUTHORED semantic replacement only");return result;}
@@ -55,7 +55,7 @@ class VettingPackageIdentityWorkflowTest {
     private VettingJobVO await(String project,String id)throws Exception {long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);while(System.nanoTime()<until){VettingJobVO job=service.getRun(project,id);if(Arrays.asList("COMPLETED","FAILED").contains(job.getStatus()))return job;Thread.sleep(10);}throw new AssertionError("Authored workflow did not terminate");}
     @Test void initialFreezeSurvivesQueueAndChangedAuthorityCannotPublish()throws Exception {
         String project=project();CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));return empty();});
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));return empty();});
         VettingJobVO queued=service.startRun(project,"en");
         try{assertTrue(entered.await(10,TimeUnit.SECONDS));JsonNode frozen=service.getRun(project,queued.getId()).getCoverage().getPackageIdentityReview();assertEquals("not_executed",frozen.path("executionStatus").asText());assertEquals("PKG-1",frozen.path("authority").path("core").path("fields").path("number").path("value").asText());authority("PKG-3","INPUT");}
         finally{release.countDown();}

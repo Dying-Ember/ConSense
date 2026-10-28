@@ -170,6 +170,36 @@ public final class VettingReportPresentation {
         location=location.replace(" (formal clause ownership unconfirmed)","").replace("; formal clause location unconfirmed"," (exact position unconfirmed)");
         return "Recorded source clause: "+clause+(str(evidence.getAnchor()).isEmpty()?"":"; "+location);
     }
+    static String evidenceName(FindingEvidence evidence) {
+        if(evidence==null)return "Source file unconfirmed";
+        if(!str(evidence.getFileName()).isEmpty())return evidence.getFileName();
+        com.fasterxml.jackson.databind.JsonNode fixed=evidence.getFixedBaselineEvidence();
+        if(fixed!=null&&fixed.isObject()){
+            String edition=fixed.path("editionId").asText();
+            switch(edition){
+                case "sl2022-original":return "SL2022 Original";
+                case "sl2022-batch01":return "SL2022 Batch 1";
+                case "sl2022-batch02-rev1":return "SL2022 Batch 2 revision 1";
+                case "sl2022-batch03":return "SL2022 Batch 3";
+                case "sl2022-batch04":return "SL2022 Batch 4";
+                case "sl2026-original":return "SL2026 Original";
+                default:
+                    String family=fixed.path("sourceFamily").asText();
+                    if("SL".equals(family))return "SL reference (edition unconfirmed)";
+                    if("GCC".equals(family)||"GCT".equals(family))return family+" reference";
+            }
+        }
+        return "Source file unconfirmed";
+    }
+    static String findingLocation(List<FindingEvidence> evidence){
+        List<String> locations=new ArrayList<>();
+        for(FindingEvidence item:safe(evidence))if(item!=null){
+            String position=nonblank(item.getPageNo(),item.getAnchor());
+            if(item.getFixedBaselineEvidence()!=null&&position.matches("(?i)P?\\d+"))position="page "+position.replaceFirst("(?i)^P","");
+            locations.add(evidenceName(item)+(str(position).isEmpty()?"":" · "+position));
+        }
+        return String.join("; ",locations);
+    }
     private static String readerFindingLocation(FindingVO finding) {
         LinkedHashSet<String> files=new LinkedHashSet<>(),positions=new LinkedHashSet<>();
         for(FindingEvidence evidence:safe(finding.getEvidence()))if(evidence!=null&&"source".equalsIgnoreCase(evidence.getSide()))files.add(str(evidence.getDocumentId())+"|"+str(evidence.getFileName()));

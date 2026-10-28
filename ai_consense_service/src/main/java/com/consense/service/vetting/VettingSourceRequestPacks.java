@@ -16,6 +16,7 @@ public final class VettingSourceRequestPacks {
     private final Map<String,Set<String>> documentIdentities = new LinkedHashMap<>();
     private final VettingBlockContinuation continuation;
     private final VettingContextBuilder observer;
+    private final Set<String> deferredTextOrigins;
 
     @Data public static class Request {
         private String id, observationId, kind, reference, status = "candidate", unknownReason;
@@ -52,6 +53,9 @@ public final class VettingSourceRequestPacks {
     }
 
     public VettingSourceRequestPacks(List<Chunk> corpus) {
+        this(corpus,Collections.emptySet());
+    }
+    VettingSourceRequestPacks(List<Chunk> corpus,Set<String> deferredTextOrigins) {
         if(corpus==null)throw new IllegalArgumentException("Canonical corpus required");
         for(Chunk c:corpus) {
             if(c==null||nvl(c.getId()).isEmpty()||payloads.containsKey(c.getId()))throw new IllegalArgumentException("Canonical corpus requires unique nonempty IDs");
@@ -60,6 +64,8 @@ public final class VettingSourceRequestPacks {
             documentIdentities.computeIfAbsent(nvl(copy.getDocumentId()),key->new LinkedHashSet<>()).add(source(copy));
         }
         List<Chunk> copies=new ArrayList<>(snapshot.values());
+        this.deferredTextOrigins=Collections.unmodifiableSet(new LinkedHashSet<>(deferredTextOrigins));
+        if(!snapshot.keySet().containsAll(this.deferredTextOrigins))throw new IllegalArgumentException("Deferred text capability is outside its exact selected corpus");
         continuation=new VettingBlockContinuation(copies);observer=new VettingContextBuilder(copies);
     }
 
@@ -129,6 +135,11 @@ public final class VettingSourceRequestPacks {
         for(VettingRetrievalSourceUnits.Unit unit:units) {
             Chunk seed=snapshot.get(unit.originId);if(seed==null)throw new IllegalArgumentException("Retrieved structural seed is not canonical");
             retrieved.add(unit.originId);
+            if(deferredTextOrigins.contains(unit.originId)){
+                if(!"unknown".equals(unit.status)||!"additional_source_context_deferred".equals(unit.reason)||!unit.ids.isEmpty()||sourceStatus(seed)!=null)throw new IllegalArgumentException("Deferred text capability differs from its selected seed");
+                // Complete context is optional until requested; its absence is not an unfulfilled evidence request.
+                continue;
+            }
             Request r=newRequest(out,"original_retrieval_structural_unit","retrieved_structural_unit",Collections.singletonList(unit.originId),null,ranks);
             r.setSourceTrace(new LinkedHashMap<>(unit.trace));
             r.setOriginObservation(VettingReviewProbe.map("originalRetrievalSeedId",unit.originId,"structuralMembersCanBecomeLiteralOrigins",false,"selectionPolicy",unit.trace.get("selectionPolicy")));

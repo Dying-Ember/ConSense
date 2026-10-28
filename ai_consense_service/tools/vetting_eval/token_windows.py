@@ -29,7 +29,26 @@ def fail(condition, kind, message, **metadata):
 
 
 def digest(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    if not isinstance(value, (list, tuple)):
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    result = hashlib.sha256()
+    for part in canonical_chunks(value):
+        result.update(part)
+    return result.hexdigest()
+
+
+def canonical_chunks(value, *, allow_nan=False):
+    encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=allow_nan)
+    if isinstance(value, (list, tuple)):
+        # Encode one parent/window in C, retaining neither a full corpus string nor scalar-sized fragments.
+        yield b'['
+        for ordinal, item in enumerate(value):
+            if ordinal:
+                yield b','
+            yield encoder.encode(item).encode('utf-8')
+        yield b']'
+    else:
+        yield from (part.encode('utf-8') for part in encoder.iterencode(value))
 
 
 def text_sha(value):

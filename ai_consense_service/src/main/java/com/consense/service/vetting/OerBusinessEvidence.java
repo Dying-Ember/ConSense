@@ -67,6 +67,9 @@ public class OerBusinessEvidence {
         private List<VettingRuleEngine.Source> semanticRuleSources;
         private boolean scanned;
         private final List<JsonNode> semanticBlocked=new ArrayList<>();
+        private final Set<String> deferredTextOrigins=new LinkedHashSet<>();
+        private Session reviewQuery;
+        private ReviewTextIndex reviewTextIndex;
         private Session(String project,String module,List<Long> ids,List<CanonicalSourceBinding> bindings,Map<String,Chunk> views,Map<String,String> pins){
             this.projectId=project;this.module=module;this.documentIds=Collections.unmodifiableList(new ArrayList<>(ids));
             this.bindingFingerprint=fingerprint(bindings);this.byId=views;
@@ -139,6 +142,12 @@ public class OerBusinessEvidence {
     public static boolean canonicalCorpus(List<Chunk> corpus){return corpus instanceof Corpus;}
     public static Session session(List<Chunk> corpus){if(!(corpus instanceof Corpus))throw new IllegalArgumentException("Canonical corpus session required");return ((Corpus)corpus).session;}
     public static boolean isSemanticCorpus(List<Chunk> corpus){return canonicalCorpus(corpus)&&session(corpus).semanticScope!=null;}
+    /** The source reader grants this operation-local capability; public unknown JSON cannot create it. */
+    static Set<String> deferredTextOrigins(List<Chunk> corpus){
+        if(!isSemanticCorpus(corpus))return Collections.emptySet();Session selected=session(corpus);
+        require(!selected.invalidated,"canonical session invalidated; reload current sources");
+        return selected.scanned&&selected.semanticSources.deferredText()?Collections.unmodifiableSet(new LinkedHashSet<>(selected.deferredTextOrigins)):Collections.emptySet();
+    }
     public Session loadSemantic(String projectId,String module,List<SourceDocument> selected){
         require("vetting".equals(module),"semantic full-scope consumption is configured for vetting only");Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
         String[] admission={"compact_metadata_unavailable"};int[] qualified={0};java.util.function.BiConsumer<String,Integer> record=(reason,count)->{admission[0]=reason;qualified[0]=count;};
@@ -262,6 +271,7 @@ public class OerBusinessEvidence {
     private final class SemanticScanAccumulator {
         final Session session;final List<Chunk> collected=new ArrayList<>();final Set<String> ids=new HashSet<>();
         final Map<String,JsonNode> groups=new LinkedHashMap<>();final List<JsonNode> blocked=new ArrayList<>();
+        final Set<String> deferred=new LinkedHashSet<>();
         JsonNode cursor;int processed,batch;
         SemanticScanAccumulator(Session session){this.session=session;}
         void accept(JsonNode result,long readElapsedMs){
@@ -270,18 +280,21 @@ public class OerBusinessEvidence {
             boolean dictionary=OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText());
             if(dictionary){for(JsonNode row:result.path("units")){String group=row.path("groupId").asText();JsonNode prior=groups.putIfAbsent(group,row.path("unit"));require(prior==null||prior.equals(row.path("unit")),"semantic group changed during scan");}
                 for(JsonNode row:result.path("blockedOrigins")){require(ids.add(row.path("id").asText()),"semantic scan repeated blocked origin");blocked.add(row.deepCopy());}}
-            for(int i=0;i<result.path("origins").size();i++){JsonNode origin=result.path("origins").get(i);String group=dictionary?result.path("originUnits").path(origin.path("id").asText()).asText():null;JsonNode unit=dictionary?groups.get(group):result.path("units").get(i);require(unit!=null,"semantic scan group missing");Chunk chunk=semanticView(session,origin,unit,dictionary);if(dictionary)((ObjectNode)chunk.getCanonicalPayload()).put("semanticUnitRef",group);require(ids.add(chunk.getId()),"semantic scan repeated an origin");collected.add(chunk);}
+            for(int i=0;i<result.path("origins").size();i++){JsonNode origin=result.path("origins").get(i);String group=dictionary?result.path("originUnits").path(origin.path("id").asText()).asText():null;JsonNode unit=dictionary?groups.get(group):result.path("units").get(i);require(unit!=null,"semantic scan group missing");Chunk chunk=semanticView(session,origin,unit,dictionary);if(dictionary)((ObjectNode)chunk.getCanonicalPayload()).put("semanticUnitRef",group);require(ids.add(chunk.getId()),"semantic scan repeated an origin");if(session.semanticSources.deferredNormalOrigin(origin,unit))deferred.add(chunk.getId());collected.add(chunk);}
             int next=result.path("coverage").path("processedOrigins").asInt();require(next==processed+result.path("origins").size()+(dictionary?result.path("blockedOrigins").size():0),"semantic scan skipped origins");processed=next;cursor=result.path("nextCursor");
             LOG.info("OER semantic source scan batch={} processedOrigins={}/{} readElapsedMs={}",++batch,processed,session.semanticSources.totalOrigins(),readElapsedMs);
             evidence.assertCompactCurrent(session.semanticScope);
         }
     }
     public List<Chunk> scan(Session session){
+        return scan(session,(processed,total)->{});
+    }
+    public List<Chunk> scan(Session session,java.util.function.BiConsumer<Integer,Integer> progress){
         require(session!=null&&session.semanticScope!=null,"semantic scan requires its selected source session");current(session);if(session.scanned)return session.chunks;
         SemanticScanAccumulator read=new SemanticScanAccumulator(session);
         if(session.semanticSources.stream()){
             long[] previous={System.nanoTime()};evidence.assertCompactCurrent(session.semanticScope);
-            retrieval.streamSemanticSources(session.semanticSources,page->{long now=System.nanoTime();read.accept(page,(now-previous[0])/1_000_000);previous[0]=System.nanoTime();});
+            retrieval.streamSemanticSources(session.semanticSources,page->{long now=System.nanoTime();read.accept(page,(now-previous[0])/1_000_000);progress.accept(read.processed,session.semanticSources.totalOrigins());previous[0]=System.nanoTime();});
             evidence.assertCompactCurrent(session.semanticScope);
         }else do{
             ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","scan");demand.put("maxItems",session.semanticSources.scanMaximumItems());demand.put("maxBytes",16777216);
@@ -289,6 +302,7 @@ public class OerBusinessEvidence {
             if(session.semanticSources.dictionary())demand.set("knownSemanticGroups",JsonUtils.mapper().valueToTree(read.groups.keySet().stream().skip(Math.max(0,read.groups.size()-512)).collect(Collectors.toList())));
             evidence.assertCompactCurrent(session.semanticScope);long started=System.nanoTime();
             read.accept(retrieval.readSemanticSources(session.semanticSources,demand),(System.nanoTime()-started)/1_000_000);
+            progress.accept(read.processed,session.semanticSources.totalOrigins());
         }while(read.cursor!=null&&!read.cursor.isNull());
         require(read.processed==session.semanticSources.totalOrigins(),"semantic scan did not cover its declared source scope");
         List<Chunk> collected=read.collected;List<JsonNode> blocked=read.blocked;
@@ -308,23 +322,35 @@ public class OerBusinessEvidence {
         session.semanticBlocked.addAll(blocked);
         for(Chunk chunk:collected){session.byId.put(chunk.getId(),chunk);session.viewPayloads.put(chunk.getId(),viewPayloads.get(chunk.getId()));session.chunks.owned.add(chunk);}
         session.chunks.sourceUnits.addAll(sourceUnits);session.scanned=true;
+        session.deferredTextOrigins.addAll(read.deferred);
         LOG.info("OER semantic scan finalized origins={} sharedGroups={} closureMs={} sourceCheckMs={} viewStampMs={} finalCheckMs={}",
                 collected.size(),sharedUnits.size(),(closuresBuilt-finalizeStarted)/1_000_000,(sourceChecked-closuresBuilt)/1_000_000,
                 (viewsStamped-sourceChecked)/1_000_000,(System.nanoTime()-viewsStamped)/1_000_000);
         return session.chunks;
     }
     public void bindReviewEvidence(Session session,List<com.consense.web.dto.VettingDtos.FindingEvidence> quotes){
-        if(session.semanticScope==null){bindRuleEvidence(session,quotes);return;}current(session);for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes)if(quote.getFixedBaselineEvidence()==null&&quote.getCanonicalEvidence()==null)bindRuleEvidenceUnchecked(session,Collections.singletonList(quote));Map<String,EvidencePointer> originals=new HashMap<>();
+        if(session.semanticScope==null){bindRuleEvidence(session,quotes);return;}current(session);for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes)if(quote.getFixedBaselineEvidence()==null&&quote.getCanonicalEvidence()==null)bindRuleEvidenceUnchecked(session,Collections.singletonList(quote));
         Set<String> selectedIds=new LinkedHashSet<>();for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes)if(quote.getCanonicalEvidence()!=null&&quote.getFixedBaselineEvidence()==null&&session.byId.containsKey(quote.getCanonicalEvidence().getCanonicalChunkId()))selectedIds.add(quote.getCanonicalEvidence().getCanonicalChunkId());
         checkSemanticViews(session,selectedIds.stream().map(session.byId::get).collect(Collectors.toList()));
         Map<String,JsonNode> fullMembers=selectedSemanticMembers(session,selectedIds);
         Set<com.consense.web.dto.VettingDtos.FindingEvidence> seen=Collections.newSetFromMap(new IdentityHashMap<>());
+        Map<com.consense.web.dto.VettingDtos.FindingEvidence,EvidencePointer> verified=new IdentityHashMap<>();Map<String,List<EvidencePointer>> groups=new LinkedHashMap<>();
         for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes){if(!seen.add(quote)||quote.getFixedBaselineEvidence()!=null)continue;EvidencePointer selected=quote.getCanonicalEvidence();if(selected==null)continue;
             Chunk captured=session.byId.get(selected.getCanonicalChunkId());
-            if(captured==null||!Objects.equals(captured.getCanonicalEvidence(),selected)||!Objects.equals(quote.getDocumentId(),captured.getDocumentId())
+            // JSON copying can change Java null and missing-node representations without changing the source wire.
+            if(captured==null||captured.getCanonicalEvidence()==null||!JsonUtils.serializedSha256(captured.getCanonicalEvidence()).equals(JsonUtils.serializedSha256(selected))||!Objects.equals(quote.getDocumentId(),captured.getDocumentId())
                     ||!Objects.equals(quote.getSourceHash(),selected.getJavaParsedSourceHash())||!VettingCorpus.normalize(captured.getContent()).contains(VettingCorpus.normalize(quote.getQuote()))
                     ||session.semanticSources.textFirst()&&!VettingCorpus.normalize(fullMembers.get(selected.getCanonicalChunkId()).path("text").asText()).contains(VettingCorpus.normalize(quote.getQuote()))){quote.setLocated(false);quote.setCanonicalEvidence(null);continue;}
-            String key=selected.getDocumentId()+"|"+selected.getProjectionSha256()+"|"+selected.getUnitId();EvidencePointer original=originals.computeIfAbsent(key,ignored->evidence.pointer(session.projectId,selected.getDocumentId(),selected.getProjectionSha256(),selected.getUnitId(),session.module));
+            verified.put(quote,selected);groups.computeIfAbsent(selected.getDocumentId()+"|"+selected.getProjectionSha256(),ignored->new ArrayList<>()).add(selected);
+        }
+        Map<String,EvidencePointer> originals=selectedTextQuotePointers(session,groups,fullMembers);
+        if(originals==null){originals=new HashMap<>();for(List<EvidencePointer> group:groups.values()){
+            EvidencePointer first=group.get(0);List<String> unitIds=group.stream().map(EvidencePointer::getUnitId).distinct().collect(Collectors.toList());
+            Map<String,EvidencePointer> selected=evidence.selectedPointers(session.projectId,first.getDocumentId(),first.getProjectionSha256(),unitIds,session.module);
+            for(String unitId:unitIds){EvidencePointer original=selected.get(unitId);require(original!=null,"selected original evidence missing");originals.put(first.getDocumentId()+"|"+first.getProjectionSha256()+"|"+unitId,original);}
+        }}
+        for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes){EvidencePointer selected=verified.remove(quote);if(selected==null)continue;
+            EvidencePointer original=originals.get(selected.getDocumentId()+"|"+selected.getProjectionSha256()+"|"+selected.getUnitId());
             String text=VettingCorpus.normalize(quote.getQuote());boolean found=!text.isEmpty()&&VettingCorpus.normalize(java.util.stream.StreamSupport.stream(original.getParts().spliterator(),false).map(part->part.path("text").asText()).collect(Collectors.joining("\n"))).contains(text);
             if(found){quote.setCanonicalEvidence(JsonUtils.read(JsonUtils.write(original),EvidencePointer.class));quote.setSourceHash(original.getJavaParsedSourceHash());quote.setOriginalSourceSha256(original.getOriginalSourceSha256());
                 List<JsonNode> parts=new ArrayList<>();for(JsonNode part:original.getParts())if(VettingCorpus.normalize(part.path("text").asText()).contains(text))parts.add(part);
@@ -332,6 +358,40 @@ public class OerBusinessEvidence {
                 quote.setNativePositions(position==null?null:Collections.singletonList(position));}
             else{quote.setLocated(false);quote.setCanonicalEvidence(null);}
         }current(session);
+    }
+
+    /** Exact quotation locators retain selected original parts; complete source context is loaded on demand. */
+    private Map<String,EvidencePointer> selectedTextQuotePointers(Session session,Map<String,List<EvidencePointer>> groups,Map<String,JsonNode> members){
+        if(groups.isEmpty())return Collections.emptyMap();
+        if(!session.semanticSources.textFirst()||currentSources==null)return null;
+        Set<Long> documentIds=new LinkedHashSet<>();Set<String> selectedIds=new LinkedHashSet<>();
+        for(List<EvidencePointer> group:groups.values())for(EvidencePointer pointer:group){
+            if(!NormalObservedContract.PRODUCER.equals(pointer.getProducerKind()))return null;
+            documentIds.add(pointer.getDocumentId());selectedIds.add(pointer.getCanonicalChunkId());
+        }
+        List<SourceDocument> selected=new ArrayList<>();for(Long id:documentIds){SourceDocument source=session.semanticDocuments.get(id);require(source!=null,"selected quotation source missing");selected.add(source);}
+        List<CanonicalSourceBinding> bindings=evidence.compactNormalCandidates(session.projectId,session.module,selected);if(bindings==null)return null;
+        for(SourceDocument source:selected)currentSources.requireOriginalBytes(source);
+        CanonicalEvidenceService.SelectedNormalTextSources text=evidence.selectedNormalTextSources(session.projectId,session.module,selected,bindings,selectedIds);if(text==null)return null;
+        Map<Long,CanonicalSourceBinding> byDocument=new HashMap<>();for(CanonicalSourceBinding binding:bindings)byDocument.put(binding.getDocumentId(),binding);
+        Map<Long,JsonNode> headers=text.headers();Map<String,JsonNode> chunks=text.chunks();Map<String,EvidencePointer> originals=new HashMap<>();
+        for(List<EvidencePointer> group:groups.values())for(EvidencePointer captured:group){
+            String key=captured.getDocumentId()+"|"+captured.getProjectionSha256()+"|"+captured.getUnitId();if(originals.containsKey(key))continue;
+            JsonNode raw=chunks.get(captured.getCanonicalChunkId()),member=members.get(captured.getCanonicalChunkId());
+            require(raw!=null&&member!=null&&raw.path("content").equals(member.path("text")),"selected quotation text differs from registered source");
+            for(String field:Arrays.asList("id","unitId","documentId","role","sourceHash","eligibleModules","sourceOrder"))require(raw.path(field).equals(member.path(field)),"selected quotation identity differs from registered source");
+            require(raw.path("parts").size()==member.path("parts").size(),"selected quotation part count differs");
+            for(int i=0;i<raw.path("parts").size();i++)for(String field:Arrays.asList("blockId","text","startOffset","endOffset"))
+                require(raw.path("parts").get(i).path(field).equals(member.path("parts").get(i).path(field)),"selected quotation part differs from registered source");
+            CanonicalSourceBinding binding=byDocument.get(captured.getDocumentId());
+            require(binding!=null&&Objects.equals(captured.getProjectionSha256(),binding.getProjectionSha256())&&Objects.equals(captured.getProjectionRevisionSha256(),binding.getProjectionRevisionSha256())
+                    &&Objects.equals(captured.getSourceRevisionSha256(),binding.getSourceRevisionSha256())&&Objects.equals(captured.getOriginalSourceSha256(),binding.getOriginalSourceSha256())
+                    &&Objects.equals(captured.getJavaParsedSourceHash(),binding.getJavaParsedSourceHash())&&Objects.equals(captured.getCanonicalSourceHash(),binding.getCanonicalSourceHash()),"selected quotation source revision differs");
+            originals.put(key,CanonicalEvidenceService.compactNormalPointer(binding,headers.get(captured.getDocumentId()),raw,session.module));
+        }
+        evidence.revalidateCompactSelection(session.semanticScope,documentIds);
+        for(SourceDocument source:selected)currentSources.requireOriginalBytes(source);
+        evidence.assertCompactCurrent(text.scope());current(session);return originals;
     }
 
     private Map<String,JsonNode> selectedSemanticMembers(Session session,Set<String> ids){
@@ -434,7 +494,7 @@ public class OerBusinessEvidence {
         }
         Session session=new Session(projectId,"advisory",new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
         session.originalFileStates=originals;
-        if(!retrieval.sourceGenerationLinked(session.indexKey,generation)){
+        if(!retrieval.sourceGenerationLinked(session.module,session.indexKey,generation)){
             AdvisoryRead recovered=recoverAdvisoryQuerySession(session,bindings,generation,currentSelected);
             return recovered==null?sequentialAdvisoryRead(projectId,currentSelected,true,false).session:recovered.session;
         }
@@ -568,7 +628,7 @@ public class OerBusinessEvidence {
         try{List<SourceDocument> selected=session.querySelection.get();assertSelectedScope(session,selected);
             List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
             require(session.bindingFingerprint.equals(fingerprint(current))&&session.sourceRenderPins.equals(sourceRenderPins(current)),"selected canonical source identity changed");
-            require(session.querySourceGeneration.equals(sourceGeneration(selected))&&retrieval.sourceGenerationLinked(session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
+            require(session.querySourceGeneration.equals(sourceGeneration(selected))&&retrieval.sourceGenerationLinked(session.module,session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
             return current;
         }catch(RuntimeException changed){session.invalidated=true;throw changed;}
     }
@@ -650,7 +710,7 @@ public class OerBusinessEvidence {
         Map<String,String> pins=sourceRenderPins(before);String identity=renderFingerprint(fingerprint(before),pins);
         Object projections=before.stream().map(CanonicalSourceBinding::getProjectionSha256).collect(Collectors.toList());
         String key=projectId+"::canonical::"+module+"::"+VettingCorpus.hash(JsonUtils.write(pins.isEmpty()?projections:Arrays.asList(projections,pins)));
-        if(!retrieval.sourceGenerationLinked(key,sourceGeneration(new ArrayList<>(selected.values()))))return currentIndexStatus(projectId,module,currentSelected);
+        if(!retrieval.sourceGenerationLinked(module,key,sourceGeneration(new ArrayList<>(selected.values()))))return currentIndexStatus(projectId,module,currentSelected);
         for(SourceDocument source:selected.values()){currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,originals.get(source.getId()));}
         OerCanonicalRetrievalClient.IndexState state=retrieval.indexAvailable(key,module,before);
         Map<Long,SourceDocument> after=selectedDocuments(projectId,currentSelected.get());
@@ -658,7 +718,7 @@ public class OerBusinessEvidence {
         require(contentRevisions.equals(sourceContentRevisions(after.values())),"current source content changed during availability check");
         List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(projectId,module,new ArrayList<>(after.values()),originals);
         require(identity.equals(renderFingerprint(fingerprint(current),sourceRenderPins(current))),"current source identity changed during availability check");
-        retrieval.sourceGenerationLinked(key,sourceGeneration(new ArrayList<>(after.values())));
+        retrieval.sourceGenerationLinked(module,key,sourceGeneration(new ArrayList<>(after.values())));
         return new CurrentIndexStatus(key,state.chunkCount,selected.size(),state);
     }
     /** A status read owns one fresh frame; the selected catalog is fetched before health and after close. */
@@ -743,7 +803,7 @@ public class OerBusinessEvidence {
             require(session.documentIds.equals(selected.stream().map(SourceDocument::getId).collect(Collectors.toList())),"current selected scope changed");
             if(session.initialSourceGeneration!=null)require(session.initialSourceGeneration.equals(sourceGeneration(selected)),"source content generation changed during initial Ask");
             if(session.queryScope!=null)require(session.querySourceGeneration.equals(sourceGeneration(selected))
-                    &&retrieval.sourceGenerationLinked(session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
+                    &&retrieval.sourceGenerationLinked(session.module,session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
         }catch(RuntimeException changed){session.invalidated=true;throw changed;}
     }
     public void ensureIndex(Session session){if(!indexStatus(session).ready)index(session);}
@@ -869,6 +929,260 @@ public class OerBusinessEvidence {
                     transport.path("reason").isNull()?null:transport.path("reason").asText(),ids,trace));
         }
         return new VettingRetrievalSourceUnits.RankedChunks(seeds,units);
+    }
+    /** Reuse the verified scan denominator and rank before loading only the requested normal text. */
+    public List<Chunk> retrieveReviewText(Session session,String query,String role,Runnable sourceGuard){
+        return retrieveReviewText(session,query,role,sourceGuard,10000);
+    }
+    public List<Chunk> retrieveReviewText(Session session,String query,String role,Runnable sourceGuard,int contextChars){
+        return retrieveReviewText(session,query,role,sourceGuard,true,contextChars);
+    }
+    public List<Chunk> retrieveRequiredProjectText(Session session,String clause,Runnable sourceGuard,int contextChars){
+        require(session!=null&&session.semanticScope!=null&&session.semanticDocuments!=null,"required project query needs its selected source scope");
+        require(clause!=null&&clause.matches("(?i)[A-Z][A-Z0-9_-]*\\.[A-Z0-9]+(?:\\.[A-Z0-9]+)*(?:\\([A-Z0-9]+\\))*"),"required project clause locator invalid");
+        String family=clause.substring(0,clause.indexOf('.')).toUpperCase(Locale.ROOT);Set<String> selected=new LinkedHashSet<>();
+        for(CanonicalSourceBinding binding:session.semanticScope.bindings()){
+            SourceDocument source=session.semanticDocuments.get(binding.getDocumentId());
+            if(source!=null&&family.equalsIgnoreCase(source.getFileKey())&&"package_manifest".equals(VettingCorpus.sourceRole(source)))selected.add(binding.getOriginalSourceSha256());
+        }
+        if(selected.isEmpty())return Collections.emptyList();
+        return retrieveReviewText(session,clause,"package_manifest",sourceGuard,true,contextChars,selected);
+    }
+    /** A model-free preview verifies only selected ranked text; it does not rescan the full corpus. */
+    public List<Chunk> retrieveReviewTextForPreview(Session session,String query,String role,Runnable sourceGuard){
+        return retrieveReviewText(session,query,role,sourceGuard,false,0);
+    }
+    private List<Chunk> retrieveReviewText(Session session,String query,String role,Runnable sourceGuard,boolean requireScan,int contextChars){
+        return retrieveReviewText(session,query,role,sourceGuard,requireScan,contextChars,null);
+    }
+    private List<Chunk> retrieveReviewText(Session session,String query,String role,Runnable sourceGuard,boolean requireScan,int contextChars,Set<String> selectedSources){
+        require(session!=null&&session.semanticScope!=null&&(!requireScan||session.scanned)&&"vetting".equals(session.module),"review query requires its selected source scope");
+        require(!JsonUtils.isBlankText(query)&&(role==null||Arrays.asList("tender","standard","project_fact","package_manifest").contains(role)),"review query or role unavailable");
+        long started=System.nanoTime();ReviewTextStats stats=reviewTextStats(query);
+        String phase="source_guard",queryFingerprint=stats==null?"":stats.queryFingerprint;int observedBudget=requireScan?contextChars:-1;
+        reviewQuerySummary("started",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+        try{
+        Runnable guard=()->{sourceGuard.run();current(session);};
+        guard.run();
+        phase="index_readiness";
+        reviewQuerySummary("started",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+        Session queryScope=session.reviewQuery;
+        if(queryScope==null){
+            List<CanonicalSourceBinding> bindings=new ArrayList<>();for(CanonicalSourceBinding original:session.semanticScope.bindings()){
+                CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(original,compact);compact.setSnapshotJson(null);bindings.add(compact);
+            }
+            List<SourceDocument> selected=new ArrayList<>(session.semanticDocuments.values());
+            String generation=sourceGeneration(selected);
+            queryScope=new Session(session.projectId,"vetting",session.documentIds,bindings,new LinkedHashMap<>(),session.sourceRenderPins);
+            queryScope.originalFileStates=observeOriginals(selected);
+            OerCanonicalRetrievalClient.IndexState available=retrieval.compactRecoveryAvailability("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),generation,guard);
+            if(!available.ready){
+                Set<String> kinds=new HashSet<>();for(JsonNode source:session.semanticSources.sourceCatalog()){
+                    require(NormalObservedContract.PRODUCER.equals(source.path("producerKind").asText()),"compact review index source kind unsupported; refresh the source-bound index");kinds.add("normal");
+                }
+                available=retrieval.compactIndex("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),kinds,generation,guard,guard,true,false);
+            }
+            require(available.ready,"source-bound review index unavailable");
+            queryScope.queryScope=bindings;queryScope.querySelection=()->{guard.run();return selected;};queryScope.querySourceGeneration=generation;
+            queryScope.queryChunkCount=available.chunkCount;session.reviewQuery=queryScope;
+        }
+        final Session rankedScope=queryScope;
+        // Each call retains only its ranked text; source identities and the native index receipt remain shared.
+        rankedScope.byId.clear();rankedScope.viewPayloads.clear();rankedScope.chunks.owned.clear();rankedScope.adviceTextByteGuard=null;rankedScope.initialAskExit=null;
+        phase="ranking";
+        reviewQuerySummary("started",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+        java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> noGraphs=ids->{throw new IllegalStateException("Complete review source graphs are not a compact-query fallback");};
+        java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> parents=(ids,response)->compactAdviceParents(rankedScope,ids,response);
+        Runnable queryGuard=()->{guard.run();currentQueryScope(rankedScope);};
+        JsonNode result=selectedSources==null?retrieval.retrieveCompact("vetting",rankedScope.indexKey,query,role,rankedScope.queryScope,rankedScope.querySourceGeneration,
+                queryGuard,noGraphs,parents,true):retrieval.retrieveCompact("vetting",rankedScope.indexKey,query,role,rankedScope.queryScope,rankedScope.querySourceGeneration,
+                queryGuard,noGraphs,parents,true,selectedSources);
+        phase="seed_binding";
+        reviewQuerySummary("started",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+        guard.run();List<Chunk> seeds=new ArrayList<>();List<String> rankedIds=new ArrayList<>();
+        for(JsonNode hit:result.path("hits")){
+            Chunk proof=rankedScope.byId.get(hit.path("id").asText());
+            Chunk selected=session.scanned?session.byId.get(hit.path("id").asText()):proof;
+            require(selected!=null&&proof!=null&&(role==null||role.equals(selected.getRole())),"ranked review origin outside the selected source scope");
+            require(Objects.equals(proof.getContent(),selected.getContent())&&Objects.equals(proof.getSourceHash(),selected.getSourceHash())
+                    &&Objects.equals(proof.getOriginalSourceSha256(),selected.getOriginalSourceSha256()),"ranked review text differs from its selected scan");
+            seeds.add(selected);rankedIds.add(selected.getId());
+        }
+        if(stats!=null)stats.seeds(seeds,!requireScan);
+        if(!session.scanned)rankedScope.completeInitialAsk();
+        if(requireScan){
+            phase="context_selection";
+            reviewQuerySummary("started",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+            if(session.reviewTextIndex==null)session.reviewTextIndex=new ReviewTextIndex(session.chunks);
+            seeds=reviewTextContext(session.reviewTextIndex,seeds,result,query,contextChars,stats);
+            checkSemanticViews(session,seeds);guard.run();
+        }
+        phase="selected_copy";
+        require(selectedSources==null||seeds.stream().allMatch(chunk->selectedSources.contains(chunk.getOriginalSourceSha256())),"required project context outside selected originals");
+        reviewQuerySummary("started",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+        List<Chunk> copied=seeds.stream().map(OerBusinessEvidence::copy).collect(Collectors.toList());
+        if(stats!=null)stats.selected(seeds,rankedIds);
+        reviewQuerySummary("completed",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);
+        return requireScan?new ReviewTextChunks(copied,rankedIds):copied;
+        }catch(RuntimeException failed){reviewQuerySummary("failed",phase,session,queryFingerprint,role,query.length(),observedBudget,started,stats);throw failed;}
+    }
+
+    private static ReviewTextStats reviewTextStats(String query){
+        try{if(!LOG.isInfoEnabled())return null;ReviewTextStats stats=new ReviewTextStats();
+            stats.queryFingerprint=VettingCorpus.hash(query.substring(0,Math.min(1024,query.length()))).substring(0,16);return stats;
+        }catch(Throwable ignored){return null;}
+    }
+    private static final class ReviewTextStats {
+        String queryFingerprint;
+        final Set<String> offered=new HashSet<>();int seeds,selected,contexts,sources,tender,standard,facts,manifests,omitted;
+        long seedChars,selectedChars,contextChars,offeredChars,omittedChars;
+        void seeds(List<Chunk> chunks,boolean preview){try{seeds=chunks.size();for(Chunk chunk:chunks){seedChars+=chunk.getContent().length();if(preview)candidate(chunk,false);}}catch(Throwable ignored){}}
+        void candidate(Chunk chunk,boolean overBudget){try{if(offered.add(chunk.getId())){offeredChars+=chunk.getContent().length();
+            if(overBudget){omitted++;omittedChars+=chunk.getContent().length();}}}catch(Throwable ignored){}}
+        void selected(List<Chunk> chunks,List<String> rankedIds){
+            try{
+            Set<String> ranked=new HashSet<>(rankedIds);Set<List<Object>> identities=new HashSet<>();selected=chunks.size();
+            for(Chunk chunk:chunks){int chars=chunk.getContent().length();selectedChars+=chars;
+                if(!ranked.contains(chunk.getId())){contexts++;contextChars+=chars;}
+                List<Object> key=reviewSourceKey(chunk);if(key!=null)identities.add(key);
+                if("tender".equals(chunk.getRole()))tender++;else if("standard".equals(chunk.getRole()))standard++;
+                else if("project_fact".equals(chunk.getRole()))facts++;else if("package_manifest".equals(chunk.getRole()))manifests++;}
+            sources=identities.size();
+            }catch(Throwable ignored){/* Counters cannot interrupt retrieval. */}
+        }
+    }
+    private static void reviewQuerySummary(String status,String phase,Session session,String queryFingerprint,String role,int queryChars,int budget,long started,ReviewTextStats stats){
+        if(stats==null)return;
+        try{LOG.info("Vetting evidence flow status={} phase={} threadId={} sessionFingerprint={} queryFingerprint={} queryChars={} queryPrefixChars={} role={} budgetChars={} seeds={} seedChars={} candidates={} candidateChars={} selected={} selectedChars={} contextChunks={} contextChars={} selectedSources={} tenderChunks={} standardChunks={} projectFactChunks={} manifestChunks={} budgetOmittedChunks={} budgetOmittedChars={} elapsedMs={}",
+                status,phase,Thread.currentThread().getId(),session.bindingFingerprint.substring(0,Math.min(16,session.bindingFingerprint.length())),queryFingerprint,queryChars,Math.min(1024,queryChars),role==null?"all":role,budget,
+                stats.seeds,stats.seedChars,stats.offered.size(),stats.offeredChars,stats.selected,stats.selectedChars,stats.contexts,stats.contextChars,stats.sources,stats.tender,stats.standard,stats.facts,stats.manifests,stats.omitted,stats.omittedChars,(System.nanoTime()-started)/1_000_000);
+        }catch(Throwable ignored){/* Observation must not change retrieval or source guards. */}
+    }
+
+    /** Retain ranking provenance through caller budgeting without adding fields to source or model text. */
+    static final class ReviewTextChunks extends ArrayList<Chunk> {
+        final Set<String> rankedIds;
+        ReviewTextChunks(List<Chunk> chunks,Collection<String> rankedIds){super(chunks);this.rankedIds=new LinkedHashSet<>(rankedIds);}
+    }
+    static boolean rankedReviewOrigin(List<Chunk> chunks,Chunk chunk){return !(chunks instanceof ReviewTextChunks)||((ReviewTextChunks)chunks).rankedIds.contains(chunk.getId());}
+    private static final String REVIEW_TECHNICAL_LABEL="(?:[A-Z]{1,8}\\.[A-Z]?|[A-Z]{2,8})[0-9]+(?:\\.[0-9]+)*(?:\\.P)?";
+    private static final java.util.regex.Pattern REVIEW_HEADING=java.util.regex.Pattern.compile(
+            "(?i)^\\s*(?:(clause)\\s+)?((?:"+REVIEW_TECHNICAL_LABEL+")|[A-Z]?[0-9]{1,3}(?:\\.[0-9]{1,3})*)(?=\\s|[.)](?:\\s|$)|$)");
+    private static final class ReviewTextIndex {
+        final Map<String,Chunk> byId=new LinkedHashMap<>();
+        final Map<List<Object>,List<Chunk>> sources=new LinkedHashMap<>();
+        final Map<List<Object>,Map<String,List<Integer>>> clauses=new HashMap<>();
+        final Set<List<Object>> ordered=new HashSet<>();
+        ReviewTextIndex(List<Chunk> corpus){
+            for(Chunk chunk:corpus){byId.put(chunk.getId(),chunk);List<Object> key=reviewSourceKey(chunk);
+                if(key!=null)sources.computeIfAbsent(key,ignored->new ArrayList<>()).add(chunk);}
+            sources.forEach((key,rows)->{Set<java.math.BigInteger> positions=new HashSet<>();
+                if(rows.stream().allMatch(c->reviewPosition(c)!=null&&positions.add(reviewPosition(c)))){
+                    rows.sort(Comparator.comparing(OerBusinessEvidence::reviewPosition));ordered.add(key);
+                    Map<String,List<Integer>> located=new LinkedHashMap<>();for(int i=0;i<rows.size();i++){
+                        String clause=reviewClause(rows.get(i));if(!clause.isEmpty())located.computeIfAbsent(clause,ignored->new ArrayList<>()).add(i);}
+                    clauses.put(key,located);}});
+        }
+    }
+    /** Select exact observed text only; adjacency never certifies ownership or complete legal scope. */
+    static List<Chunk> reviewTextContext(List<Chunk> corpus,List<Chunk> seeds,JsonNode result,String query,int maxChars){
+        return reviewTextContext(new ReviewTextIndex(corpus),seeds,result,query,maxChars,null);
+    }
+    private static List<Chunk> reviewTextContext(ReviewTextIndex index,List<Chunk> seeds,JsonNode result,String query,int maxChars,ReviewTextStats stats){
+        LinkedHashMap<String,Chunk> selected=new LinkedHashMap<>();int[] remaining={Math.max(0,maxChars)};
+        Map<String,Boolean> requestedClauses=new HashMap<>();
+        for(Chunk seed:seeds)addReviewText(selected,seed,remaining,stats);
+        for(Chunk seed:seeds){
+            List<Object> key=reviewSourceKey(seed);if(key==null||!selected.containsKey(seed.getId()))continue;
+            List<Chunk> rows=index.sources.get(key);if(rows==null)continue;
+            int position=rows.indexOf(index.byId.get(seed.getId()));boolean ordered=index.ordered.contains(key);if(position<0)continue;
+            if(ordered){
+                // An explicit request can find a new clause even when ranking repeats the same seed.
+                Map<String,Integer> requested=new LinkedHashMap<>();
+                for(Map.Entry<String,List<Integer>> clause:index.clauses.get(key).entrySet())if(requestedClauses.computeIfAbsent(clause.getKey(),id->requestsReviewClause(query,id)))
+                    for(int i:clause.getValue()){Integer previous=requested.get(clause.getKey());
+                        if(previous==null||Math.abs(i-position)<Math.abs(previous-position))requested.put(clause.getKey(),i);}
+                int requests=0;for(Integer start:requested.values()){if(requests++>=4)break;
+                    for(Chunk context:reviewClauseText(rows,start))addReviewText(selected,context,remaining,stats);}
+            }
+            int observed=0;
+            for(JsonNode unit:result.path("sourceUnits").path("units")){
+                if(!completeTransport(unit)||!VettingRetrievalSourceUnits.textIds(unit.path("originIds")).contains(seed.getId()))continue;
+                for(String id:VettingRetrievalSourceUnits.textIds(unit.path("requiredMemberIds"))){Chunk context=index.byId.get(id);
+                    if(context!=null&&key.equals(reviewSourceKey(context))&&!differentReviewClause(seed,context)&&observed++<64)
+                        addReviewText(selected,context,remaining,stats);}
+            }
+            if(!ordered)continue;
+            List<Chunk> clause=reviewClauseText(rows,position);
+            if(clause.size()>1)for(Chunk context:clause)addReviewText(selected,context,remaining,stats);
+            else if(reviewClause(seed).isEmpty())for(int near:new int[]{position-1,position+1})if(near>=0&&near<rows.size()
+                    &&!differentReviewClause(seed,rows.get(near))&&reviewHeading(rows.get(near)).isEmpty())
+                addReviewText(selected,rows.get(near),remaining,stats);
+        }
+        Map<List<Object>,List<Chunk>> groups=new LinkedHashMap<>();
+        for(Chunk chunk:selected.values()){List<Object> key=reviewSourceKey(chunk);
+            groups.computeIfAbsent(key==null?Arrays.asList("unbound",chunk.getId()):key,ignored->new ArrayList<>()).add(chunk);}
+        List<Chunk> out=new ArrayList<>();groups.forEach((key,rows)->{if(index.ordered.contains(key))rows.sort(Comparator.comparing(OerBusinessEvidence::reviewPosition));out.addAll(rows);});return out;
+    }
+    private static void addReviewText(Map<String,Chunk> selected,Chunk chunk,int[] remaining,ReviewTextStats stats){
+        if(chunk==null||selected.containsKey(chunk.getId())||JsonUtils.isBlankText(chunk.getContent()))return;
+        boolean overBudget=chunk.getContent().length()>remaining[0];if(stats!=null)stats.candidate(chunk,overBudget);
+        if(overBudget)return;
+        selected.put(chunk.getId(),chunk);remaining[0]-=chunk.getContent().length();
+    }
+    private static List<Chunk> reviewClauseText(List<Chunk> rows,int seed){
+        int start=seed;String clause=reviewClause(rows.get(seed));
+        // A title can precede an unlabelled continuation, but only within a short observed window.
+        if(clause.isEmpty())for(int i=seed-1;i>=Math.max(0,seed-32);i--){
+            if(differentReviewClause(rows.get(seed),rows.get(i)))break;
+            if(!reviewClause(rows.get(i)).isEmpty()){start=i;clause=reviewClause(rows.get(i));break;}}
+        else while(start>0&&seed-start<32&&reviewHeading(rows.get(start)).isEmpty()&&clause.equals(reviewClause(rows.get(start-1)))
+                &&!differentReviewClause(rows.get(seed),rows.get(start-1)))start--;
+        if(clause.isEmpty())return Collections.singletonList(rows.get(seed));
+        List<Chunk> out=new ArrayList<>();Chunk first=rows.get(start);
+        for(int i=start;i<rows.size()&&out.size()<64;i++){
+            Chunk row=rows.get(i);if(i>start&&!unownedNumberedTechnicalItem(first,row)&&(differentReviewClause(first,row)
+                    ||!reviewHeading(row).isEmpty()&&(!clause.equals(reviewHeading(row))
+                        ||JsonUtils.isBlankText(first.getClauseHeadingLocation())||!Objects.equals(first.getClauseHeadingLocation(),row.getClauseHeadingLocation()))))break;
+            out.add(row);
+        }
+        return out;
+    }
+    private static boolean unownedNumberedTechnicalItem(Chunk heading,Chunk item){
+        return reviewClause(heading).matches(REVIEW_TECHNICAL_LABEL)&&JsonUtils.isBlankText(item.getClauseId())
+                &&JsonUtils.isBlankText(item.getClauseHeadingLocation())&&reviewHeading(item).matches("[0-9]{1,3}(?:\\.[0-9]{1,3})*");
+    }
+    private static boolean differentReviewClause(Chunk left,Chunk right){
+        String a=reviewClause(left),b=reviewClause(right);
+        return !a.isEmpty()&&!b.isEmpty()&&!a.equals(b)
+                ||!JsonUtils.isBlankText(left.getClauseHeadingLocation())&&!JsonUtils.isBlankText(right.getClauseHeadingLocation())
+                    &&!left.getClauseHeadingLocation().equals(right.getClauseHeadingLocation());
+    }
+    private static String reviewClause(Chunk chunk){return JsonUtils.isBlankText(chunk.getClauseId())?reviewHeading(chunk):chunk.getClauseId().trim().toUpperCase(Locale.ROOT);}
+    private static String reviewHeading(Chunk chunk){
+        String text=chunk.getContent()==null?"":chunk.getContent();java.util.regex.Matcher match=REVIEW_HEADING.matcher(text);if(!match.find())return "";
+        String id=match.group(2).toUpperCase(Locale.ROOT);
+        // Bare quantities such as "12 months" are not headings; declared clause IDs remain authoritative.
+        if(id.matches("[0-9]+")&&match.group(1)==null&&(match.end(2)>=text.length()||".)".indexOf(text.charAt(match.end(2)))<0))return "";
+        return id;
+    }
+    private static boolean requestsReviewClause(String query,String clause){
+        if(clause.isEmpty()||query==null)return false;
+        String prefix=clause.matches("[0-9]+")?"(?:clause|GCC|GCT|SCT|SCC|NTT|PRE|SL)\\s+":"";
+        boolean projectVariant=clause.endsWith(".P")&&clause.matches(REVIEW_TECHNICAL_LABEL);
+        String identifier=projectVariant?clause.substring(0,clause.length()-2):clause;
+        return java.util.regex.Pattern.compile("(?i)(?<![A-Z0-9.])"+prefix+java.util.regex.Pattern.quote(identifier)+(projectVariant?"(?:\\.P)?":"")+"(?![A-Z0-9.])").matcher(query).find();
+    }
+    private static java.math.BigInteger reviewPosition(Chunk chunk){
+        JsonNode order=chunk.getCanonicalEvidence()==null?null:chunk.getCanonicalEvidence().getSourceOrder();
+        return order!=null&&order.isIntegralNumber()&&order.bigIntegerValue().signum()>=0?order.bigIntegerValue():null;
+    }
+    private static List<Object> reviewSourceKey(Chunk chunk){
+        EvidencePointer p=chunk.getCanonicalEvidence();if(p==null||p.getDocumentId()==null
+                ||!Objects.equals(chunk.getId(),p.getCanonicalChunkId())||!Objects.equals(chunk.getDocumentId(),String.valueOf(p.getDocumentId()))
+                ||!Objects.equals(chunk.getOriginalSourceSha256(),p.getOriginalSourceSha256())||!Objects.equals(chunk.getSourceHash(),p.getCanonicalSourceHash()))return null;
+        if(Arrays.asList(chunk.getRole(),p.getProjectId(),p.getModule(),p.getOriginalSourceSha256(),p.getJavaParsedSourceHash(),p.getSourceRevisionSha256(),p.getCanonicalSourceHash(),p.getProjectionSha256(),p.getProjectionRevisionSha256()).stream().anyMatch(JsonUtils::isBlankText))return null;
+        return Arrays.asList(chunk.getRole(),p.getProjectId(),p.getModule(),p.getDocumentId(),p.getOriginalSourceSha256(),p.getJavaParsedSourceHash(),p.getSourceRevisionSha256(),p.getCanonicalSourceHash(),p.getProjectionSha256(),p.getProjectionRevisionSha256(),p.getProjectionSchema(),p.getProducerKind(),p.getSourceRevisionKind(),p.getFamilyCompositionSha256(),p.getFamilyComponentSetSha256());
     }
     public JsonNode response(Session session,String query,String role){
         return response(session,query,role,false);

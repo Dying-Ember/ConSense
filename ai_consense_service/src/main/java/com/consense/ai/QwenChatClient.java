@@ -41,8 +41,8 @@ public final class QwenChatClient implements LlmClient {
     @Override public String embedModel(){return "";}
     /** Immutable bytes built by the same adapter used for actual Qwen chat. */
     public static final class PreparedRequest {
-        private final String generationJson,probeJson;private final boolean stream;
-        private PreparedRequest(String generation,String probe,boolean streaming){generationJson=generation;probeJson=probe;stream=streaming;}
+        private final String generationJson,probeJson;private final boolean stream;private final int maxTokens;
+        private PreparedRequest(String generation,String probe,boolean streaming,int maxTokens){generationJson=generation;probeJson=probe;stream=streaming;this.maxTokens=maxTokens;}
         public String getGenerationJson(){return generationJson;} public String getProbeJson(){return probeJson;} public boolean isStream(){return stream;}
     }
     public PreparedRequest prepare(List<ChatTurn> turns,JsonNode schema,boolean stream) {
@@ -52,7 +52,7 @@ public final class QwenChatClient implements LlmClient {
         com.fasterxml.jackson.databind.node.ObjectNode generation=delegate.prepareStructuredRequest(turns,schema,stream);
         if(jsonObject)generation.putObject("response_format").put("type","json_object");
         com.fasterxml.jackson.databind.node.ObjectNode probe=generation.deepCopy();probe.put("max_tokens",1);probe.put("stream",false);
-        return new PreparedRequest(JsonUtils.write(generation),JsonUtils.write(probe),stream);
+        return new PreparedRequest(JsonUtils.write(generation),JsonUtils.write(probe),stream,generation.path("max_tokens").asInt());
     }
     /** A real cap1 generation, deliberately separate from business-output decoding and repair. */
     public String usageProbe(PreparedRequest prepared,Consumer<Runnable> cancel) {
@@ -75,7 +75,7 @@ public final class QwenChatClient implements LlmClient {
     public String generate(PreparedRequest prepared,Consumer<String> delta,Consumer<Runnable> cancel) {return generate(prepared,delta,cancel,null);}
     public String generate(PreparedRequest prepared,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<JsonNode> receipt) {
         ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta(cfg.getApiKey(),applicationCallback(delta==null?ignored->{}:delta));
-        return safeCall(()->{String result=delegate.sendPreparedQwen(prepared.generationJson,prepared.stream,safe,cancel,raw->{if(receipt!=null)receipt.accept(responseReceipt(raw));});safe.finish();return result;});
+        return safeCall(()->{String result=delegate.sendPreparedQwen(prepared.generationJson,prepared.maxTokens,prepared.stream,safe,cancel,raw->{if(receipt!=null)receipt.accept(responseReceipt(raw));});safe.finish();return result;});
     }
     private JsonNode responseReceipt(String raw) {
         com.fasterxml.jackson.databind.node.ObjectNode safe=JsonUtils.mapper().createObjectNode();

@@ -23,6 +23,7 @@ final class VettingPacketCoverage {
     }
     static void restore(SemanticPacketVO saved,SemanticTopicVO call,SemanticPacketVO packet) {
         packet.setAttempts(saved.getAttempts());
+        packet.setParentPacketId(saved.getParentPacketId());packet.setRequestedEvidenceNeedId(saved.getRequestedEvidenceNeedId());packet.setEvidenceNeeds(saved.getEvidenceNeeds());
         packet.setChecklistAssessments(saved.getChecklistAssessments());
         call.setStatus(saved.getStatus());call.setFailureKind(saved.getFailureKind());call.setError(saved.getError());call.setModelResponseMetadata(saved.getModelResponseMetadata());call.setRawResponseSha256(saved.getRawResponseSha256());
         call.setReturnedAssessments(saved.getReturnedAssessments());call.setIssueAssessments(saved.getIssueAssessments());call.setConsistentAssessments(saved.getConsistentAssessments());call.setInsufficientContextAssessments(saved.getInsufficientContextAssessments());call.setAcceptedFindings(saved.getAcceptedFindings());call.setRejectedRecords(saved.getRejectedRecords());
@@ -56,16 +57,22 @@ final class VettingPacketCoverage {
         audit.setSourceRequestCount(audit.getSourceRequests().size());audit.setPendingSourceRequestCount((int)audit.getSourceRequests().stream().filter(r->!r.getReviewExecutionStatus().startsWith("decoded")).count());
         if("failed".equals(audit.getGlobalCallStatus()))audit.setAggregateReviewStatus("failed");
         else if(audit.getPacketAudits().stream().noneMatch(SemanticPacketVO::isActualGatewayCallStarted))audit.setAggregateReviewStatus("not_submitted");
-        else if(audit.getPendingSourceRequestCount()>0||audit.getFailedPacketCount()>0||audit.getNotSubmittedPacketCount()>0||audit.getPacketAudits().stream().anyMatch(p->!"observed_tokens".equals(p.getInputBudgetStatus())))audit.setAggregateReviewStatus("partial");
+        else if(audit.getPendingSourceRequestCount()>0||audit.getFailedPacketCount()>0||audit.getNotSubmittedPacketCount()>0||audit.getPacketAudits().stream().anyMatch(p->p.getRejectedRecords()>0||!"observed_tokens".equals(p.getInputBudgetStatus())))audit.setAggregateReviewStatus("partial");
         else audit.setAggregateReviewStatus("observed_requests_decoded_scope_unknown");
-        if(audit.getPacketAudits().stream().anyMatch(p->"issue".equals(p.getCheckState())))audit.setCheckState("issue");
-        else if(audit.getPacketAudits().stream().anyMatch(p->"insufficient_evidence".equals(p.getCheckState())))audit.setCheckState("insufficient_evidence");
-        else if(!audit.getPacketAudits().isEmpty()&&audit.getPacketAudits().stream().allMatch(p->"checked_pass".equals(p.getCheckState()))&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("checked_pass");
-        else if(!audit.getPacketAudits().isEmpty()&&audit.getPacketAudits().stream().allMatch(p->"not_applicable".equals(p.getCheckState()))&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("not_applicable");
+        VettingEvidenceNeedResolution.Result resolution=VettingEvidenceNeedResolution.resolve(audit.getPacketAudits());
+        List<String> effective=audit.getPacketAudits().stream().map(resolution::effectiveCheckState).filter(state->!"superseded".equals(state)).collect(Collectors.toList());
+        if(effective.contains("issue"))audit.setCheckState("issue");
+        else if(effective.contains("insufficient_evidence"))audit.setCheckState("insufficient_evidence");
+        else if(!effective.isEmpty()&&effective.stream().allMatch("checked_pass"::equals)&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("checked_pass");
+        else if(!effective.isEmpty()&&effective.stream().allMatch("not_applicable"::equals)&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("not_applicable");
         else audit.setCheckState("not_completed");
     }
     private static String execution(SemanticPacketVO p) {
         if("failed".equals(p.getStatus()))return "failed";
+        if("completed_with_rejections".equals(p.getStatus())&&p.getAttempts().stream().anyMatch(a->"decoded".equals(a.getStatus())
+                &&a.getValidationReason()!=null&&a.getValidationReason().startsWith("BUSINESS_SHAPE_MISMATCH: ")))return "partial_business_shape_rejection";
+        if("completed_with_rejections".equals(p.getStatus())&&p.getAttempts().stream().anyMatch(a->"decoded".equals(a.getStatus())
+                &&a.getValidationReason()!=null&&a.getValidationReason().startsWith("SOURCE_ATTRIBUTION_MISMATCH: ")))return "partial_source_attribution_rejection";
         if("provider_estimated_fit".equals(p.getInputBudgetStatus())) {
             if("completed_with_rejections".equals(p.getStatus()))return "decoded_provider_estimate_with_rejections";
             return Arrays.asList("completed","completed_empty").contains(p.getStatus())?"decoded_provider_estimate":"not_submitted";

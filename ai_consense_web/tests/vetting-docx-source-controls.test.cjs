@@ -16,9 +16,9 @@ const finding = (code, items) => ({ code, status: 'Open', group: 'reference', sc
   runId: 'run-1', generatedRevisionSha256: 'generated', sourceSnapshotSha256: 'source', fileKey: 'SCC', pageNo: null })
 const plain = value => JSON.parse(JSON.stringify(value))
 
-async function mount(items) {
+async function mount(items, findingOverrides = {}) {
   const store = vue.reactive({ activeProjectId: 'project-a', locale: 'en', notify() {}, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
-  const findings = [finding('F1', items), finding('F2', [evidence({ documentId: 'other', fileName: 'other.docx' })])]
+  const findings = [{ ...finding('F1', items), ...findingOverrides }, finding('F2', [evidence({ documentId: 'other', fileName: 'other.docx' })])]
   const readCalls = []
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), { boundaries: {
     '@noble/hashes/sha256': require('@noble/hashes/sha256'),
@@ -107,9 +107,11 @@ test('source close controls release selection; legacy DOCX remains readable with
   } finally { h.dispose() }
 })
 
-test('canonical/fixed panels and PDF links keep their existing paths; incomplete source identity cannot open', async () => {
+test('canonical DOCX opens the guarded reader while retaining secondary download, fixed panels and PDF links', async () => {
+  const canonicalEvidence = { addressKind: 'canonical_adoption_unit', projectId: 'project-a', module: 'vetting', documentId: 42,
+    canonicalChunkId: 'source-unit', originalSourceSha256: 'a'.repeat(64), javaParsedSourceHash: 'registered-source-hash' }
   const h = await mount([
-    evidence({ canonicalEvidence: { source: 'synthetic-canonical' }, fileName: 'canonical.docx' }),
+    evidence({ canonicalEvidence, fileName: 'canonical.docx', clauseId: 'SCC 4.301', anchor: 'native/location' }),
     evidence({ fixedBaselineEvidence: { source: 'synthetic-fixed' }, documentId: 'fixed:1', fileName: 'fixed.docx' }),
     evidence({ fileName: 'actual.pdf', pageNo: 'P7', nativePositions: undefined }),
     evidence({ fileName: 'missing-hash.docx', originalSourceSha256: undefined })
@@ -118,9 +120,12 @@ test('canonical/fixed panels and PDF links keep their existing paths; incomplete
     await h.openFinding('F1')
     assert.ok(find(h.root, node => node.props?.class === 'canonical-panel'))
     assert.ok(find(h.root, node => node.props?.class === 'fixed-panel'))
-    assert.equal(originalButton(h.root), undefined, 'Only an ordinary DOCX with a complete original identity enters the shared reader')
+    const open = originalButton(h.root)
+    assert.ok(open, 'Canonical DOCX has the same first-level original-reading action')
+    for (let parent = open.parent; parent; parent = parent.parent) assert.notEqual(parent.tag, 'details')
+    assert.ok(text(h.root).includes('SCC 4.301'), 'The readable clause survives evidence detail normalization')
     const canonical = find(h.root, node => node.tag === 'a' && node.props?.download === 'canonical.docx')
-    assert.ok(canonical, 'A normal canonical DOCX uses the native download link')
+    assert.ok(canonical, 'The exact canonical original remains available as a secondary download')
     assert.equal(canonical.props.target, undefined, 'A non-PDF original does not open a new browsing tab')
     assert.equal(text(canonical).trim(), 'vetting.drawer.downloadOriginal', 'The download has a visible text label')
     const canonicalUrl = new URL(canonical.props.href, 'http://localhost')
@@ -133,13 +138,19 @@ test('canonical/fixed panels and PDF links keep their existing paths; incomplete
     assert.equal(new URL(pdf.props.href, 'http://localhost').searchParams.get('sourceRole'), 'tender')
     assert.equal(pdf.props.target, '_blank'); assert.equal(pdf.props.download, undefined)
     assert.equal(text(pdf).trim(), 'vetting.drawer.openOriginal')
-    assert.equal(h.readCalls.length, 0)
+    open.props.onClick(); await settle()
+    assert.equal(h.readCalls.length, 1)
+    assert.equal(h.readCalls[0].sourceModule, 'vetting')
+    assert.deepEqual(plain(h.readCalls[0].citation), {
+      evidenceId: 'F1', documentId: '42', fileLabel: 'canonical.docx', pageNo: '', anchor: 'native/location', content: 'Repeated wording exists elsewhere.', score: 0,
+      sourceHash: 'registered-source-hash', originalSourceSha256: 'a'.repeat(64), sourceRole: 'tender', nativePositions, canonicalEvidence: [canonicalEvidence]
+    }, 'The existing source loader receives the recorded original identity and canonical address without substitution')
   } finally { h.dispose() }
 })
 
-test('ordinary originals without a valid recorded role remain unavailable rather than adopting the current role', async () => {
+test('ordinary and canonical originals without a valid recorded role remain unavailable', async () => {
   for (const sourceRole of [undefined, '', 'drawing', 'TENDER']) {
-    const h = await mount([evidence({ sourceRole }), evidence({ fileName: 'actual.pdf', sourceRole })])
+    const h = await mount([evidence({ sourceRole }), evidence({ canonicalEvidence: { source: 'synthetic-canonical' }, sourceRole }), evidence({ fileName: 'actual.pdf', sourceRole })])
     try {
       await h.openFinding('F1')
       assert.ok(!originalButton(h.root), 'Missing or invalid recorded role cannot open a DOCX original')
@@ -147,4 +158,41 @@ test('ordinary originals without a valid recorded role remain unavailable rather
       assert.equal(h.readCalls.length, 0)
     } finally { h.dispose() }
   }
+})
+
+test('rule provenance does not require a model packet and unresolved location remains visible', async () => {
+  const h = await mount([evidence({ located: false, nativePositions, clauseId: 'SCC 4.301' })], { source: 'rule' })
+  try {
+    await h.openFinding('F1')
+    const drawer = find(h.root, node => node.tag === 'aside')
+    assert.ok(text(drawer).includes('vetting.coverage.ruleEvidence'))
+    assert.ok(!text(drawer).includes('vetting.coverage.legacyPacketUnknown'))
+    assert.ok(!find(drawer, node => node.tag === 'details' && String(node.props?.class).includes('evidence-technical-details')), 'No model packet is invented for rule evidence')
+    assert.ok(text(drawer).includes('vetting.drawer.notLocated'), 'Original reading never promotes unresolved canonical evidence')
+    const open = originalButton(drawer); assert.ok(open)
+    for (let parent = open.parent; parent; parent = parent.parent) assert.notEqual(parent.tag, 'details')
+    open.props.onClick(); await settle()
+    assert.deepEqual(plain(h.readCalls[0].citation.nativePositions), nativePositions)
+    assert.ok(text(drawer).includes('vetting.drawer.notLocated'))
+  } finally { h.dispose() }
+})
+
+test('model packets and historical unknown provenance keep their separate messages', async () => {
+  for (const source of ['llm', undefined]) {
+    const h = await mount([evidence()], { source })
+    try {
+      await h.openFinding('F1')
+      const drawer = find(h.root, node => node.tag === 'aside')
+      assert.ok(text(drawer).includes('vetting.coverage.legacyPacketUnknown'))
+      assert.ok(!text(drawer).includes('vetting.coverage.ruleEvidence'))
+    } finally { h.dispose() }
+  }
+  const h = await mount([evidence({ packetId: 'actual-model-packet', packetSourceSnapshotSha256: 'e'.repeat(64) })], { source: 'llm' })
+  try {
+    await h.openFinding('F1')
+    const drawer = find(h.root, node => node.tag === 'aside')
+    assert.ok(text(drawer).includes('actual-model-packet'))
+    assert.ok(!text(drawer).includes('vetting.coverage.ruleEvidence'))
+    assert.ok(!text(drawer).includes('vetting.coverage.legacyPacketUnknown'))
+  } finally { h.dispose() }
 })

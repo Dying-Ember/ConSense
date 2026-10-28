@@ -212,7 +212,7 @@ watch(activeKey, () => applyActive())
               <div class="muted small">
                 <template v-if="active.placeholderCount > 0">
                   <AppIcon name="info" :size="13" />
-                  {{ t('prompts.placeholderHint', { count: active.placeholderCount }) }}
+                  {{ t(active.group === 'vetting' ? 'prompts.vettingPlaceholderHint' : 'prompts.placeholderHint', { count: active.placeholderCount }) }}
                 </template>
                 <template v-else>
                   <AppIcon name="info" :size="13" />{{ t('prompts.noPlaceholderHint') }}

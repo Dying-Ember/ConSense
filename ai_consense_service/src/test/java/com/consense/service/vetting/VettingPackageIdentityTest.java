@@ -28,6 +28,17 @@ class VettingPackageIdentityTest {
     @Test void emptyUnobservedAndPlaceholderFieldsNeverProducePass(){
         for(List<VettingRuleEngine.Source> sources:Arrays.asList(Collections.<VettingRuleEngine.Source>emptyList(),Collections.singletonList(source("1",block("a","Contract No: ____"))))){VettingPackageIdentity.Review review=VettingPackageIdentity.review(sources,authority("",null));assertTrue(review.outputs().isEmpty());assertEquals("unknown_no_own_declaration",review.ledger().path("fields").path("number").path("status").asText());}
     }
+    @Test void ellipsisFormPlaceholderIsNotAConflictingContractNumber(){
+        VettingPackageIdentity.Review review=VettingPackageIdentity.review(Arrays.asList(
+                source("bond",block("number","Contract No. 20250101")),
+                source("declaration",block("number","Contract No. 20250101")),
+                source("form",block("blank","Contract No.: \u2026\u2026\u2026."))),null);
+        assertTrue(review.outputs().isEmpty());
+        assertEquals("candidate_agreement_scope_unknown",review.ledger().path("fields").path("number").path("status").asText());
+        assertEquals("value_missing_or_placeholder",review.ledger().path("declarations").get(2).path("reason").asText());
+        assertEquals(1,VettingPackageIdentity.review(Arrays.asList(source("one",block("a","Contract No. 20250101")),
+                source("two",block("b","Contract No. 20250102"))),null).outputs().size());
+    }
     @Test void whitespaceComparisonKeepsRawUnicodePunctuationCaseAndLeadingZeroes(){
         String text="Project Title: New\u00a0\tHousing";VettingPackageIdentity.Review agreement=VettingPackageIdentity.review(Collections.singletonList(source("1",block("a",text))),authority(null,"New Housing"));
         assertTrue(agreement.outputs().isEmpty());assertEquals("New\u00a0\tHousing",agreement.ledger().path("declarations").get(0).path("rawValue").asText());assertEquals("candidate_agreement_scope_unknown",agreement.ledger().path("fields").path("title").path("status").asText());

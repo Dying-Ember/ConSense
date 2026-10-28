@@ -83,7 +83,7 @@ class VettingRecoveryWorkflowTest {
             try { com.consense.service.sources.SourceContentDigestMigration.install(connection);return null; }
             catch(Exception failure) { throw new java.sql.SQLException(failure); }
         });
-        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
         when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<byte[]>getArgument(0).clone();});
         // Explicit renderer replacement: durable recovery/content only, not LibreOffice acceptance.
         doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));

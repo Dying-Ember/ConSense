@@ -74,6 +74,23 @@ class CanonicalSourceBindingPersistenceTest {
         assertNull(loaded.getSnapshotContentSha256(),"Legacy fixture must not acquire an inferred trusted content stamp");
         assertEquals(1,repository.findByProjectIdAndDocumentIdOrderByIdDesc("project-a",11L).size());
     }
+    @Test void fullScopeHistoriesUseOneBoundedScalarQueryAndRetainForeignRevisions() {
+        java.util.List<Long> anchors=new java.util.ArrayList<>();
+        for(long document=1;document<=33;document++)for(int revision=0;revision<3;revision++) {
+            CanonicalSourceBinding row=new CanonicalSourceBinding();row.setProjectId("batch-history");row.setDocumentId(document);row.setProjectionSha256(String.format(java.util.Locale.ROOT,"%064d",document*10+revision));
+            row.setOriginalSourceSha256(sha());row.setJavaParsedSourceHash(sha());row.setRoutingSha256(sha());row.setSourceRevisionSha256(sha());row.setProjectionRevisionSha256(sha());row.setCanonicalSourceHash(sha());row.setScopePolicySha256(sha());
+            row.setSnapshotBytesSha256(sha());row.setDeclaredModule(revision==2?"advisory":"vetting");row.setEligibleModulesJson("[\"vetting\",\"advisory\"]");row.setSnapshotJson("{\"unusedBody\":\""+"x".repeat(16384)+"\"}");
+            repository.saveAndFlush(row);if(revision==1)anchors.add(row.getId());
+        }
+        entityManager.clear();org.hibernate.stat.Statistics statistics=entityManager.getEntityManagerFactory().unwrap(org.hibernate.SessionFactory.class).getStatistics();statistics.clear();SqlCapture.statements.clear();
+        java.util.List<CanonicalSourceBindingRepository.CompactMetadata> rows=repository.findCompactHistoriesForSelected("batch-history",anchors,org.springframework.data.domain.PageRequest.of(0,67));
+        assertEquals(66,rows.size());assertEquals(1,SqlCapture.statements.size());String sql=SqlCapture.statements.get(0).toLowerCase(java.util.Locale.ROOT);
+        assertFalse(sql.contains("snapshot_json"),sql);assertTrue(sql.contains(" limit ")||sql.contains(" fetch first "),sql);
+        assertEquals(0,statistics.getEntityStatistics(CanonicalSourceBinding.class.getName()).getLoadCount());
+        for(int i=0;i<33;i++){assertEquals(i+1L,rows.get(2*i).getDocumentId());assertEquals("advisory",rows.get(2*i).getDeclaredModule());assertEquals(anchors.get(i),rows.get(2*i+1).getId());}
+        jdbc.update("DELETE FROM canonical_source_binding WHERE id=?",anchors.get(0));entityManager.clear();
+        assertEquals(64,repository.findCompactHistoriesForSelected("batch-history",anchors,org.springframework.data.domain.PageRequest.of(0,67)).size(),"Deleting the retained anchor removes its complete history group so the guard can reject it");
+    }
     @Test void familyPinsAndNullLegacyReviewPinsRoundTripInActualJpaAfterExactUpgrade()throws Exception{
         CanonicalSourceBinding row=com.consense.service.sources.NativePdfSourceFamilyFixture.binding("authored-family-v1.json");row.setId(null);
         repository.saveAndFlush(row);entityManager.clear();CanonicalSourceBinding loaded=repository.findById(row.getId()).get();

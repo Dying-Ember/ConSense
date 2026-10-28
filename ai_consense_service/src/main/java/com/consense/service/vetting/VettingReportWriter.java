@@ -33,6 +33,7 @@ import java.util.zip.*;
 /** Word and PDF exports share one report outline and the same source snapshot. */
 @Component
 public class VettingReportWriter {
+    static final String PARTIAL_RESULTS_NOTICE="Review run failed. Only partial results from accepted source packets are available. Unfinished source requests remain unreviewed.";
     private static final int FURNITURE_SIZE = 11;
     private static final float MARGIN = 48;
     private static final float WIDTH = PDRectangle.A4.getWidth() - MARGIN * 2;
@@ -205,6 +206,7 @@ public class VettingReportWriter {
     }
     private void writeBusinessWord(XWPFDocument document,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist,Set<String> appAuthoredEnglish) {
         wordLine(document,"Comments on Tender Documentation","Title",false,appAuthoredEnglish);
+        if(partialResults(job))wordLine(document,PARTIAL_RESULTS_NOTICE,"Normal",true,appAuthoredEnglish);
         XWPFTable metadata=document.createTable(4,3);metadata.setWidth("100%");
         String[][] fields={{"Contract Title",reportIdentity(job,"title")},{"Contract No.",reportIdentity(job,"number")},{"Contract Manager","Not provided"},{"Surveyor","Not provided"}};
         for(String[] field:fields)knownEnglish(appAuthoredEnglish,field[0]);
@@ -227,7 +229,9 @@ public class VettingReportWriter {
         for(VettingReportPresentation.Table table:VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)))wordTable(document,table,appAuthoredEnglish);
     }
     private static void knownEnglish(Set<String> known,String text){Collections.addAll(known,text.split("[\\r\\n]+",-1));}
+    private static boolean partialResults(VettingJobVO job){return job!=null&&"FAILED".equals(job.getStatus())&&job.getResult()!=null&&Boolean.TRUE.equals(job.getResult().getPartialResults());}
     private static final Set<String> APP_READER_ENGLISH=Set.of(
+            PARTIAL_RESULTS_NOTICE,
             "Supporting source quotations","Additional recorded source checks","Review limitations and unreviewed scope","Package identity coordination",
             "The numbered comments are review suggestions. Existing recorded source clauses are retained. Recorded source positions and located quotations do not confirm formal clause ownership or the legal conclusion. Candidate equivalence remains unconfirmed.",
             "No findings were recorded; this does not establish that the documents have no issues.",
@@ -257,6 +261,19 @@ public class VettingReportWriter {
     private static boolean appOwnedReaderEnglish(String text){
         // Only digits vary in these exact application templates; filenames, quotes and arbitrary suffixes never match.
         return APP_READER_ENGLISH.contains(text.replaceAll("[0-9]+","{n}"));
+    }
+    /** Language provenance only: exact server-only vocabulary and numeric templates, never arbitrary reader values. */
+    static Set<String> appAuthoredJsonEnglish(JsonNode presentation){
+        Set<String> vocabulary=new HashSet<>(),values=new HashSet<>(),known=new HashSet<>();
+        jsonTextValues(JsonUtils.mapper().valueToTree(VettingReportPresentation.readerChecklist(Collections.emptyList(),Collections.emptyList())),vocabulary);
+        jsonTextValues(JsonUtils.mapper().valueToTree(VettingReportPresentation.readerComments(Collections.emptyList(),null)),vocabulary);
+        jsonTextValues(JsonUtils.mapper().valueToTree(VettingReportPresentation.readerEvidenceIndex(Collections.emptyList(),null)),vocabulary);
+        jsonTextValues(presentation,values);
+        for(String value:values)if(vocabulary.contains(value)||appOwnedReaderEnglish(value))known.add(value);
+        return known;
+    }
+    private static void jsonTextValues(JsonNode node,Set<String> values){
+        if(node==null)return;if(node.isTextual())values.add(node.textValue());else if(node.isContainerNode())node.forEach(child->jsonTextValues(child,values));
     }
     private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak,Set<String> known){knownEnglish(known,text);wordLine(document,text,style,pageBreak);}
     private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak) {
@@ -307,7 +324,7 @@ public class VettingReportWriter {
         return table;
     }
     private void setWordCells(XWPFTableRow row,List<String> values,int[] widths,boolean header) {
-        row.getCtRow().addNewTrPr();row.setCantSplitRow(true);
+        row.getCtRow().addNewTrPr();row.setCantSplitRow(header);
         // POI seeds a new row from the merged first row's physical cell count.
         while(row.getTableCells().size()<values.size())row.addNewTableCell();
         for(int i=0;i<values.size();i++) {
@@ -321,6 +338,7 @@ public class VettingReportWriter {
     }
     private void writeBusinessPdf(PdfCursor cursor,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) throws IOException {
         cursor.centeredTitle("Comments on Tender Documentation");
+        if(partialResults(job))cursor.block(new Block(0,PARTIAL_RESULTS_NOTICE),null);
         cursor.metadata("Contract Title",reportIdentity(job,"title"));
         cursor.metadata("Contract No.",reportIdentity(job,"number"));
         cursor.metadata("Contract Manager","Not provided");cursor.metadata("Surveyor","Not provided");
@@ -362,6 +380,7 @@ public class VettingReportWriter {
 
     private List<Block> outline(Project project,List<FindingVO> findings,VettingJobVO job,String lang) {
         List<Block> blocks=new ArrayList<>();CoverageVO coverage=job==null?null:job.getCoverage();
+        if(partialResults(job))blocks.add(new Block(0,PARTIAL_RESULTS_NOTICE));
         identityOutline(blocks,job);
         blocks.add(new Block(2,tr(lang,"支持审查意见的原文摘录","支持審查意見的原文摘錄","Supporting source quotations")));
         blocks.add(new Block(0,tr(lang,"编号意见均为待复核的审查建议。已有来源条款归属保留；原文位置和已定位引文本身不确认正式条款归属或法律结论，候选意见是否等价尚未确认。","編號意見均為待覆核的審查建議。已有來源條款歸屬保留；原文位置和已定位引文本身不確認正式條款歸屬或法律結論，候選意見是否等價尚未確認。","The numbered comments are review suggestions. Existing recorded source clauses are retained. Recorded source positions and located quotations do not confirm formal clause ownership or the legal conclusion. Candidate equivalence remains unconfirmed.")));
@@ -500,7 +519,7 @@ public class VettingReportWriter {
     }
     private void readerEvidence(List<Block> blocks,FindingEvidence evidence,String lang) {
         String page=JsonUtils.isBlankText(evidence.getPageNo())?"":("; recorded page: "+evidence.getPageNo());
-        Block label=compact(new Block(0,available(evidence.getFileName(),lang)+" — "+VettingReportPresentation.readerEvidenceLocation(evidence)+page+"; "+verification(evidence.isLocated()?"verified":"unverified",lang)));
+        Block label=compact(new Block(0,VettingReportPresentation.evidenceName(evidence)+" — "+VettingReportPresentation.readerEvidenceLocation(evidence)+page+"; "+verification(evidence.isLocated()?"verified":"unverified",lang)));
         label.keepWithNextOpening=true;blocks.add(label);
         Block quote=new Block(0,JsonUtils.isBlankText(evidence.getQuote())?"Verbatim source quotation is unavailable; source review is required.":evidence.getQuote());quote.quote=true;blocks.add(quote);
         if(evidence.getFixedBaselineEvidence()!=null)readerReference(blocks,evidence.getFixedBaselineEvidence());

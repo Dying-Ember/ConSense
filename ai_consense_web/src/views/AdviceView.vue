@@ -7,9 +7,11 @@ import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDoc
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
+import FixedReferenceSelection from '@/components/FixedReferenceSelection.vue'
 import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
 import FixedBaselineEvidencePanel from '@/components/FixedBaselineEvidencePanel.vue'
 import AdviceAnswer from '@/components/AdviceAnswer.vue'
+import AppModal from '@/components/AppModal.vue'
 import AdviceSourceReader from '@/components/AdviceSourceReader.vue'
 import { streamAdvice, stopAdvice } from '@/advice/adviceStream'
 import { claimReviewHandoff, handoffSourceWarnings, reviewHandoffCopy, reviewQuestion, type ReviewHandoff } from '@/advice/reviewHandoff'
@@ -28,12 +30,21 @@ const scope = ref('fullset')
 const basisScope = ref<AdviceBasisScope>('project_contract')
 const sessions = ref<AdviceSession[]>([])
 const sessionId = ref('')
+const choosingNewScope = ref(false)
+const previousConversation = ref<{ id: string; question: string } | null>(null)
+const clearTarget = ref<{ projectId: string; sessionId: string; epoch: number; scopeEpoch: number; label: string } | null>(null)
 const sessionCreating = ref(false)
 const sessionError = ref('')
 let sessionSequence = 0
 const asking = ref(false)
 const indexing = ref(false)
 const activeCitation = ref<Citation | null>(null)
+const showCompletePassage = ref(false)
+const longCitation = computed(() => (activeCitation.value?.content.length ?? 0) > 1200)
+const displayedCitation = computed(() => {
+  const content = activeCitation.value?.content ?? ''
+  return longCitation.value && !showCompletePassage.value ? `${Array.from(content).slice(0, 1200).join('').trimEnd()}…` : content
+})
 const activeSources = ref<Citation[]>([])
 const activeSourceScope = ref('fullset')
 const historyEl = ref<HTMLElement | null>(null)
@@ -72,6 +83,9 @@ const evidenceCopy = {
   session: { zhHans: '咨询会话', zhHant: '諮詢會話', en: 'Advisory session' },
   legacy: { zhHans: '历史对话／新会话范围', zhHant: '歷史對話／新會話範圍', en: 'Legacy history / new session scope' },
   newSession: { zhHans: '建立新会话', zhHant: '建立新會話', en: 'Create new session' },
+  changeScope: { zhHans: '切换参考范围', zhHant: '切換參考範圍', en: 'Change reference scope' },
+  newScope: { zhHans: '新会话：选择参考范围', zhHant: '新會話：選擇參考範圍', en: 'New conversation: choose reference scope' },
+  newScopeNote: { zhHans: '请选择新会话的参考范围。上一会话仍会保存，不会用于新范围的回答。', zhHant: '請選擇新會話的參考範圍。上一會話仍會保存，不會用於新範圍的回答。', en: 'Choose the reference scope for the new conversation. The previous conversation remains saved and will not be used in the new scope.' },
   project: { zhHans: '项目', zhHant: '項目', en: 'Project' },
   basis: { zhHans: '证据用途', zhHant: '證據用途', en: 'Evidence basis' },
   projectBasis: { zhHans: '本项目合同咨询', zhHant: '本項目合約諮詢', en: 'Project contract advice' },
@@ -106,7 +120,7 @@ const evidenceCopy = {
 const projectId = computed(() => store.activeProjectId)
 const projectName = computed(() => store.activeProject?.id === projectId.value ? pick(store.activeProject.name) : t('common.empty'))
 const activeSessionLabel = computed(() => {
-  if (!sessionId.value) return pick(evidenceCopy.legacy)
+  if (!sessionId.value) return pick(choosingNewScope.value ? evidenceCopy.newScope : evidenceCopy.legacy)
   const selected = sessions.value.find(item => item.id === sessionId.value)
   return selected ? sessionLabel(selected) : t('common.unconfirmed')
 })
@@ -222,6 +236,7 @@ function invalidateIndexCheck() {
 }
 
 function resetScopedState() {
+  clearTarget.value = null
   void stopCurrentRequest()
   if (!activeIndexCheck || !currentIndexCheck(activeIndexCheck)) invalidateIndexCheck()
   ++scopeEpoch; ++rebuildSequence; ++askSequence; ++reloadSequence; ++sourceCheckSequence; ++preparationSequence
@@ -260,14 +275,15 @@ function reloadIndexStatus(): Promise<void> {
 async function reload() {
   const id = projectId.value
   const selectedSession = sessionId.value, selectedScopeEpoch = scopeEpoch
+  const newScope = choosingNewScope.value && !selectedSession
   const epoch = viewEpoch
   const sequence = ++reloadSequence
   if (!id) return
   const [messageList, quickList] = await Promise.all([
-    adviceApi.messages(id, selectedSession || undefined),
+    newScope ? Promise.resolve([]) : adviceApi.messages(id, selectedSession || undefined),
     adviceApi.quickQuestions(id)
   ])
-  if (epoch !== viewEpoch || sequence !== reloadSequence || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
+  if (epoch !== viewEpoch || sequence !== reloadSequence || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch || newScope !== (choosingNewScope.value && !sessionId.value)) return
   messages.value = messageList
   quickQuestions.value = quickList
   activeSources.value = []
@@ -276,12 +292,19 @@ async function reload() {
 }
 
 async function reloadSessions() {
-  const id = projectId.value, epoch = viewEpoch, sequence = ++sessionSequence
+  const id = projectId.value, epoch = viewEpoch, sequence = ++sessionSequence, selectedScopeEpoch = scopeEpoch
   sessions.value = []; sessionError.value = ''
   if (!id) return
   try {
     const list = await adviceApi.sessions(id)
-    if (epoch === viewEpoch && id === projectId.value && sequence === sessionSequence) sessions.value = list.filter(item => item.projectId === id)
+    if (epoch !== viewEpoch || id !== projectId.value || sequence !== sessionSequence) return
+    sessions.value = list.filter(item => item.projectId === id)
+    if (sessionId.value || choosingNewScope.value || handoff.value || handoffError.value || selectedScopeEpoch !== scopeEpoch) return
+    try {
+      const saved = sessionStorage.getItem(`consense.advice.session.${id}`)
+      if (sessions.value.some(item => item.id === saved)) sessionId.value = saved!
+      else if (saved) sessionStorage.removeItem(`consense.advice.session.${id}`)
+    } catch { /* Conversation history remains available when browser storage is disabled. */ }
   } catch (caught) { if (epoch === viewEpoch && sequence === sessionSequence) sessionError.value = adviceError(caught) }
 }
 
@@ -293,11 +316,25 @@ async function createSession() {
     const created = await adviceApi.createSession(id, selectedScope, basis)
     if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch) return false
     if (created.projectId !== id || created.scope !== selectedScope || created.basisScope !== basis || !created.id) throw new Error('ADVICE_SESSION_IDENTITY_MISMATCH')
-    sessions.value.push(created); sessionId.value = created.id
+    sessions.value.push(created); choosingNewScope.value = false; sessionId.value = created.id
     await nextTick()
     return true
   } catch (caught) { if (epoch === viewEpoch) sessionError.value = adviceError(caught); return false }
   finally { if (epoch === viewEpoch) sessionCreating.value = false }
+}
+
+function changeReferenceScope() {
+  if (asking.value || sessionCreating.value) return
+  previousConversation.value = { id: sessionId.value, question: question.value }
+  question.value = ''
+  choosingNewScope.value = true
+  sessionId.value = ''
+}
+
+function cancelReferenceScope() {
+  if (asking.value || sessionCreating.value || !previousConversation.value) return
+  question.value = previousConversation.value.question
+  sessionId.value = previousConversation.value.id
 }
 
 async function reloadScope() {
@@ -349,19 +386,26 @@ async function prepareSources() {
 }
 
 onMounted(() => { void reload(); void reloadSessions(); void reloadScope(); void reloadIndexStatus() })
-watch(projectId, () => {
-  viewEpoch++
-  ++sessionSequence; sessions.value = []; sessionId.value = ''; sessionCreating.value = false; sessionError.value = ''
+watch(projectId, async () => {
+  const epoch = ++viewEpoch
+  ++sessionSequence; sessions.value = []; sessionId.value = ''; choosingNewScope.value = false; previousConversation.value = null; sessionCreating.value = false; sessionError.value = ''
   resetScopedState()
   if (handoff.value || handoffError.value) clearImportedDraft()
   scopeLoaded.value = false
   messages.value = []; scopeDocuments.value = []; activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
+  await nextTick()
+  if (epoch !== viewEpoch) return
   void reload(); void reloadSessions(); void reloadScope(); void reloadIndexStatus()
 })
 watch(() => [projectId.value, route.query.review], claimImportedDraft, { immediate: true })
 watch(() => [scope.value, basisScope.value], () => { resetScopedState(); messages.value = []; void reload(); void reloadScope(); void reloadIndexStatus() })
 watch(sessionId, () => {
   const selected = sessions.value.find(item => item.id === sessionId.value)
+  if (selected) {
+    choosingNewScope.value = false; previousConversation.value = null
+    try { sessionStorage.setItem(`consense.advice.session.${projectId.value}`, selected.id) }
+    catch { /* Saving the selection must not block a saved conversation. */ }
+  }
   const sameScope = !selected || (selected.scope === scope.value && selected.basisScope === basisScope.value)
   const status = sameScope ? indexStatus.value : null
   resetScopedState(); messages.value = []
@@ -530,7 +574,15 @@ async function refreshIndex() {
   }
 }
 
+function requestClearChat() {
+  if (!projectId.value || choosingNewScope.value || sessionCreating.value) return
+  clearTarget.value = { projectId: projectId.value, sessionId: sessionId.value, epoch: viewEpoch, scopeEpoch, label: activeSessionLabel.value }
+}
+
 async function clearChat() {
+  const target = clearTarget.value
+  if (!target || choosingNewScope.value || sessionCreating.value || target.projectId !== projectId.value || target.sessionId !== sessionId.value || target.epoch !== viewEpoch || target.scopeEpoch !== scopeEpoch) return
+  clearTarget.value = null
   const id = projectId.value, epoch = viewEpoch, selectedSession = sessionId.value, selectedScopeEpoch = scopeEpoch
   const stopped = stopCurrentRequest()
   ++askSequence; ++reloadSequence; asking.value = true
@@ -558,6 +610,7 @@ function replyToClarification(message: ChatMessage) {
 }
 
 function selectCitation(citation: Citation) {
+  showCompletePassage.value = false
   activeCitation.value = citation
 }
 
@@ -575,6 +628,7 @@ function openMessageSources(message: ChatMessage, citationText?: string) {
   if (citationText && matches.length !== 1) return
   activeSourceScope.value = message.sourceScope ?? scope.value
   activeCitation.value = matches[0] ?? message.sources[0]
+  showCompletePassage.value = false
   sourceDetails.value = false
 }
 
@@ -658,7 +712,7 @@ async function askPrecedence() {
         <button class="btn" type="button" :disabled="asking || sourcesUnavailable || preparingSources" @click="askPrecedence">
           <AppIcon name="info" :size="15" />{{ t('advice.actions.precedence') }}
         </button>
-        <button class="btn" type="button" @click="clearChat">
+        <button class="btn" type="button" :disabled="!projectId || choosingNewScope || sessionCreating" @click="requestClearChat">
           <AppIcon name="trash" :size="15" />{{ t('advice.actions.clear') }}
         </button>
       </div>
@@ -666,7 +720,15 @@ async function askPrecedence() {
 
     <p v-if="indexChecking" class="small muted" role="status" data-advice-index-checking>{{ streamCopy('Checking source scope and index availability. Your question draft is retained.', '正在核对来源范围和索引状态，问题草稿已保留。', '正在核對來源範圍和索引狀態，問題草稿已保留。') }}</p>
 
-    <p class="small muted" data-sl-reference-scope>{{ pick({ en: 'SL reference retrieval uses the project editions saved in “SL editions and library” above; project adoption remains unconfirmed.', zhHans: 'SL 参考检索使用顶部“SL 版本与资料库”中本项目已保存的版本；项目采用状态仍待确认。', zhHant: 'SL 參考檢索使用頂部「SL 版本與資料庫」中本項目已儲存的版本；項目採用狀態仍待確認。' }) }}</p>
+    <AppModal v-if="clearTarget" :open="true" :title="streamCopy('Clear this conversation?', '清空当前对话？', '清空目前對話？')" @close="clearTarget = null" @keydown.esc="clearTarget = null">
+      <p>{{ streamCopy('This deletes its saved questions and answers and cannot be undone. Other conversations are kept.', '这会删除本对话已保存的问题和答案，无法撤销。其他对话会保留。', '這會刪除本對話已儲存的問題和答案，無法復原。其他對話會保留。') }}</p>
+      <p>{{ clearTarget.label }}</p>
+      <template #footer>
+        <button class="btn" type="button" autofocus @click="clearTarget = null">{{ t('common.cancel') }}</button>
+        <button class="btn danger" type="button" @click="clearChat">{{ streamCopy('Clear saved messages', '确认清空已保存消息', '確認清空已儲存訊息') }}</button>
+      </template>
+    </AppModal>
+    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="advisory" />
     <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ t('advice.sourceScope.includedCount', { count: scopeDocuments.filter(item => item.included).length }) }}</summary>
       <p class="muted small">{{ pick(evidenceCopy.project) }} ID: {{ projectId }} · {{ pick(evidenceCopy.session) }} ID: {{ sessionId || '—' }}</p>
@@ -731,7 +793,10 @@ async function askPrecedence() {
               </select>
             </label>
             <button class="btn" type="button" :disabled="sessionCreating || asking" @click="createSession">{{ pick(evidenceCopy.newSession) }}</button>
+            <button v-if="sessionId" class="btn" type="button" :disabled="sessionCreating || asking" @click="changeReferenceScope">{{ pick(evidenceCopy.changeScope) }}</button>
+            <button v-if="choosingNewScope && previousConversation" class="btn" type="button" :disabled="sessionCreating || asking" @click="cancelReferenceScope">{{ streamCopy('Return to previous conversation', '返回上一对话', '返回上一對話') }}</button>
             <p class="muted small">{{ pick(evidenceCopy.binding) }}</p>
+            <p v-if="choosingNewScope" class="muted small" role="status">{{ pick(evidenceCopy.newScopeNote) }}</p>
             <p v-if="sessionError" class="warning-note" role="alert">{{ sessionError }}</p>
             <p v-if="basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
           </div>
@@ -759,8 +824,7 @@ async function askPrecedence() {
                   <p v-if="message.content" class="muted small">{{ streamCopy('The answer is continuing; the complete result has not been saved yet.', '答复正在继续，完整结果尚未保存。', '答覆正在繼續，完整結果尚未儲存。') }}</p>
                 </div>
                 <p v-if="message.deliveryState === 'failed' || message.deliveryState === 'stopped'" class="warning-note" role="alert">{{ message.deliveryState === 'stopped' ? streamCopy('Stopped. Any displayed portions are not a completed answer.', '已停止，已显示的部分不构成完整答复。', '已停止，已顯示的部分不構成完整答覆。') : streamCopy('This request failed before completion. Any displayed portions are not a completed answer.', '本次请求未完成，已显示的部分不构成完整答复。', '本次請求未完成，已顯示的部分不構成完整答覆。') }}</p>
-                <p v-if="!message.deliveryState || message.deliveryState === 'complete'" class="muted small">{{ message.modelIdentity?.model || message.model ? `${t('llm.recordedModel')}: ${message.modelIdentity?.model || message.model}` : t('llm.identityUnknown') }}<template v-if="message.modelIdentity"> · {{ message.modelIdentity.profileId }} · {{ message.modelIdentity.provider }}</template></p>
-                <p v-if="message.modelIdentity && (!message.deliveryState || message.deliveryState === 'complete')" class="muted small">{{ t('llm.identityNote') }}</p>
+                <p v-if="!message.deliveryState || message.deliveryState === 'complete'" class="muted small">{{ message.modelIdentity?.model || message.model ? `${t('llm.recordedModel')}: ${message.modelIdentity?.model || message.model}` : t('llm.identityUnknown') }}</p>
                 <strong v-if="!message.deliveryState || message.deliveryState === 'complete'">{{ message.content ? pick(message.title) : t('advice.unknown.title') }}</strong>
                 <p v-if="message.basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
                 <p v-if="message.basisScope === 'insufficient'" class="warning-note">{{ streamCopy('Evidence is insufficient for the complete requested conclusion. The following analysis is limited.', '现有依据不足以支持所请求的完整结论，以下为有限分析。', '現有依據不足以支持所請求的完整結論，以下為有限分析。') }}</p>
@@ -869,8 +933,10 @@ async function askPrecedence() {
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
               <p v-if="activeCitation.fixedBaselineEvidence" class="warning-note">{{ streamCopy('This is a fixed standard original. Its source identity does not establish project adoption.', '这是固定标准原件，其来源身份本身不证明本项目采用。', '這是固定標準原件，其來源身份本身不證明本項目採用。') }}</p>
               <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" :auto-load="false" />
-              <section class="source-context"><h4>{{ streamCopy('Quoted excerpt and related original images', '引用摘录及关联原图', '引用摘錄及關聯原圖') }}</h4>
-              <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />
+              <section class="source-context"><h4>{{ streamCopy('Retrieved source passage', '检索到的原文', '檢索到的原文') }}</h4>
+              <p v-if="longCitation && !showCompletePassage" class="muted small">{{ streamCopy('Showing the beginning of a long passage; the exact supporting sentences have not been identified.', '此处只显示较长原文的开头；系统尚未确定支持结论的准确句子。', '此處只顯示較長原文的開頭；系統尚未確定支持結論的準確句子。') }}</p>
+              <div class="sv-para" v-html="highlightHtml(displayedCitation)" />
+              <button v-if="longCitation" class="btn" type="button" @click="showCompletePassage = !showCompletePassage">{{ showCompletePassage ? streamCopy('Show shorter preview', '收起完整原文', '收起完整原文') : streamCopy('Show complete passage', '显示完整原文', '顯示完整原文') }}</button>
               <button class="btn" type="button" @click="sourceDetails = !sourceDetails">{{ streamCopy('Show related original images / tables', '查看关联原图／整表', '查看關聯原圖／整表') }}</button>
               <template v-if="sourceDetails">
               <CanonicalEvidencePanel
@@ -902,6 +968,8 @@ async function askPrecedence() {
 </template>
 
 <style scoped>
+.chat-history { grid-template-columns: minmax(0, 1fr); }
+.bubble { min-width: 0; }
 .source-scope { padding: 14px 18px; margin-bottom: 18px; }
 .session-controls { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 10px; }
 .session-controls label { flex: 1; min-width: 180px; }.session-controls p { width: 100%; margin: 0; }

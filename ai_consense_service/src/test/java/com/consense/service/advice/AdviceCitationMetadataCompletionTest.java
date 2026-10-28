@@ -16,8 +16,8 @@ class AdviceCitationMetadataCompletionTest {
         List<CitationVO> selected=sources();for(CitationVO source:selected){source.setCanonicalEvidence(Collections.singletonList(new com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer()));
             source.setCanonicalSourceUnit(JsonUtils.parse("{\"status\":\"unknown\",\"reason\":\"additional_source_context_deferred\",\"semanticScopeVerified\":false}"));}
         Object publication=publication(selected,new HashSet<>(Arrays.asList("[1]","[2]")));begin(publication,false,false);
-        AdviceService.AnswerRecord answer=answer("Supported [1] and explicit [2].");ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);
-        assertTrue(errors(publication).isEmpty(),errors(publication).toString());assertEquals(Arrays.asList("[1]","[2]"),answer.getSections().get(1).getCitations());
+        AdviceService.AnswerRecord answer=checkOnlyAnswer("[1]");ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);
+        assertTrue(errors(publication).isEmpty(),errors(publication).toString());assertEquals(Arrays.asList("[2]","[1]"),answer.getSections().get(1).getCitations());
         assertEquals("unknown",selected.get(0).getCanonicalSourceUnit().path("status").asText());assertFalse(selected.get(0).getCanonicalSourceUnit().path("semanticScopeVerified").asBoolean());
     }
     @Test void synchronousCompletionChangesOnlyOuterMetadataAndKeepsRawAttempt() throws Exception {
@@ -83,10 +83,14 @@ class AdviceCitationMetadataCompletionTest {
             ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);
             assertFalse(errors(publication).isEmpty());assertEquals(1,accepted(publication).size());assertEquals(Collections.singletonList("[1]"),section.getCitations());}
     }
-    @Test void checkOnlyAliasIsNotGuessedIntoOuterMetadata() throws Exception {
-        Object publication=publication(sources());begin(publication,false,false);AdviceService.AnswerRecord answer=answer("Supported [1].");
-        answer.getSections().get(1).getChecks().get(1).setCitations(Arrays.asList("[1]","[2]"));
-        ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);assertFalse(errors(publication).isEmpty());assertEquals(1,accepted(publication).size());
+    @Test void omittedNestedParentAliasIsRepresentedWithoutChangingModelSection() throws Exception {
+        Object publication=publication(sources());begin(publication,false,false);AdviceService.AnswerRecord answer=checkOnlyAnswer("[1]");
+        AdvisoryHarness.Section raw=answer.getSections().get(1);String before=JsonUtils.write(raw);boolean grounded=answer.isGrounded();String basis=answer.getBasisScope();
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(raw,sources(),false,(scope,refs)->true)).getMessage().contains("every alias must also be in section.citations"));
+        ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);
+        assertTrue(errors(publication).isEmpty(),errors(publication).toString());assertEquals(2,accepted(publication).size());
+        assertEquals(Arrays.asList("[2]","[1]"),answer.getSections().get(1).getCitations());assertEquals(before,JsonUtils.write(raw));
+        assertOnlyParentCitationsChanged(raw,answer.getSections().get(1));assertEquals(grounded,answer.isGrounded());assertEquals(basis,answer.getBasisScope());
     }
     @Test void graphOnlyAliasIsNotGuessedButExplicitBodyAliasCanCompleteFlowchartMetadata() throws Exception {
         Object rejected=publication(sources());begin(rejected,false,false);AdviceService.AnswerRecord absent=flowchart("Supported relation [1].");
@@ -114,18 +118,18 @@ class AdviceCitationMetadataCompletionTest {
         assertEquals(prefix,JsonUtils.write(envelope.getSections()));assertTrue(errors(publication).isEmpty());
         assertThrows(BizException.class,()->accept(publication,raw.getSections().get(1)));
     }
-    @Test void knownCheckOnlyAliasReportsPreciseFeedbackWithoutPromotion() throws Exception {
+    @Test void knownCheckOnlyAliasCompletesMetadataAndRecordsProvenance() throws Exception {
         List<CitationVO> sources=sources();CitationVO extra=new CitationVO();extra.setEvidenceId("[14]");extra.setSourceRole("tender");sources.add(extra);
         Object publication=publication(sources);begin(publication,false,false);AdviceService.AnswerRecord answer=answer("Supported [1].");
         AdvisoryHarness.Section raw=answer.getSections().get(1);raw.getChecks().get(4).setCitations(Arrays.asList("[1]","[14]"));String before=JsonUtils.write(raw);
         ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);
-        assertEquals(1,accepted(publication).size());assertEquals(before,JsonUtils.write(raw));assertEquals(Collections.singletonList("[1]"),raw.getCitations());
-        assertTrue(errors(publication).stream().allMatch(e->e.contains("section.checks[4].citations: every alias must also be in section.citations; missing aliases: [\"[14]\"]")),"KNOWN_CHECK_ONLY_MISSING_ALIAS_FEEDBACK_NOT_PRESENT");
-        String repair=ReflectionTestUtils.invokeMethod(publication,"repairInstruction",before);
-        assertTrue(repair.contains("section.checks[4].citations"));assertTrue(repair.contains("[14]"));
-        assertTrue(repair.contains("verify the named aliases against the original sources"));assertTrue(repair.contains("Never add an alias solely to clear validation"));
-        assertTrue(repair.contains("delete a required check"));assertTrue(repair.contains("missing_evidence/fail into pass"));
-        assertTrue(((List<?>)ReflectionTestUtils.getField(publication,"citationMetadataCompletions")).isEmpty());
+        assertEquals(2,accepted(publication).size());assertEquals(before,JsonUtils.write(raw));assertEquals(Collections.singletonList("[1]"),raw.getCitations());
+        assertTrue(errors(publication).isEmpty(),errors(publication).toString());assertEquals(Arrays.asList("[1]","[14]"),answer.getSections().get(1).getCitations());
+        assertOnlyParentCitationsChanged(raw,answer.getSections().get(1));
+        List<?> changes=(List<?>)ReflectionTestUtils.getField(publication,"citationMetadataCompletions");assertEquals(1,changes.size());Map<?,?> change=(Map<?,?>)changes.get(0);
+        assertEquals(Collections.singletonList("[1]"),change.get("explicitBodyAliases"));assertEquals(Arrays.asList("[1]","[14]"),change.get("explicitCheckAliases"));
+        assertEquals(Collections.singletonList("[14]"),change.get("addedAliases"));assertEquals(VettingCorpus.hash(before),change.get("rawSerializedSectionSha256"));
+        assertEquals(VettingCorpus.hash(JsonUtils.write(answer.getSections().get(1))),change.get("normalizedSerializedSectionSha256"));
     }
     @Test void unknownNestedAliasStillFailsBeforeAnyMetadataPromotion() throws Exception {
         Object publication=publication(sources());begin(publication,false,false);AdviceService.AnswerRecord answer=answer("Supported [1].");
@@ -141,16 +145,58 @@ class AdviceCitationMetadataCompletionTest {
     }
     @Test void preciseSiblingRejectionKeepsIndependentCompletionAndImmutableRepairPrefix() throws Exception {
         List<CitationVO> sources=sources();CitationVO extra=new CitationVO();extra.setEvidenceId("[14]");extra.setSourceRole("tender");sources.add(extra);
+        extra.setCanonicalSourceUnit(JsonUtils.parse("{\"status\":\"partial\"}"));
         Object publication=publication(sources);begin(publication,true,false);AdviceService.AnswerRecord answer=answer("Supported [1] and [2].");
         for(AdvisoryHarness.Section raw:answer.getSections())accept(publication,raw);
         AdvisoryHarness.Section sibling=JsonUtils.read(JsonUtils.write(answer.getSections().get(1)),AdvisoryHarness.Section.class);sibling.setId("rejected-sibling");
         sibling.getChecks().get(4).setCitations(Arrays.asList("[1]","[14]"));accept(publication,sibling);
         assertEquals(2,accepted(publication).size());assertEquals(Arrays.asList("[1]","[2]"),accepted(publication).get(1).getCitations());
-        assertTrue(errors(publication).get(0).contains("missing aliases: [\"[14]\"]"),"SIBLING_MISSING_ALIAS_FEEDBACK_NOT_PRESENT");String prefix=JsonUtils.write(accepted(publication));
+        assertTrue(errors(publication).get(0).contains("adoption or requested basis is not supported"),"PARTIAL_SOURCE_MUST_NOT_BE_PROMOTED");String prefix=JsonUtils.write(accepted(publication));
         begin(publication,true,true);AdviceService.AnswerRecord repair=answer("unused");repair.setSections(Collections.emptyList());
         ReflectionTestUtils.invokeMethod(publication,"finish",repair,"Explain the clause",true);assertEquals(prefix,JsonUtils.write(repair.getSections()));
         assertThrows(BizException.class,()->accept(publication,answer.getSections().get(1)));
     }
+    @Test void nestedCompletionKeepsStreamFinalAndPublishedPrefixImmutable()throws Exception{
+        Object publication=publication(sources());begin(publication,true,false);AdviceService.AnswerRecord answer=checkOnlyAnswer("[1]");String before=JsonUtils.write(answer.getSections());
+        for(AdvisoryHarness.Section raw:answer.getSections())accept(publication,raw);assertEquals(2,accepted(publication).size());
+        assertEquals(before,JsonUtils.write(ReflectionTestUtils.getField(publication,"proposed")));
+        ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",true);assertTrue(errors(publication).isEmpty());assertEquals(Arrays.asList("[2]","[1]"),answer.getSections().get(1).getCitations());
+        String prefix=JsonUtils.write(accepted(publication));begin(publication,true,true);AdviceService.AnswerRecord envelope=answer("unused");envelope.setSections(Collections.emptyList());
+        ReflectionTestUtils.invokeMethod(publication,"finish",envelope,"Explain the clause",true);assertEquals(prefix,JsonUtils.write(envelope.getSections()));
+        assertThrows(BizException.class,()->accept(publication,answer.getSections().get(1)));
+        Object changedPublication=publication(sources());begin(changedPublication,true,false);AdviceService.AnswerRecord raw=checkOnlyAnswer("[1]");for(AdvisoryHarness.Section section:raw.getSections())accept(changedPublication,section);
+        AdviceService.AnswerRecord changed=JsonUtils.read(JsonUtils.write(raw),AdviceService.AnswerRecord.class);changed.getSections().get(1).getChecks().get(4).setReason("AUTHORED changed after streaming");
+        assertThrows(IllegalArgumentException.class,()->ReflectionTestUtils.invokeMethod(changedPublication,"finish",changed,"Explain the clause",true));
+    }
+    @Test void invalidParentAndNestedArraysAreNotCleanedIntoValidEvidence()throws Exception{
+        for(String kind:Arrays.asList("parent_empty","parent_unknown","parent_duplicate","nested_null","nested_unknown","nested_malformed","nested_duplicate","null_check","null_checks")){
+            Object publication=publication(sources());begin(publication,false,false);AdviceService.AnswerRecord answer=checkOnlyAnswer("[1]");AdvisoryHarness.Section raw=answer.getSections().get(1);
+            if("parent_empty".equals(kind))raw.setCitations(Collections.emptyList());if("parent_unknown".equals(kind))raw.setCitations(Arrays.asList("[2]","[999]"));if("parent_duplicate".equals(kind))raw.setCitations(Arrays.asList("[2]","[2]"));
+            if("nested_null".equals(kind))raw.getChecks().get(4).setCitations(null);if("nested_unknown".equals(kind))raw.getChecks().get(4).setCitations(Collections.singletonList("[999]"));if("nested_malformed".equals(kind))raw.getChecks().get(4).setCitations(Collections.singletonList("[01]"));if("nested_duplicate".equals(kind))raw.getChecks().get(4).setCitations(Arrays.asList("[1]","[1]"));
+            if("null_check".equals(kind))raw.getChecks().set(4,null);if("null_checks".equals(kind))raw.setChecks(null);String before=JsonUtils.write(raw);
+            try{ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);}catch(AdvisoryHarness.ContractViolation malformedEnvelope){assertTrue(kind.startsWith("null_")||"nested_null".equals(kind),kind);}
+            assertFalse(errors(publication).isEmpty(),kind);assertEquals(1,accepted(publication).size(),kind);assertEquals(before,JsonUtils.write(raw),kind);
+            assertTrue(((List<?>)ReflectionTestUtils.getField(publication,"citationMetadataCompletions")).isEmpty(),kind);
+        }
+    }
+    @Test void nestedMetadataDoesNotPromoteFailedOrMissingChecksOrGroundedness()throws Exception{
+        for(String status:Arrays.asList("fail","missing_evidence")){
+            Object publication=publication(sources());begin(publication,false,false);AdviceService.AnswerRecord answer=checkOnlyAnswer("[1]");answer.setGrounded(false);AdvisoryHarness.Section raw=answer.getSections().get(1);raw.getChecks().get(4).setStatus(status);String before=JsonUtils.write(raw.getChecks());
+            ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);assertFalse(errors(publication).isEmpty(),status);assertEquals(1,accepted(publication).size());assertFalse(answer.isGrounded());
+            assertEquals(before,JsonUtils.write(raw.getChecks()));assertEquals(before,JsonUtils.write(answer.getSections().get(1).getChecks()));assertEquals(status,answer.getSections().get(1).getChecks().get(4).getStatus());
+        }
+    }
+    @Test void nestedAliasCannotAcquireAdoptionOrPromoteUnsupportedSource()throws Exception{
+        for(String kind:Arrays.asList("standard_only_parent","partial_added_source","unadopted_standard","limits","uncertainty")){
+            List<CitationVO> selected=sources();Object publication=publication(selected);begin(publication,false,false);AdviceService.AnswerRecord answer=checkOnlyAnswer("[1]");AdvisoryHarness.Section raw=answer.getSections().get(1);
+            if("standard_only_parent".equals(kind)){selected.get(1).setSourceRole("standard");selected.get(1).setApplicabilityContextComplete(true);selected.get(1).setFileLabel("AUTHORED standard");selected.get(0).setContent("The AUTHORED standard is incorporated.");}
+            if("partial_added_source".equals(kind))selected.get(0).setCanonicalSourceUnit(JsonUtils.parse("{\"status\":\"partial\"}"));if("unadopted_standard".equals(kind))selected.get(0).setSourceRole("standard");
+            if("limits".equals(kind)||"uncertainty".equals(kind)){raw.setKind(kind);raw.setBasisScope("insufficient");}
+            ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);assertFalse(errors(publication).isEmpty(),kind);assertEquals(1,accepted(publication).size(),kind);assertEquals(Collections.singletonList("[2]"),raw.getCitations());
+        }
+    }
+    private AdviceService.AnswerRecord checkOnlyAnswer(String alias){AdviceService.AnswerRecord result=answer("Supported [2].");AdvisoryHarness.Section raw=result.getSections().get(1);raw.setCitations(Collections.singletonList("[2]"));for(AdvisoryHarness.Check check:raw.getChecks())if(!check.getCitations().isEmpty())check.setCitations(Collections.singletonList("[2]"));raw.getChecks().get(4).setCitations(Collections.singletonList(alias));return result;}
+    private void assertOnlyParentCitationsChanged(AdvisoryHarness.Section raw,AdvisoryHarness.Section normalized){com.fasterxml.jackson.databind.node.ObjectNode before=JsonUtils.mapper().valueToTree(raw),after=JsonUtils.mapper().valueToTree(normalized);before.remove("citations");after.remove("citations");assertEquals(before,after);}
     private AdviceService.AnswerRecord answer(String text){return JsonUtils.read(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":"+JsonUtils.write(text)+",\"citations\":[\"[1]\"]}"),AdviceService.AnswerRecord.class);}
     private AdviceService.AnswerRecord flowchart(String text){AdviceService.AnswerRecord answer=answer(text);AdvisoryHarness.Section section=answer.getSections().get(1);section.setKind("flowchart");
         section.setFlowchartPlan(JsonUtils.read("{\"nodes\":[{\"id\":\"s\",\"label\":\"\",\"kind\":\"start\",\"citations\":[]},{\"id\":\"e\",\"label\":\"Supported outcome\",\"kind\":\"end\",\"citations\":[\"[2]\"]}],\"edges\":[{\"from\":\"s\",\"to\":\"e\",\"condition\":\"\",\"actor\":\"\",\"action\":\"\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[2]\"]}]}",AdvisoryHarness.GraphPlan.class));return answer;}

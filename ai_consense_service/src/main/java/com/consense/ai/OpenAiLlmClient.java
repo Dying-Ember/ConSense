@@ -95,6 +95,8 @@ public class OpenAiLlmClient implements LlmClient {
 
     private String chat(List<ChatTurn> turns, boolean structured) {
         ObjectNode body = request(turns, structured, false);
+        QwenResponseTelemetry telemetry=qwen?new QwenResponseTelemetry("generation",body.path("max_tokens").asInt(),false):null;boolean completed=false;
+        try {
         String url = trim(cfg.getBaseUrl()) + "/v1/chat/completions";
         String requestJson = JsonUtils.write(body);
         String raw = miniMax
@@ -103,10 +105,11 @@ public class OpenAiLlmClient implements LlmClient {
                     : http.postJsonWithoutReplay(url, requestJson, cfg.getTimeoutMs(), authHeader()))
                 : qwen ? http.postJsonWithoutReplay(url,requestJson,cfg.getTimeoutMs(),authHeader())
                 : http.postJson(url, requestJson, cfg.getTimeoutMs(), authHeader(), structured ? 0 : cfg.getMaxRetry());
-        return decodeResponse(raw,structured);
+        String result=decodeResponse(raw,structured,telemetry);completed=true;return result;
+        }finally{if(telemetry!=null)telemetry.finish(completed);}
     }
 
-    private String decodeResponse(String raw,boolean structured) {
+    private String decodeResponse(String raw,boolean structured,QwenResponseTelemetry telemetry) {
         JsonNode root;
         try {
             root = JsonUtils.parse(raw);
@@ -115,6 +118,10 @@ public class OpenAiLlmClient implements LlmClient {
             throw new IncompleteModelResponseException("Structured provider response is not a JSON envelope", raw, null,
                     IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE, null);
         }
+        return decodeResponse(raw,structured,root,telemetry);
+    }
+    private String decodeResponse(String raw,boolean structured,JsonNode root,QwenResponseTelemetry telemetry) {
+        if(telemetry!=null)telemetry.observe(root,false);
         JsonNode choices = root.path("choices");
         JsonNode choice = choices.path(0);
         JsonNode content = choice.path("message").path("content");
@@ -172,22 +179,28 @@ public class OpenAiLlmClient implements LlmClient {
     @Override public String chatStructuredStream(List<ChatTurn> turns, JsonNode schema,
                                                  Consumer<String> onDelta, Consumer<Runnable> onCancel) {
         validateStructured(schema);
-        StreamContent output = new StreamContent(onDelta, miniMax);
+        ObjectNode body=request(turns,true,true);
+        QwenResponseTelemetry telemetry=qwen?new QwenResponseTelemetry("generation",body.path("max_tokens").asInt(),true):null;boolean completed=false;
+        StreamContent output = new StreamContent(onDelta, miniMax,null,telemetry);
+        try {
         http.postJsonStream(trim(cfg.getBaseUrl()) + "/v1/chat/completions",
-                JsonUtils.write(request(turns, true, true)), cfg.getTimeoutMs(), authHeader(),
+                JsonUtils.write(body), cfg.getTimeoutMs(), authHeader(),
                 16 * 1024 * 1024, true, output::event, onCancel);
-        return output.finish();
+        String result=output.finish();completed=true;return result;
+        }finally{if(telemetry!=null)telemetry.finish(completed);}
     }
 
     ObjectNode prepareStructuredRequest(List<ChatTurn> turns,JsonNode schema,boolean stream) {
         validateStructured(schema);return request(turns,true,stream);
     }
-    String sendPreparedQwen(String json,boolean stream,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<String> receipt) {
+    String sendPreparedQwen(String json,int requestedMaxTokens,boolean stream,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<String> receipt) {
         if(!qwen)throw new IllegalStateException("Qwen prepared transport required");
+        QwenResponseTelemetry telemetry=new QwenResponseTelemetry("generation",requestedMaxTokens,stream);boolean completed=false;
+        try {
         if(stream) {
-            StreamContent output=new StreamContent(delta,false,cfg.getChatModel());
+            StreamContent output=new StreamContent(delta,false,cfg.getChatModel(),telemetry);
             String raw=http.postJsonStream(trim(cfg.getBaseUrl())+"/v1/chat/completions",json,cfg.getTimeoutMs(),authHeader(),
-                    16*1024*1024,true,output::event,cancel);if(receipt!=null)receipt.accept(raw);return output.finish();
+                    16*1024*1024,true,output::event,cancel);if(receipt!=null)receipt.accept(raw);String result=output.finish();completed=true;return result;
         }
         String raw=http.postJsonBoundedWithoutReplay(trim(cfg.getBaseUrl())+"/v1/chat/completions",json,
                 cfg.getTimeoutMs(),authHeader(),16*1024*1024,cancel);
@@ -197,7 +210,8 @@ public class OpenAiLlmClient implements LlmClient {
             parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);envelope=JsonUtils.mapper().readTree(parser);
             if(envelope==null||!envelope.isObject()||parser.nextToken()!=null||!cfg.getChatModel().equals(envelope.path("model").asText()))throw new IOException();
         }catch(IOException|RuntimeException invalid){throw new IncompleteModelResponseException("Qwen response identity invalid",raw,null,IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE,null);}
-        return decodeResponse(raw,true);
+        String result=decodeResponse(raw,true,envelope,telemetry);completed=true;return result;
+        }finally{telemetry.finish(completed);}
     }
 
     private static final class StreamContent {
@@ -205,10 +219,12 @@ public class OpenAiLlmClient implements LlmClient {
         private final Consumer<String> delta;
         private final boolean miniMax;
         private final String expectedModel;
+        private final QwenResponseTelemetry telemetry;
         private boolean stopped, done;
         private JsonNode last;
         StreamContent(Consumer<String> d, boolean miniMax) { this(d,miniMax,null); }
-        StreamContent(Consumer<String> d,boolean miniMax,String model) { delta=java.util.Objects.requireNonNull(d);this.miniMax=miniMax;this.expectedModel=model; }
+        StreamContent(Consumer<String> d,boolean miniMax,String model) {this(d,miniMax,model,null);}
+        StreamContent(Consumer<String> d,boolean miniMax,String model,QwenResponseTelemetry telemetry) { delta=java.util.Objects.requireNonNull(d);this.miniMax=miniMax;this.expectedModel=model;this.telemetry=telemetry; }
         private void reject(String message, IncompleteModelResponseException.FailureKind kind) {
             throw new IncompleteModelResponseException(message, last == null ? "" : last.toString(),
                     JsonUtils.mapper().getNodeFactory().textNode(content.toString()), kind, last);
@@ -223,6 +239,7 @@ public class OpenAiLlmClient implements LlmClient {
             } catch (IOException invalid) {
                 reject("Invalid streaming provider JSON envelope", IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE);
             }
+            if(telemetry!=null)telemetry.observe(last,true);
             if(expectedModel!=null&&!expectedModel.equals(last.path("model").asText()))reject("Qwen streaming response model differs",IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE);
             JsonNode code = last.path("base_resp").path("status_code");
             if (last.hasNonNull("error") || (last.hasNonNull("base_resp") && !last.path("base_resp").isObject())
@@ -263,6 +280,38 @@ public class OpenAiLlmClient implements LlmClient {
             if (!stopped || (!done && !miniMax)) reject("Streaming model completion marker is missing", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
             if (JsonUtils.isBlankText(content.toString())) reject("Streaming model returned no text", IncompleteModelResponseException.FailureKind.MISSING_TEXT);
             return content.toString();
+        }
+    }
+
+    /** Scalar observations from already parsed provider envelopes; never retains provider text. */
+    public static final class QwenResponseTelemetry {
+        private final String callId=java.util.UUID.randomUUID().toString(),phase;
+        private final int requestedMaxTokens;private final boolean stream;private final long started=System.nanoTime();
+        private String finishReason="missing";private Long contentCharacters,reasoningCharacters,promptTokens,completionTokens,reasoningTokens;
+        public QwenResponseTelemetry(String phase,int requestedMaxTokens,boolean stream){
+            this.phase="preflight".equals(phase)?"preflight":"generation";this.requestedMaxTokens=requestedMaxTokens;this.stream=stream;
+            try{log.info("ConSense Qwen stage=provider_started phase={} call={} thread={} stream={} requestedMaxTokens={}",this.phase,callId,Thread.currentThread().getId(),stream,requestedMaxTokens);}catch(Throwable ignored){/* Diagnostics only. */}
+        }
+        public void observe(JsonNode envelope,boolean delta){
+            try {
+                if(envelope==null)return;JsonNode choice=envelope.path("choices").path(0),message=choice.path(delta?"delta":"message");
+                if(choice.hasNonNull("finish_reason"))finishReason=IncompleteModelResponseException.safeFinishReason(choice.path("finish_reason"));
+                JsonNode content=message.path("content"),reasoning=message.path("reasoning_content");if(!reasoning.isTextual())reasoning=message.path("reasoning");
+                if(content.isTextual())contentCharacters=(delta&&contentCharacters!=null?contentCharacters:0L)+content.textValue().length();
+                if(reasoning.isTextual())reasoningCharacters=(delta&&reasoningCharacters!=null?reasoningCharacters:0L)+reasoning.textValue().length();
+                JsonNode usage=envelope.path("usage");
+                if(usage.has("prompt_tokens"))promptTokens=nonnegative(usage.path("prompt_tokens"));
+                if(usage.has("completion_tokens"))completionTokens=nonnegative(usage.path("completion_tokens"));
+                JsonNode reasoningUsage=usage.path("completion_tokens_details").path("reasoning_tokens");
+                if(reasoningUsage.isMissingNode())reasoningUsage=usage.path("reasoning_tokens");
+                if(!reasoningUsage.isMissingNode())reasoningTokens=nonnegative(reasoningUsage);
+            }catch(Throwable ignored){/* Diagnostics cannot alter decoding. */}
+        }
+        private static Long nonnegative(JsonNode value){return value.isIntegralNumber()&&value.canConvertToLong()&&value.longValue()>=0?value.longValue():null;}
+        public void finish(boolean completed){
+            try{log.info("ConSense Qwen stage=provider_finished phase={} call={} thread={} stream={} requestedMaxTokens={} completed={} wallNanos={} finishReason={} contentCharacters={} reasoningCharacters={} reportedPromptTokens={} reportedCompletionTokens={} reportedReasoningTokens={}",
+                    phase,callId,Thread.currentThread().getId(),stream,requestedMaxTokens,completed,System.nanoTime()-started,finishReason,contentCharacters,reasoningCharacters,promptTokens,completionTokens,reasoningTokens);}
+            catch(Throwable ignored){/* Diagnostics cannot replace the result or original exception. */}
         }
     }
 

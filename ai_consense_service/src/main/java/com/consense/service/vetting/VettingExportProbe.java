@@ -18,21 +18,25 @@ final class VettingExportProbe {
     }
     static VettingExportProbe start(ConsenseProperties props,String projectId,String format,String language){
         String configured=props.getVetting().getExportProbeDirectory();
-        if(JsonUtils.isBlankText(configured))return new VettingExportProbe(null,null,projectId,format,language,null);
         String operation="export-"+UUID.randomUUID();String requestedAt=Instant.now().toString();
+        if(JsonUtils.isBlankText(configured)){
+            VettingExportProbe probe=new VettingExportProbe(null,operation,projectId,format,language,requestedAt);
+            probe.summary("export_started",DocumentParseProbe.map("format",format,"fullArtifactProbe",false));return probe;
+        }
         Path root=Paths.get(configured).toAbsolutePath().normalize(),dir=root.resolve(operation);
         try{Files.createDirectories(root);Files.createDirectory(dir);return new VettingExportProbe(dir,operation,projectId,format,language,requestedAt);}
         catch(IOException e){throw new DocumentParseProbe.Failure("Cannot create fresh report export probe",e);}
     }
     boolean enabled(){return directory!=null;}
+    void summary(String phase,Map<String,?> scalars){VettingReviewProbe.logSummary("export",runId,operationId,0,null,phase,scalars);}
     void bindRun(String actualRunId){
-        if(!enabled())return;
+        if(!enabled()){runId=actualRunId;summary("export_run_bound",Collections.emptyMap());return;}
         if(JsonUtils.isBlankText(actualRunId)||runId!=null&&!runId.equals(actualRunId))throw new IllegalStateException("Report probe requires one actual selected report run ID");
         runId=actualRunId;
         event("export_run_binding",DocumentParseProbe.map("actualRunId",actualRunId,"requestedAt",requestedAt,"binding","ReportContext.job.id selected by unchanged reportContext policy"));
     }
     void event(String phase,Object observations){write(phase,observations,null);}
-    void returned(byte[] bytes){write("actual_returned_report_bytes",DocumentParseProbe.map("byteArrayBoundary","Exact byte[] returned by service; HTTP client bytes are independently captured by the driver"),bytes);}
+    void returned(byte[] bytes){summary("export_bytes_ready",DocumentParseProbe.map("bytes",bytes==null?null:bytes.length));write("actual_returned_report_bytes",DocumentParseProbe.map("byteArrayBoundary","Exact byte[] returned by service; HTTP client bytes are independently captured by the driver"),bytes);}
     private synchronized void write(String phase,Object observations,byte[] artifact){
         if(!enabled())return;long started=System.nanoTime();String name=String.format(Locale.ROOT,"%05d-%s",++sequence,phase);
         Map<String,Object> record=DocumentParseProbe.map("schemaVersion",1,"operationId",operationId,"projectId",projectId,"runId",runId,
@@ -50,10 +54,12 @@ final class VettingExportProbe {
         finally{observerNanos+=System.nanoTime()-started;}
     }
     void originalFailure(String phase,Throwable original){
+        summary(phase,DocumentParseProbe.map("outcome","failed","failureKind",original==null?"unknown":original.getClass().getSimpleName()));
         try{event(phase,DocumentParseProbe.map("failureChain",DocumentParseProbe.failures(original),"runIdentityKnown",runId!=null));}
         catch(DocumentParseProbe.Failure observation){original.addSuppressed(observation);}
     }
     void originalFailureElapsed(String phase,Throwable original,long elapsed){
+        summary(phase,DocumentParseProbe.map("outcome","failed","wallNanos",elapsed,"failureKind",original==null?"unknown":original.getClass().getSimpleName()));
         try{event(phase,DocumentParseProbe.map("failureChain",DocumentParseProbe.failures(original),"runIdentityKnown",runId!=null,
             "wallNanos",elapsed,"seconds",elapsed/1_000_000_000.0,"boundary","Actual reportContext failure before the selected run ID became known"));}
         catch(DocumentParseProbe.Failure observation){original.addSuppressed(observation);}
@@ -62,13 +68,14 @@ final class VettingExportProbe {
     static Timer measure(VettingExportProbe probe,String phase,String boundary){return probe==null?null:probe.measure(phase,boundary);}
     static final class Timer implements AutoCloseable{
         private final VettingExportProbe probe;private final String phase,boundary;private final long started,overhead;private boolean closed;
-        Timer(VettingExportProbe probe,String phase,String boundary){this.probe=probe;this.phase=phase;this.boundary=boundary;this.overhead=probe.observerNanos;this.started=System.nanoTime();}
+        Timer(VettingExportProbe probe,String phase,String boundary){this.probe=probe;this.phase=phase;this.boundary=boundary;probe.summary(phase,DocumentParseProbe.map("status","started"));this.overhead=probe.observerNanos;this.started=System.nanoTime();}
         @Override public void close(){if(closed)return;closed=true;long inclusive=System.nanoTime()-started,io=probe.observerNanos-overhead,actual=Math.max(0,inclusive-io);
+            probe.summary(phase,DocumentParseProbe.map("status","finished","wallNanos",actual,"inclusiveWallNanos",inclusive));
             probe.event("phase_timing",DocumentParseProbe.map("stage",phase,"wallNanos",actual,"seconds",actual/1_000_000_000.0,"inclusiveWallNanos",inclusive,
                 "probeOverheadNanos",io,"boundary",boundary,"clock","System.nanoTime; nested business stages are not additive"));}
     }
     synchronized void finish(String status){
-        if(!enabled()||finished)return;finished=true;
+        if(finished)return;finished=true;summary("export_finished",DocumentParseProbe.map("status",status));if(!enabled())return;
         Map<String,Object> summary=DocumentParseProbe.map("schemaVersion",1,"operationId",operationId,"projectId",projectId,"runId",runId,"format",format,"status",status,
             "eventCount",sequence,"serializationAndHashWallNanos",serializationNanos,"artifactWriteWallNanos",writeNanos,"eventObserverWallNanos",observerNanos,
             "summarySelfFlushIncluded",false,"layoutQualityAccepted",null,"boundary","Report generation observations only; no Word pagination, native rendering inspection or semantic approval");

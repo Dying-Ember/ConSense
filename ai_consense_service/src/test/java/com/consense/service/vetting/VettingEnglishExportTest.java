@@ -15,11 +15,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import static org.junit.jupiter.api.Assertions.*;
@@ -28,7 +30,58 @@ import static org.mockito.Mockito.*;
 
 /** Authored translation/transport doubles verify the public export seam, never remote translation quality. */
 class VettingEnglishExportTest {
+    @TempDir Path exportTemporary;
     private static final String QUOTE="雇主须在认证后第十四天付款。",REMARK="保留原有付款条款。";
+
+    @Test void fullCardinalityJsonSkipsOnlyProvenAppEnglishAndPreservesDynamicEvidence()throws Exception {
+        try(Fixture f=new Fixture()){
+            String french="Contrat de construction.pdf",spanish="El pago vence en 14 dias.";
+            String suffix="Page 1 visual regions, writing states and native/visual relationships remain source-unverified. Annexe francaise a verifier.";
+            ArrayNode evidence=(ArrayNode)JsonUtils.parse(f.finding.getEvidenceJson());((ObjectNode)evidence.get(0)).put("fileName",french);f.finding.setEvidenceJson(JsonUtils.write(evidence));f.finding.setReviewRemarks(spanish);
+            List<DocumentCoverageVO> documents=new ArrayList<>();List<SourceDocument> selectedSources=new ArrayList<>();Set<String> authoredWarnings=new HashSet<>();
+            for(int document=1;document<=33;document++){
+                List<String> warnings=new ArrayList<>();for(int direction=1;direction<=27;direction++){
+                    String warning="Semantic review covered only "+(document*100+direction)+"/"+(document*100+100)+" excerpts; other excerpts were not included in successful model calls.";
+                    warnings.add(warning);authoredWarnings.add(warning);
+                }
+                if(document==1)warnings.add(suffix);
+                documents.add(new DocumentCoverageVO(String.valueOf(document),"DOC"+document,document==1?french:"Authored contract "+document+".pdf","PARSED",1000,500,100,50,warnings));
+                SourceDocument selected=new SourceDocument();selected.setId((long)document);selected.setProjectId("p");selected.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);selected.setFileName(documents.get(documents.size()-1).getFileName());selected.setFileKey("DOC"+document);selected.setReviewRole("tender");selected.setParseStatus("PARSED");selectedSources.add(selected);
+            }
+            when(f.sources.findSelectedBusinessSourcesByProjectId("p","fullset","vetting")).thenReturn(selectedSources);
+            CoverageVO coverage=new CoverageVO(33,33,documents,List.of());List<SemanticTopicVO> topics=new ArrayList<>();
+            for(int index=1;index<=27;index++){
+                SemanticTopicVO topic=new SemanticTopicVO();topic.setTopicIndex(index);topic.setTopic("Authored review direction "+index);topic.setStatus("completed");
+                SemanticPacketVO packet=new SemanticPacketVO();packet.setPacketId("authored-packet-"+index);packet.setStatus("completed");
+                packet.getVerifiedAssessments().add(new VerifiedAssessmentVO("insufficient_context","Authored pending assessment "+index,"Retrieve the missing appendix for direction "+index,List.of(),List.of("Provide the named source appendix.")));
+                topic.getPacketAudits().add(packet);topics.add(topic);
+            }
+            coverage.setSemanticTopics(topics);f.run.setCoverageJson(JsonUtils.write(coverage));
+            List<String> submitted=new ArrayList<>();java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+            com.consense.ai.LlmClient client=mock(com.consense.ai.LlmClient.class);when(client.available()).thenReturn(true);
+            Map<String,String> replacements=new LinkedHashMap<>();replacements.put(french,"Construction contract.pdf");replacements.put(spanish,"Payment is due within 14 days.");replacements.put("Annexe francaise a verifier.","French appendix to check.");
+            replacements.put(QUOTE,"The Employer shall pay on the fourteenth day after certification.");replacements.put(REMARK,"Retain the original payment clause.");
+            replacements.put("\u539f\u9879\u76ee\u540d\u79f0","Original project");replacements.put("\u539f\u5408\u7ea6\u7f16\u53f7","Original contract number");replacements.put("\u539f\u59cb\u4efb\u52a1\u4fe1\u606f","Original task message");
+            replacements.put("\u539f\u59cb\u610f\u89c1\u6807\u9898","Original finding title");replacements.put("\u539f\u59cb\u610f\u89c1\u5185\u5bb9","Original finding text");replacements.put("\u5f85\u9879\u76ee\u56e2\u961f\u786e\u8ba4","Pending project-team confirmation");
+            doAnswer(call->{calls.incrementAndGet();List<com.consense.ai.LlmClient.ChatTurn> turns=call.getArgument(0);ArrayNode rows=JsonUtils.mapper().createArrayNode();
+                for(JsonNode row:JsonUtils.parse(turns.get(1).getContent())){String source=row.path("text").asText();submitted.add(source);String translated=source;for(Map.Entry<String,String> replacement:replacements.entrySet())translated=translated.replace(replacement.getKey(),replacement.getValue());
+                    rows.addObject().put("id",row.path("id").asText()).put("sourceLanguage",source.equals(translated)?"en":"mul").put("translated",source.equals(translated)?0:1).put("text",source.equals(translated)?"":translated);
+                }return JsonUtils.write(rows);
+            }).when(client).chatStructured(anyList(),any());
+            ConsenseProperties props=new ConsenseProperties();props.setStorageRoot(exportTemporary.toString());EnglishFileOutput output=new EnglishFileOutput(new com.consense.ai.AiGateway(client),null,props);f.service.setEnglishFileOutput(output);
+            Object context=org.springframework.test.util.ReflectionTestUtils.invokeMethod(f.service,"reportContext","p");Object presentation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(f.service,"englishReportPresentation",context);JsonNode original=JsonUtils.mapper().valueToTree(presentation);
+            BizException legacy=assertThrows(BizException.class,()->output.json(original,"authored-full-report-legacy",()->{}));assertTrue(legacy.getMessage().contains("bounded translation call limit"));assertEquals(0,calls.get());
+            String sourceBefore=f.finding.getEvidenceJson(),humanBefore=f.finding.getReviewRemarks(),coverageBefore=f.run.getCoverageJson();
+            JsonNode exported=JsonUtils.parse(new String(f.service.exportJson("p","en"),StandardCharsets.UTF_8));
+            assertEquals(33,exported.path("job").path("coverage").path("documents").size());assertEquals(27,exported.path("job").path("coverage").path("semanticTopics").size());assertEquals(1,exported.path("findings").size());
+            int retainedWarnings=0;for(JsonNode document:exported.path("job").path("coverage").path("documents"))retainedWarnings+=document.path("warnings").size();assertEquals(892,retainedWarnings);
+            assertTrue(Collections.disjoint(authoredWarnings,submitted),"Exact application warnings must not consume model classification calls");
+            assertFalse(submitted.contains(VettingChecklistCatalog.items().get(0).getDescription()));assertTrue(submitted.contains(french));assertTrue(submitted.contains(QUOTE));assertTrue(submitted.stream().anyMatch(s->s.contains(spanish)));assertTrue(submitted.contains(suffix));
+            assertTrue(calls.get()>0&&calls.get()<=24);assertFalse(containsHan(JsonUtils.write(exported)));assertTrue(exported.path("findings").get(0).path("evidence").get(0).path("displayQuote").asText().startsWith("English translation:"));
+            assertEquals(sourceBefore,f.finding.getEvidenceJson());assertEquals(humanBefore,f.finding.getReviewRemarks());assertEquals(coverageBefore,f.run.getCoverageJson());
+            System.out.println(JsonUtils.write(Map.of("fixture","authored33Sources27Directions891DistinctAppWarnings","documents",33,"directions",27,"appWarningSegments",891,"retainedWarnings",retainedWarnings,"classifiedSegments",submitted.size(),"modelCalls",calls.get(),"actualRuntimeOrSourceAcceptance",false)));
+        }
+    }
 
     @Test void everyUiLanguageUsesTheSameDerivedEnglishDocxAndPdfWithoutChangingTheOriginalSnapshot()throws Exception{
         try(Fixture f=new Fixture()){
@@ -68,7 +121,7 @@ class VettingEnglishExportTest {
             BizException failure=new BizException(4100,"English translation did not complete.");
             when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenThrow(failure);
             assertSame(failure,assertThrows(BizException.class,()->f.service.exportDocx("p","en")));
-            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenThrow(failure);
+            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenThrow(failure);
             assertSame(failure,assertThrows(BizException.class,()->f.service.exportJson("p","en")));
             assertEquals(REMARK,f.finding.getReviewRemarks());assertEquals(QUOTE,f.findingQuote());assertEquals(1,f.saved.size());
         }
@@ -84,7 +137,7 @@ class VettingEnglishExportTest {
 
     @Test void aSourceVersionChangeDuringJsonTranslationCannotReturnTheOldPresentation()throws Exception{
         try(Fixture f=new Fixture()){
-            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(i->{((Runnable)i.getArgument(2)).run();f.run.setSourceSnapshotSha256(VettingCorpus.hash("changed source"));return english((JsonNode)i.getArgument(0));});
+            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(i->{((Runnable)i.getArgument(2)).run();f.run.setSourceSnapshotSha256(VettingCorpus.hash("changed source"));return english((JsonNode)i.getArgument(0));});
             BizException changed=assertThrows(BizException.class,()->f.service.exportJson("p","en"));assertEquals(4104,changed.getCode());assertEquals(QUOTE,f.findingQuote());assertEquals(REMARK,f.finding.getReviewRemarks());
         }
     }
@@ -119,7 +172,7 @@ class VettingEnglishExportTest {
         for(String field:Arrays.asList("status","action","addendum","checklist"))try(Fixture f=new Fixture()){
             AtomicReference<String> checklistRemark=new AtomicReference<>("Original human countercheck");VettingChecklistService checklist=mock(VettingChecklistService.class);
             when(checklist.resultsForRun(any(VettingRun.class))).thenAnswer(call->Collections.singletonList(new VettingChecklistCatalog.Result("APP-I-001","unchecked",checklistRemark.get())));f.service.setChecklistService(checklist);
-            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{
+            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{
                 ((Runnable)call.getArgument(2)).run();
                 if("status".equals(field))f.finding.setStatus("Handled");
                 if("action".equals(field))f.finding.setActionTaken("Concurrent human action");
@@ -195,7 +248,7 @@ class VettingEnglishExportTest {
             when(writer.docx(any(Project.class),anyList(),any(VettingJobVO.class),eq("en"),nullable(VettingExportProbe.class),anyList(),anySet())).thenAnswer(i->word("原件中文段落"));
             byte[] translated=word("English translation: Original source wording presented in English.");
             when(english.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(i->{((Runnable)i.getArgument(2)).run();assertEquals("原件中文段落",text(i.getArgument(0)));return translated.clone();});
-            when(english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(i->{((Runnable)i.getArgument(2)).run();JsonNode raw=i.getArgument(0);suppliedJson.set(raw.deepCopy());return english(raw);});service.setEnglishFileOutput(english);
+            when(english.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(i->{((Runnable)i.getArgument(2)).run();JsonNode raw=i.getArgument(0);suppliedJson.set(raw.deepCopy());return english(raw);});service.setEnglishFileOutput(english);
             DraftingService renderer=mock(DraftingService.class);when(renderer.renderPdf(any(byte[].class))).thenAnswer(i->{rendered.set(((byte[])i.getArgument(0)).clone());return VettingDocxPdfFixture.render(rendered.get());});service.setDraftingIdentity(renderer);
         }
         String findingQuote(){return JsonUtils.parse(finding.getEvidenceJson()).get(0).path("quote").asText();}

@@ -208,8 +208,16 @@ export interface VettingParsedTablesPage {
   semanticQuality: 'unknown'; canonicalAdoption: 'not_performed'
 }
 
+export interface ProjectTextSearchResult {
+  selectedDocuments: number; availableDocuments: number
+  hits: Array<{ documentId: string; fileName: string; pageNo: string | null; anchor: string | null; text: string; sourceHash: string; originalSourceSha256: string }>
+}
+
 export const vettingApi = {
   files: (projectId: string) => api.get<VettingSourceReviewFile[]>(`/vetting/${projectId}/files`),
+  searchProjectText: (projectId: string, query: string, allSources: boolean) =>
+    api.post<ProjectTextSearchResult>(`/vetting/${encodeURIComponent(projectId)}/sources/search`, { query, allSources },
+      { timeout: 1800000, reportError: false, llmSelection: { profileId: null } }),
   parsedText: (projectId: string, documentId: string, pins: { originalSourceSha256: string; routingSha256: string; businessContentSha256: string }, page: number) =>
     api.get<VettingParsedTextPage>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/parsed-text?${new URLSearchParams({ ...pins, page: String(page) })}`, { reportError: false }),
   parsedTables: (projectId: string, documentId: string, pins: { originalSourceSha256: string; routingSha256: string; businessContentSha256: string }, page: number) =>
@@ -270,12 +278,13 @@ export const vettingApi = {
         if (!value || typeof value !== 'object') return false
         const report = value as Record<string, unknown>
         const project = report.project as { id?: unknown } | null
-        const job = report.job as { id?: unknown; status?: unknown } | null
+        const job = report.job as { id?: unknown; status?: unknown; partialResults?: unknown } | null
         const diagnostics = report.diagnostics as { retainedServerSide?: unknown; sourceRunId?: unknown; sourceReportSnapshotId?: unknown } | null
         const sha256 = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
         return report.schemaVersion === '2.0' && report.reportStructureVersion === 'competition-comments-and-checklist-v1'
           && report.presentationOnly === true && report.language === 'en' && report.reportLanguage === 'en'
-          && project?.id === projectId && typeof job?.id === 'string' && job.id.length > 0 && job.status === 'COMPLETED'
+          && project?.id === projectId && typeof job?.id === 'string' && job.id.length > 0
+          && (job.status === 'COMPLETED' || job.status === 'FAILED' && job.partialResults === true)
           && report.sourceRunId === job.id && sha256(report.sourceReportSnapshotId) && sha256(report.sourceSnapshotSha256)
           && diagnostics?.retainedServerSide === true && diagnostics.sourceRunId === job.id && diagnostics.sourceReportSnapshotId === report.sourceReportSnapshotId
           && ['findings', 'commentsTables', 'checklistTables', 'checklistResults'].every(key => Array.isArray(report[key]))

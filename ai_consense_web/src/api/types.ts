@@ -676,6 +676,7 @@ export interface VettingMetrics {
 }
 
 export interface VettingRunResult {
+  partialResults?: boolean
   promptPolicy?: Record<string, string> | null
   modelIdentity?: ModelIdentity | null
   total: number

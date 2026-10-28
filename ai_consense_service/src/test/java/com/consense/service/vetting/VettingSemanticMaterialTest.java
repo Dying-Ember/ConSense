@@ -172,7 +172,7 @@ class VettingSemanticMaterialTest {
         }
         java.lang.reflect.Method full=VettingSemanticReview.class.getDeclaredMethod("reviewScanned",String.class,VettingSemanticReview.Result.class,List.class,List.class,String.class,List.class,Runnable.class,VettingReviewProbe.class);full.setAccessible(true);
         VettingSemanticReview.Result result=(VettingSemanticReview.Result)full.invoke(review,"fixture-project",new VettingSemanticReview.Result(),chunks,chunks,"en",null,(Runnable)()->{},VettingReviewProbe.start(properties,null,"fixture"));
-        assertEquals(1,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().containsAll(Arrays.asList(chunks.get(0).getId(),chunks.get(1).getId(),chunks.get(2).getId())));
+        assertEquals(1,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty(),"An empty response retains submitted cross-file text without completing its semantic assessments");
         com.consense.web.dto.VettingDtos.SemanticTopicVO audit=result.getTopicAudits().get(0);assertEquals("full_scope",audit.getReviewKind());assertEquals("not_completed",audit.getCheckState());
         assertTrue(audit.getPacketAudits().stream().anyMatch(p->p.getSubmittedChunkIds().contains(chunks.get(0).getId())&&p.getSubmittedChunkIds().contains(chunks.get(1).getId())));
         verifyNoInteractions(retrieval);

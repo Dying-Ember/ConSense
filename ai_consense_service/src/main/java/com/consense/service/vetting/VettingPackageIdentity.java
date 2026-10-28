@@ -19,7 +19,7 @@ public final class VettingPackageIdentity {
     private static final Pattern EXTERNAL=Pattern.compile("(?i)\\b(?:another|other|external|reference|refer(?:red)?\\h+to|see|under)\\b|其他|另一|參見|参见|參考|参考");
     private static final Pattern EXAMPLE=Pattern.compile("(?i)^(?:standard(?:\\h+form)?|template|example|sample|specimen|edition|標準|标准|範本|范本|示例|版本)(?:\\h*[:：-]?)$");
     private static final Pattern EXTERNAL_HEADING=Pattern.compile("(?i)^(?:external\\h+references?|(?:other|another)\\h+(?:contracts?|projects?)|外部引用|其他合同|其他項目|其他项目)(?:\\h*[:：-]?)$");
-    private static final Pattern PLACEHOLDER=Pattern.compile("(?i)^(?:unknown|n/?a|tbd|to\\h+be\\h+(?:confirmed|completed)|[\\s_.*?—–-]+|\\[[^]]*]|<[^>]*>)$");
+    private static final Pattern PLACEHOLDER=Pattern.compile("(?i)^(?:unknown|n/?a|tbd|to\\h+be\\h+(?:confirmed|completed)|[\\s_.*?—–…-]+|\\[[^]]*]|<[^>]*>)$");
     private VettingPackageIdentity(){}
 
     public static final class Review {

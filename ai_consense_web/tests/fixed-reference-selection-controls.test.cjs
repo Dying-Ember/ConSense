@@ -258,27 +258,16 @@ test('actual backend stages and edition statuses have readable labels in every l
   }
 })
 
-test('the common topbar exposes the same exact saved editions in both Vetting and Advice', async () => {
+test('the reference control exposes and searches the saved editions for both Vetting and Advice', async () => {
   for (const module of ['vetting', 'advice']) {
-    const timers = new Map(), queries = [], store = vue.reactive({ activeProjectId: 'P', locale: 'en', health: null, projects: [], activeProject: null })
-    const fixedReferenceApi = { status: async () => ({ configured: true }), selection: async id => { assert.equal(id, 'P'); return selectionStatus({ manifestSha256: manifest, slSources: [{ editionId: 'official-2025', sha256: b }] }) }, search: async (id, module, query) => { queries.push({ id, module, query }); return [] } }
-    const loaded = loadVue(path.join(__dirname, '../src/components/AppTopbar.vue'), { boundaries: {
-      '@/api': { fixedReferenceApi, slLibraryApi: { status: async () => libraryStatus({ retrievalAvailable: true }) } },
-      'vue-i18n': { useI18n: () => ({ t: value => value }) }, 'vue-router': { useRoute: () => ({ name: module }) },
-      '@/stores/app': { useAppStore: () => store }, '@/composables/useLocalized': { useLocalized: () => ({ pick: value => value?.en || '' }) },
-      '@/i18n': { SUPPORTED_LOCALES: ['en'], LOCALE_LABELS: { en: 'English' } }, '@/i18n/inspection': { inspectionWords: () => ({ title: 'Inspection' }) },
-      './AppIcon.vue': { default: { render: () => null } }, './AppModal.vue': { default: modal }
-    }, globals: { setTimeout: callback => { timers.set(1, callback); return 1 }, clearTimeout: id => timers.delete(id) } })
-    const h = renderer(), app = h.createApp(loaded.default); app.mount(h.root); await settle()
+    const h = await mount({ projectId: 'P', module: module === 'advice' ? 'advisory' : 'vetting', selection: async () => selectionStatus({ manifestSha256: manifest, slSources: [{ editionId: 'official-2025', sha256: b }] }), library: async () => libraryStatus({ retrievalAvailable: true }), search: async () => [] })
     try {
       assert.ok(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-library-open')), module)
       const summary = text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-saved-scope')))
       assert.match(summary, /SL 2025 official/); assert.doesNotMatch(summary, /[a-f0-9]{64}/)
-      find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-library-open')).props.onClick(); await settle()
-      find(h.root, node => node.tag === 'input' && Object.hasOwn(node.props, 'data-fixed-search-query')).props['onUpdate:modelValue']('literal'); await settle()
-      await find(h.root, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle()
-      assert.deepEqual(queries, [{ id: 'P', module: module === 'advice' ? 'advisory' : 'vetting', query: 'literal' }])
-    } finally { app.unmount(); assert.equal(timers.size, 0) }
+      await h.open(); await h.query('literal'); await h.search()
+      assert.deepEqual(h.queries, [{ id: 'P', module: module === 'advice' ? 'advisory' : 'vetting', query: 'literal' }])
+    } finally { h.dispose(); assert.equal(h.timers.size, 0) }
   }
 })
 

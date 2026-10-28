@@ -34,6 +34,12 @@ public class VettingController {
         return ApiResponse.ok(vettingService.listFiles(projectId));
     }
 
+    @PostMapping("/sources/search")
+    public ApiResponse<ProjectTextSearchResult> searchProjectText(@PathVariable String projectId,
+            @Valid @RequestBody ProjectTextSearchRequest request) {
+        return ApiResponse.ok(vettingService.searchProjectText(projectId,request.getQuery(),request.isAllSources()));
+    }
+
     @PutMapping("/sources/{documentId}/role")
     public ApiResponse<VettingFileVO> confirmSourceRole(@PathVariable String projectId,@PathVariable Long documentId,
             @Valid @RequestBody SourceRoleConfirmationRequest request) {

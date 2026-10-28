@@ -26,6 +26,181 @@ import static org.mockito.Mockito.*;
 
 /** Python-authored wire and mocked transport; this is not a model or original-PDF acceptance test. */
 class OerCanonicalRetrievalClientTest {
+    @Test void compactTargetSelectionFiltersBeforeRankingWithoutChangingTheWholeIndexReceipt()throws Exception {
+        Wire wire=compactSourceWire();String source=wire.binding.getOriginalSourceSha256();
+        wire.response.putArray("selectedSourceSha256").add(source);
+        assertEquals(wire.response.path("hits").get(0).path("id").asText(),compactSourceQuery(wire,Collections.singleton(source)).path("hits").get(0).path("id").asText());
+        ArgumentCaptor<String> body=ArgumentCaptor.forClass(String.class);verify(wire.http).postJson(endsWith("/retrieve"),body.capture(),anyLong());
+        JsonNode request=JsonUtils.parse(body.getValue());assertEquals(Collections.singletonList(source),JsonUtils.readList(JsonUtils.write(request.path("sourceSha256")),String.class));
+        assertEquals(KEY,request.path("projectId").asText());assertEquals("tender",request.path("role").asText());
+        assertTrue(wire.client.sourceGenerationLinked("vetting",KEY,COMPACT_GENERATION));verifyNoInteractions(wire.backend);
+        verify(wire.http,never()).postJson(endsWith("/index-canonical"),anyString(),anyLong());
+    }
+    @Test void compactTargetSelectionRejectsMissingWrongDuplicateAndMalformedEchoes()throws Exception {
+        for(String mutation:Arrays.asList("missing","wrong","duplicate","non_array","non_text")){
+            Wire wire=compactSourceWire();String source=wire.binding.getOriginalSourceSha256();
+            if("wrong".equals(mutation))wire.response.putArray("selectedSourceSha256").add(VettingCorpus.hash("unselected source"));
+            if("duplicate".equals(mutation))wire.response.putArray("selectedSourceSha256").add(source).add(source);
+            if("non_array".equals(mutation))wire.response.put("selectedSourceSha256",source);
+            if("non_text".equals(mutation))wire.response.putArray("selectedSourceSha256").add(1);
+            IllegalStateException rejected=assertThrows(IllegalStateException.class,()->compactSourceQuery(wire,Collections.singleton(source)),mutation);
+            assertTrue(rejected.getMessage().contains("source selection"),rejected.getMessage());verifyNoInteractions(wire.backend);
+        }
+    }
+    @Test void compactTargetSelectionRejectsEmptyMalformedAndUnauthorizedRequestsBeforeTransport()throws Exception {
+        for(Set<String> selection:Arrays.asList(Collections.<String>emptySet(),Collections.singleton("not-a-source-hash"),Collections.singleton(VettingCorpus.hash("outside the project")))){
+            Wire wire=compactSourceWire();assertThrows(IllegalStateException.class,()->compactSourceQuery(wire,selection));
+            verify(wire.http,never()).postJson(endsWith("/retrieve"),anyString(),anyLong());verifyNoInteractions(wire.backend);
+        }
+    }
+    @Test void compactTargetSelectionRejectsAnUnselectedPayloadBeforeTextHydration()throws Exception {
+        Wire wire=compactSourceWire();String source=wire.binding.getOriginalSourceSha256();wire.response.putArray("selectedSourceSha256").add(source);
+        ((ObjectNode)wire.response.path("hits").get(0).path("payload")).put("originalSourceSha256",VettingCorpus.hash("outside target"));
+        IllegalStateException rejected=assertThrows(IllegalStateException.class,()->compactSourceQuery(wire,Collections.singleton(source)));
+        assertTrue(rejected.getMessage().contains("requested source selection"),rejected.getMessage());verifyNoInteractions(wire.backend);
+    }
+    @Test void legacyCompactQueriesDoNotRequireOrSendATargetSelection()throws Exception {
+        Wire wire=compactSourceWire();assertEquals(wire.response.path("hits").get(0).path("id").asText(),compactSourceQuery(wire,null).path("hits").get(0).path("id").asText());
+        ArgumentCaptor<String> body=ArgumentCaptor.forClass(String.class);verify(wire.http).postJson(endsWith("/retrieve"),body.capture(),anyLong());
+        assertFalse(JsonUtils.parse(body.getValue()).has("sourceSha256"));verifyNoInteractions(wire.backend);
+    }
+    private static final String COMPACT_GENERATION=VettingCorpus.hash("authored selected-source generation");
+    private static Wire compactSourceWire()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");wire.index();wire.binding.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);available.put("coldBootstrap",false);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-review-index");available.putNull("indexGeneration");
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenReturn(JsonUtils.write(available));
+        assertTrue(wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(wire.binding),wire.snapshot.path("chunks").size(),COMPACT_GENERATION,()->{}).ready);
+        clearInvocations(wire.http,wire.backend);return wire;
+    }
+    private static JsonNode compactSourceQuery(Wire wire,Set<String> selection){
+        Map<String,JsonNode> parents=new LinkedHashMap<>();wire.snapshot.path("chunks").forEach(chunk->parents.put(chunk.path("id").asText(),chunk));
+        java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate=ids->{fail("A compact target query cannot load complete graphs");return null;};
+        java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> compact=(ids,response)->new OerCanonicalRetrievalClient.RankedTextParents(parents);
+        return selection==null?wire.client.retrieveCompact("vetting",KEY,"named authored clause","tender",Collections.singletonList(wire.binding),COMPACT_GENERATION,()->{},hydrate,compact,true)
+                :wire.client.retrieveCompact("vetting",KEY,"named authored clause","tender",Collections.singletonList(wire.binding),COMPACT_GENERATION,()->{},hydrate,compact,true,selection);
+    }
+
+    @Test void coldAdapterRejectionDoesNotBlockARecheckedExistingIndex()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);available.put("coldBootstrap",true);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-review-index");available.putNull("indexGeneration");
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong()))
+                .thenThrow(new com.consense.common.BizException("HTTP 422 {\"detail\":{\"kind\":\"INDEX_ADAPTER_PREDECESSOR_CHANGED\"}}"))
+                .thenReturn(JsonUtils.write(available));
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        assertThrows(com.consense.common.BizException.class,()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}));
+        assertTrue(wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}).ready);
+        verify(wire.http,times(2)).postJson(endsWith("/index-canonical/availability"),anyString(),anyLong());
+        verify(wire.http,never()).postJson(endsWith("/index-canonical"),anyString(),anyLong());
+    }
+    @Test void adapterRejectionStillInvalidatesAnExistingReceipt()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");wire.index();
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong()))
+                .thenThrow(new com.consense.common.BizException("HTTP 422 {\"detail\":{\"kind\":\"INDEX_ADAPTER_PREDECESSOR_CHANGED\"}}"));
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        assertThrows(com.consense.common.BizException.class,()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}));
+        assertTrue(assertThrows(IllegalStateException.class,()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{})).getMessage().contains("canonical_index_receipt_invalidated"));
+        verify(wire.http,times(1)).postJson(endsWith("/index-canonical/availability"),anyString(),anyLong());
+    }
+    @Test void otherColdFailuresStillInvalidateTheReceipt()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong()))
+                .thenThrow(new com.consense.common.BizException("HTTP 503 index unavailable"));
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        assertThrows(com.consense.common.BizException.class,()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}));
+        assertTrue(assertThrows(IllegalStateException.class,()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{})).getMessage().contains("canonical_index_receipt_invalidated"));
+        verify(wire.http,times(1)).postJson(endsWith("/index-canonical/availability"),anyString(),anyLong());
+    }
+    @Test void failedColdAdapterCheckCannotPublishAnOlderConcurrentReceipt()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);available.put("coldBootstrap",true);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-review-index");available.putNull("indexGeneration");
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenAnswer(call->{
+            int number=calls.incrementAndGet();if(number==1){entered.countDown();assertTrue(release.await(10,java.util.concurrent.TimeUnit.SECONDS));}
+            if(number==2)throw new com.consense.common.BizException("HTTP 422 {\"detail\":{\"kind\":\"INDEX_ADAPTER_PREDECESSOR_CHANGED\"}}");
+            return JsonUtils.write(available);
+        });
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        java.util.concurrent.ExecutorService executor=java.util.concurrent.Executors.newSingleThreadExecutor();
+        try{
+            java.util.concurrent.Future<OerCanonicalRetrievalClient.IndexState> pending=executor.submit(()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}));
+            assertTrue(entered.await(10,java.util.concurrent.TimeUnit.SECONDS));
+            assertThrows(com.consense.common.BizException.class,()->wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}));
+            release.countDown();assertThrows(java.util.concurrent.ExecutionException.class,()->pending.get(10,java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}).ready);
+        }finally{release.countDown();executor.shutdownNow();}
+    }
+    @Test void aRejectedQueryDoesNotInvalidateTheIndexForTheNextDirection()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");wire.index();
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);available.put("coldBootstrap",false);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-review-index");available.putNull("indexGeneration");
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenReturn(JsonUtils.write(available));
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        assertTrue(wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}).ready);
+        Map<String,JsonNode> selected=new LinkedHashMap<>();wire.snapshot.path("chunks").forEach(c->selected.put(c.path("id").asText(),c));
+        when(wire.http.postJson(endsWith("/retrieve"),anyString(),anyLong()))
+            .thenThrow(new com.consense.common.BizException("HTTP 422 {\"detail\": {\"kind\": \"QUERY_TOKEN_BUDGET_EXHAUSTED\"}}"))
+            .thenReturn(JsonUtils.write(wire.response));
+        java.util.function.Supplier<JsonNode> query=()->wire.client.retrieveCompact("vetting",KEY,"authored query","tender",Collections.singletonList(compact),generation,()->{},
+                ids->{fail("A compact review query cannot load complete graphs");return null;},(ids,response)->new OerCanonicalRetrievalClient.RankedTextParents(selected),true);
+        assertThrows(com.consense.common.BizException.class,query::get);
+        assertEquals(1,query.get().path("hits").size(),"A rejected query must not prevent the next direction from using the same verified index");
+        doThrow(new com.consense.common.BizException("HTTP 503 index unavailable")).when(wire.http).postJson(endsWith("/retrieve"),anyString(),anyLong());
+        assertThrows(com.consense.common.BizException.class,query::get);
+        assertTrue(assertThrows(IllegalStateException.class,query::get).getMessage().contains("canonical_index_receipt_invalidated"),"Other retrieval failures keep the existing invalidation guard");
+    }
+    @Test void vettingCompactRecoveryAndRankingKeepModuleProofWithoutHydratingSourceGraphs()throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        wire.index();
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);available.put("coldBootstrap",false);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-review-index");available.putNull("indexGeneration");
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenReturn(JsonUtils.write(available));
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        assertTrue(wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}).ready);
+        assertTrue(wire.client.sourceGenerationLinked("vetting",KEY,generation),"The Vetting receipt must be usable by its own module");
+        clearInvocations(wire.backend,wire.http);Map<String,JsonNode> selected=new LinkedHashMap<>();wire.snapshot.path("chunks").forEach(c->selected.put(c.path("id").asText(),c));
+        JsonNode result=wire.client.retrieveCompact("vetting",KEY,"named authored clause","tender",Collections.singletonList(compact),generation,()->{},
+                ids->{fail("A compact review query cannot load complete graphs");return null;},(ids,response)->new OerCanonicalRetrievalClient.RankedTextParents(selected),true);
+        assertEquals(1,result.path("hits").size());assertEquals("additional_source_context_deferred",result.path("sourceUnits").path("units").get(0).path("reason").asText());
+        verifyNoInteractions(wire.backend);verify(wire.http,never()).postJson(endsWith("/index-canonical"),anyString(),anyLong());
+        assertThrows(IllegalStateException.class,()->wire.client.retrieveCompact("vetting",KEY,"missing compact proof","tender",Collections.singletonList(compact),generation,()->{},
+                ids->{fail("No full-graph fallback");return null;},(ids,response)->null,true));
+    }
+    @Test void aVettingGenerationReceiptCannotBeUsedAsAdvisory() throws Exception {
+        Wire wire=new Wire();wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");wire.index();
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);available.put("coldBootstrap",false);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-review-index");available.putNull("indexGeneration");
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenReturn(JsonUtils.write(available));
+        String generation=VettingCorpus.hash("authored selected-source generation");
+        assertTrue(wire.client.compactRecoveryAvailability("vetting",KEY,Collections.singletonList(compact),wire.snapshot.path("chunks").size(),generation,()->{}).ready);
+        assertThrows(IllegalStateException.class,()->wire.client.sourceGenerationLinked("advisory",KEY,generation));
+    }
     private static final String INPUT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     private static final String KEY="test-canonical";
     @Test void frameBackedCorpusBorrowsItsVerifiedChunkTree() throws Exception {
@@ -193,6 +368,20 @@ class OerCanonicalRetrievalClientTest {
     private static void semanticMembers(Wire wire,ObjectNode unit){
         ArrayNode members=(ArrayNode)unit.path("members");for(int i=0;i<members.size();i++)members.set(i,semanticMember(wire,members.get(i)));
         for(String field:Arrays.asList("hierarchyContext","attachmentContext"))if(unit.path(field).isObject())semanticMembers(wire,(ObjectNode)unit.path(field));
+    }
+    @Test void deferredTextPreparationRequiresAdvertisedProfileAndExactReplyWithoutAnIndex()throws Exception{
+        for(String mode:Arrays.asList("none","unadvertised","wrong_reply")){
+            Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare");ObjectNode capability=(ObjectNode)wire.health.path("oer").path("sourceRead");
+            capability.putArray("semanticReadVersions").add(OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);ArrayNode profiles=capability.putArray("semanticReadProfiles").add("full").add(OerCanonicalRetrievalClient.TEXT_FIRST_PROFILE);
+            boolean advertised=!"unadvertised".equals(mode);if(advertised)profiles.add(OerCanonicalRetrievalClient.DEFERRED_TEXT_FIRST_PROFILE);
+            String requested=advertised?OerCanonicalRetrievalClient.DEFERRED_TEXT_FIRST_PROFILE:OerCanonicalRetrievalClient.TEXT_FIRST_PROFILE;
+            prepared.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);prepared.put("semanticReadProfile","wrong_reply".equals(mode)?OerCanonicalRetrievalClient.TEXT_FIRST_PROFILE:requested);
+            ((ObjectNode)prepared.path("scopeIdentity")).put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY).put("semanticReadProfile",prepared.path("semanticReadProfile").asText());sealReadScope(prepared);
+            when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenReturn(JsonUtils.write(prepared));
+            if("wrong_reply".equals(mode))assertThrows(RuntimeException.class,()->wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding)));
+            else {OerCanonicalRetrievalClient.SemanticSources selected=wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding));assertTrue(selected.textFirst());assertEquals(advertised,selected.deferredText());}
+            ArgumentCaptor<String> body=ArgumentCaptor.forClass(String.class);verify(wire.backend).sourceRead(body.capture(),eq("vetting"),eq(16777216));assertEquals(requested,JsonUtils.parse(body.getValue()).path("semanticReadProfile").asText());verify(wire.backend,never()).snapshot(anyString(),anyString());verify(wire.http,never()).postJson(anyString(),anyString(),anyLong());
+        }
     }
     @Test void preparedSemanticReadsDoNotLoadSnapshotsOrRequireAnIndex()throws Exception{
         Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare"),returned=semanticFixture(wire,"ids");

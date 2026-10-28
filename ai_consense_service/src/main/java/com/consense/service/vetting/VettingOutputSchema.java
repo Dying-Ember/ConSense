@@ -11,6 +11,9 @@ final class VettingOutputSchema {
     private VettingOutputSchema() { }
 
     static JsonNode forChunkIds(Collection<String> chunkIds) {
+        return forChunkIds(chunkIds,null);
+    }
+    static JsonNode forChunkIds(Collection<String> chunkIds,Collection<String> assignedChecklistIds) {
         ObjectNode root = JsonUtils.mapper().createObjectNode();
         root.put("type", "array");
         ObjectNode item = root.putObject("items"); item.put("type", "object"); item.put("additionalProperties", false);
@@ -24,10 +27,12 @@ final class VettingOutputSchema {
         ObjectNode pending=fields.putObject("pendingFacts");pending.put("type","array");pending.set("items",text(1,600));pending.put("maxItems",20);
         fields.set("suggestedAction",choice("delete","amend","insert","review"));
         ObjectNode checks=fields.putObject("checklistAssessments");checks.put("type","array");checks.put("maxItems",67);
+        if(assignedChecklistIds!=null)checks.put("maxItems",assignedChecklistIds.size());
         ObjectNode check=checks.putObject("items");check.put("type","object");check.put("additionalProperties",false);
         ObjectNode checkFields=check.putObject("properties");
         checkFields.set("itemId",choice(VettingChecklistCatalog.items().stream().map(VettingChecklistCatalog.Item::getId)
-                .filter(id->!VettingChecklistCatalog.annexItemIds().contains(id)).toArray(String[]::new)));
+                .filter(id->!VettingChecklistCatalog.annexItemIds().contains(id)&&(assignedChecklistIds==null||assignedChecklistIds.isEmpty()||assignedChecklistIds.contains(id))).toArray(String[]::new)));
+        if(assignedChecklistIds!=null&&assignedChecklistIds.isEmpty())checkFields.set("itemId",text(1,64));
         checkFields.set("status",choice("fulfilled","not_fulfilled","insufficient_evidence","not_applicable"));checkFields.set("reason",text(1,1200));
         // Contract candidate only: all facts remain untrusted until server source-role/object validation.
         ObjectNode support=checkFields.putObject("support");ArrayNode alternatives=support.putArray("anyOf");

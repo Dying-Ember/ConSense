@@ -36,7 +36,7 @@ class VettingDuplicatePublicationSafetyTest {
         SourceDocument source=source();Candidate quantity=candidate(source,"same","Quantity mismatch","The same tender event requires exactly two versus exactly three signed paper copies.");
         Candidate time=candidate(source,"same","Appointment time mismatch","The same tender event is fixed at 12:00 noon versus 14:00 on the same date.");
         assertEquals(VettingService.fingerprint(quantity),VettingService.fingerprint(time),"Precondition: identical raw fingerprint metadata, distinct actual reported claims");
-        when(semantic.reviewWithProgress(isNull(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(quantity,time));
+        when(semantic.reviewWithProgress(anyString(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(quantity,time));
         assertEquals(2,service.run(source.getProjectId(),"en").getTotal(),"PUBLICATION_DISTINCT_REPORTED_CLAIMS_MUST_SURVIVE_RAW_FINGERPRINT_COLLISION");
         List<FindingVO> rows=service.listFindings(source.getProjectId(),null,null,null,null,null);
         assertEquals(2,rows.size());assertEquals(new HashSet<>(Arrays.asList(quantity.getComment(),time.getComment())),new HashSet<>(Arrays.asList(rows.get(0).getBody().getEn(),rows.get(1).getBody().getEn())));
@@ -46,7 +46,7 @@ class VettingDuplicatePublicationSafetyTest {
     @Test void separatePacketsRemainSeparateRawAuditMembersEvenForTheSameReportedProblem() {
         SourceDocument source=source();Candidate a=candidate(source,"A","Quantity mismatch","The same tender event requires exactly two versus exactly three copies.");
         Candidate b=candidate(source,"B",a.getTitle(),a.getComment());assertNotEquals(VettingService.fingerprint(a),VettingService.fingerprint(b));
-        when(semantic.reviewWithProgress(isNull(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(a,b));
+        when(semantic.reviewWithProgress(anyString(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(a,b));
         assertEquals(2,service.run(source.getProjectId(),"en").getTotal());List<FindingVO> rows=service.listFindings(source.getProjectId(),null,null,null,null,null);assertEquals(2,rows.size());
         Set<String> packets=new HashSet<>();for(FindingVO row:rows)packets.add(row.getEvidence().get(0).getPacketId());assertEquals(new HashSet<>(Arrays.asList(a.getPacketId(),b.getPacketId())),packets);
     }
@@ -54,14 +54,14 @@ class VettingDuplicatePublicationSafetyTest {
     @Test void anExactRepeatedCandidateInTheSamePacketRemainsIdempotent() {
         SourceDocument source=source();Candidate a=candidate(source,"same","Quantity mismatch","The same tender event requires exactly two versus exactly three copies.");
         Candidate same=JsonUtils.read(JsonUtils.write(a),Candidate.class);
-        when(semantic.reviewWithProgress(isNull(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(a,same));
+        when(semantic.reviewWithProgress(anyString(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(a,same));
         assertEquals(1,service.run(source.getProjectId(),"en").getTotal());
     }
 
     @Test void sameFingerprintKeepsHumanDecisionsSeparateByExactGeneratedRevision() {
         SourceDocument source=source();Candidate quantity=candidate(source,"same","Quantity mismatch","Two versus three copies require review.");
         Candidate time=candidate(source,"same","Fixed time mismatch","12:00 versus 14:00 requires separate review.");
-        when(semantic.reviewWithProgress(isNull(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(quantity,time));
+        when(semantic.reviewWithProgress(anyString(),eq(source.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(quantity,time));
         assertEquals(2,service.run(source.getProjectId(),"en").getTotal(),"PUBLICATION_DISTINCT_REPORTED_CLAIMS_MUST_SURVIVE_RAW_FINGERPRINT_COLLISION");
         List<FindingVO> first=service.listFindings(source.getProjectId(),null,null,null,null,null);
         FindingVO q=first.stream().filter(row->quantity.getTitle().equals(row.getTitle().getEn())).findFirst().orElseThrow(AssertionError::new);

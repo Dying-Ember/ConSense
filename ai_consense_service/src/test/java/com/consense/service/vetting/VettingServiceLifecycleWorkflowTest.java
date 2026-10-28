@@ -70,6 +70,32 @@ class VettingServiceLifecycleWorkflowTest {
         });
         when(evidencePreparation.prepareNormalCandidate(anyString(),anyLong(),eq("vetting"))).thenAnswer(call->normalPreparation.prepare(call.getArgument(0),call.getArgument(1),call.getArgument(2)));
     }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"unchanged","between_packets","before_save"})
+    void frozenSlSelectionCannotChangeBetweenDirectionsOrBeforePublication(String phase)throws Exception{
+        String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 Retain the same source scope throughout review.");
+        VettingService target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(service);
+        FixedBaselineRetrievalClient original=(FixedBaselineRetrievalClient)org.springframework.test.util.ReflectionTestUtils.getField(target,"fixedBaseline");
+        FixedBaselineRetrievalClient fixed=mock(FixedBaselineRetrievalClient.class);when(fixed.enabled()).thenReturn(true);
+        JsonNode first=JsonUtils.parse("{\"manifestSha256\":\"authored-manifest\",\"slSources\":[{\"editionId\":\"SL2022-B2-r1\",\"sha256\":\"authored-first\"}]}");
+        java.util.concurrent.atomic.AtomicReference<JsonNode> selection=new java.util.concurrent.atomic.AtomicReference<>(first);
+        when(fixed.projectSelection(project)).thenAnswer(call->selection.get().deepCopy());org.springframework.test.util.ReflectionTestUtils.setField(target,"fixedBaseline",fixed);
+        try{
+            when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
+                Runnable guard=call.getArgument(6);guard.run();
+                if(!"unchanged".equals(phase))selection.set(JsonUtils.parse("{\"manifestSha256\":\"authored-manifest\",\"slSources\":[{\"editionId\":\"SL2021\",\"sha256\":\"authored-second\"}]}"));
+                if("between_packets".equals(phase))guard.run();
+                return result(doc,false);
+            });
+            if("unchanged".equals(phase)){
+                assertDoesNotThrow(()->service.run(project,"en"));assertEquals("COMPLETED",service.latestRun(project).getStatus());
+            }else{
+                BizException rejected=assertThrows(BizException.class,()->service.run(project,"en"));assertTrue(rejected.getMessage().contains("SL source selection changed"),rejected.getMessage());
+                assertEquals("FAILED",service.latestRun(project).getStatus());assertTrue(findings.findByProjectIdOrderByCodeAsc(project).isEmpty(),"Changed editions cannot publish the old run's generated findings");
+            }
+            VettingRun saved=runs.findFirstByProjectIdOrderByStartedAtDesc(project).orElseThrow(AssertionError::new);
+            assertEquals(VettingCorpus.hash(JsonUtils.write(Arrays.asList(true,first))),JsonUtils.parse(saved.getCoverageJson()).path("fixedReferenceSelectionSha256").asText(),"The original choice is persisted; the changed choice never replaces it");
+        }finally{org.springframework.test.util.ReflectionTestUtils.setField(target,"fixedBaseline",original);}
+    }
 
     @Test void canonicalRunFreezesThePersistedPreparedGraphBeforeLoadingTheCorpus() throws Exception {
         useLegacyFullPreparationAdapter();
@@ -161,7 +187,7 @@ class VettingServiceLifecycleWorkflowTest {
 
     @Test void coverageOnlyChangeAfterSemanticReturnCannotReachFinalSave() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 Retain the original source evidence.");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
             SourceDocument fresh=documents.findById(doc.getId()).orElseThrow(AssertionError::new);fresh.setParseCoverageJson("{\"changedAfterSemanticReturn\":true}");documents.saveAndFlush(fresh);return result(doc,false);
         });
         BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
@@ -174,7 +200,7 @@ class VettingServiceLifecycleWorkflowTest {
     @Test void defaultOffAndObservedRerunKeepSelectionAndAllHumanFields() throws Exception {
         String project=project();SourceDocument scc=source(project,"SCC","SCC.txt","SCC 9.1 Clause 25.2(4) of the General Conditions of Contract is deleted.");
         source(project,"PRE","PRE.txt","PRE 18.1 The contractor shall comply with GCC25.2(4) when applying for interim payment.");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{Result result=result(scc,true);call.<ReviewProgress>getArgument(4).update(3,3,"fixture progress");return result;});
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{Result result=result(scc,true);call.<ReviewProgress>getArgument(4).update(3,3,"fixture progress");return result;});
         Path root=probeRoot(project);RunResultVO baseline=service.run(project,"en");assertFalse(Files.exists(root));
         List<VettingFinding> original=findings.findByProjectIdOrderByCodeAsc(project).stream().filter(VettingFinding::getActive).collect(Collectors.toList());
         assertTrue(original.size()>=2);VettingFinding human=original.get(0);
@@ -205,7 +231,7 @@ class VettingServiceLifecycleWorkflowTest {
     }
     @Test void candidateSnapshotsPreserveSourceBeforeOriginalNormalization() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 The contractor shall retain the original source description.");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{Result r=result(doc,false);r.getCandidates().get(0).setSource("fixture-provider");return r;});
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{Result r=result(doc,false);r.getCandidates().get(0).setSource("fixture-provider");return r;});
         Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());service.run(project,"en");List<JsonNode> events=events(root,service.latestRun(project).getId());
         assertEquals("fixture-provider",one(events,"semantic_result_raw_candidates").path("observations").path("result").path("candidates").get(0).path("source").asText());
         JsonNode decision=one(events,"candidate_filter_decision").path("observations");assertEquals("fixture-provider",decision.path("sourceBeforeNormalization").asText());assertEquals("model",decision.path("candidate").path("source").asText());
@@ -213,7 +239,7 @@ class VettingServiceLifecycleWorkflowTest {
     }
     @Test void repeatedSameCandidateObjectRetainsEveryOriginalOccurrenceInTheDecisionTrace() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 The source fixture remains immutable during observation.");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{Result r=result(doc,false);r.getCandidates().add(r.getCandidates().get(0));return r;});
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{Result r=result(doc,false);r.getCandidates().add(r.getCandidates().get(0));return r;});
         Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());assertEquals(1,service.run(project,"en").getTotal());
         List<JsonNode> decisions=phase(events(root,service.latestRun(project).getId()),"candidate_filter_decision");assertEquals(2,decisions.size());
         for(JsonNode event:decisions){JsonNode original=event.path("observations").path("originalOrdinals");assertEquals(2,original.size());assertEquals(0,original.get(0).asInt());assertEquals(1,original.get(1).asInt());}
@@ -222,7 +248,7 @@ class VettingServiceLifecycleWorkflowTest {
     @Test void actualSemanticFailureKeepsCauseSuppressedAndCommittedFailureStatus() throws Exception {
         String project=project();source(project,"NTT","NTT.txt","NTT 1.1 Original text remains available after a failed review.");
         RuntimeException cause=new RuntimeException("fixture semantic failure",new java.io.IOException("underlying fixture cause"));cause.addSuppressed(new IllegalStateException("original suppressed marker"));
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenThrow(cause);
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenThrow(cause);
         Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());BizException outward=assertThrows(BizException.class,()->service.run(project,"en"));
         assertEquals("fixture semantic failure",outward.getMessage());VettingJobVO run=service.latestRun(project);assertEquals("FAILED",run.getStatus());
         List<JsonNode> events=events(root,run.getId());JsonNode tree=one(events,"service_run_failure").path("observations").path("originalFailure");
@@ -232,7 +258,7 @@ class VettingServiceLifecycleWorkflowTest {
     }
     @Test void originalPersistenceFailureRollsBackRecordsAndHasNoFalseCommitEvent() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 Source identity and existing human records are retained.");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,false));service.run(project,"en");
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,false));service.run(project,"en");
         FindingVO before=service.listFindings(project,null,null,null,null,null).get(0);VettingHumanReviewFixture.updateReview(service,project,before.getCode(),new ReviewUpdateRequest("original manual","done",true));
         List<VettingFinding> previous=findings.findByProjectIdOrderByCodeAsc(project);String previousRun=previous.get(0).getRunId();
         doThrow(new IllegalStateException("fixture saveAll rejected",new java.io.IOException("storage fixture cause"))).when(findings).saveAll(any());
@@ -245,7 +271,7 @@ class VettingServiceLifecycleWorkflowTest {
     }
     @Test void unusableObserverDirectoryCannotTurnBusinessSuccessIntoFailure() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 Optional observer failure must not modify generated records.");
-        when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,false));Path file=probeRoot(project);Files.createDirectories(file.getParent());Files.write(file,new byte[]{1});
+        when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(doc,false));Path file=probeRoot(project);Files.createDirectories(file.getParent());Files.write(file,new byte[]{1});
         props.getVetting().setServiceProbeDirectory(file.toString());assertEquals(1,service.run(project,"en").getTotal());assertEquals("COMPLETED",service.latestRun(project).getStatus());assertEquals(1,service.listFindings(project,null,null,null,null,null).size());assertEquals(1,Files.size(file));
     }
     @Test void restartRecoveryRecordsActualRunAndProjectWithoutTouchingCompletedRun() throws Exception {

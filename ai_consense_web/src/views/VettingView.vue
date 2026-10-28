@@ -3,13 +3,14 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { vettingApi } from '@/api'
-import type { VettingParsedTextPage, VettingParsedTablesPage, VettingSourceReviewFile } from '@/api'
+import type { ProjectTextSearchResult, VettingParsedTextPage, VettingParsedTablesPage, VettingSourceReviewFile } from '@/api'
 import { ApiError, type PreparedDownload } from '@/api/client'
 import type { Citation, DocumentScope, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
 import AppModal from '@/components/AppModal.vue'
+import FixedReferenceSelection from '@/components/FixedReferenceSelection.vue'
 import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
 import FixedBaselineEvidencePanel from '@/components/FixedBaselineEvidencePanel.vue'
 import AdviceSourceReader from '@/components/AdviceSourceReader.vue'
@@ -36,7 +37,7 @@ function callStatusLabel(status?: string): string {
 function requestStateLabel(status: string, kind: 'transportStates' | 'requestStates'): string {
   const known = kind === 'transportStates'
     ? ['already_global', 'transported_extra_pack', 'oversized', 'omitted_pack_cap', 'unknown', 'budget_unknown', 'over_budget']
-    : ['decoded', 'decoded_provider_estimate', 'decoded_with_rejections', 'decoded_provider_estimate_with_rejections', 'over_budget', 'not_submitted_over_budget', 'not_submitted_budget_unknown', 'not_submitted_oversized', 'not_submitted_omitted_pack_cap', 'not_submitted_unknown', 'failed', 'not_submitted']
+    : ['decoded', 'decoded_provider_estimate', 'decoded_with_rejections', 'decoded_provider_estimate_with_rejections', 'partial_business_shape_rejection', 'partial_source_attribution_rejection', 'over_budget', 'not_submitted_over_budget', 'not_submitted_budget_unknown', 'not_submitted_oversized', 'not_submitted_omitted_pack_cap', 'not_submitted_unknown', 'failed', 'not_submitted']
   return known.includes(status) ? t(`vetting.coverage.${kind}.${status}`) : `${t('vetting.coverage.callStates.unknown')} (${status})`
 }
 
@@ -47,12 +48,13 @@ function checkStateLabel(status?: string): string { return t(`vetting.checkState
 
 function jobFailureMessageKey(value?: string | null): string | null {
   const message = value?.trim() ?? ''
-  if (message.startsWith('Model response source attribution invalid:')) return 'vetting.job.sourceAttributionFailed'
-  if (message.startsWith('Structured output must be one complete JSON value')) return 'vetting.job.resultFormatFailed'
+  if (message.startsWith('Model response source attribution invalid:') || message === 'source_attribution_invalid') return 'vetting.job.sourceAttributionFailed'
+  if (message.startsWith('Structured output must be one complete JSON value') || message.startsWith('Structured output does not conform') || ['structured_output_invalid', 'business_shape_invalid'].includes(message)) return 'vetting.job.resultFormatFailed'
   return null
 }
 function readerJobMessage(value?: string | null): string {
   const key = jobFailureMessageKey(value)
+  if (value?.startsWith('来源、模型或审查配方与检查点不兼容')) return sourceReaderCopy('This review was interrupted and could not be resumed safely. Previous results were retained.', '本次审查已中断，无法安全自动恢复；之前的结果已保留。', '本次審查已中斷，無法安全自動恢復；之前的結果已保留。')
   return key ? t(key) : value ?? ''
 }
 
@@ -190,7 +192,8 @@ const retainedChecklists = ref<VettingChecklist[]>([])
 const checklistChanged = ref(false)
 const currentChecklistDirty = computed(() => checklist.value !== null && JSON.stringify(checklist.value.items) !== JSON.stringify(checklistBaseline.value))
 const checklistDirty = computed(() => currentChecklistDirty.value || retainedChecklists.value.length > 0)
-const checklistWritable = computed(() => sourceRoleSaving.value === null && checklist.value?.writable && !checklistChanged.value && checklist.value.runId === job.value?.id)
+const checklistWritable = computed(() => sourceRoleSaving.value === null && checklist.value?.writable && !checklistChanged.value && checklist.value.runId === job.value?.id
+  && job.value?.status === 'COMPLETED' && job.value.sourceSetStale !== true && job.value.sourceVerification !== 'NOT_CHECKED')
 const loading = ref(false)
 const selectedDetail = ref<Finding | null>(null)
 const evidenceLoading = ref(false)
@@ -229,6 +232,67 @@ const sourceOriginalPreview = ref<{ file: VettingSourceReviewFile; source: strin
 const sourceOriginalPanel = ref<HTMLElement | null>(null), parsedTextPanel = ref<HTMLElement | null>(null), sourceSetPanel = ref<HTMLElement | null>(null)
 let parsedTextSequence = 0
 const sourceReaderCopy = (en: string, hans: string, hant: string) => (store.locale ?? 'en').startsWith('en') ? en : store.locale === 'zh-Hant' ? hant : hans
+function jobStep(phase: string) {
+  switch (phase) {
+    case 'queued': return sourceReaderCopy('Waiting to start', '等待开始', '等待開始')
+    case 'preparing': return sourceReaderCopy('Preparing project documents', '准备项目文件', '準備項目檔案')
+    case 'reading': return sourceReaderCopy('Reading project text', '读取项目文字', '讀取項目文字')
+    case 'rules': return sourceReaderCopy('Checking contract rules', '检查合同规则', '檢查合約規則')
+    case 'semantic': return sourceReaderCopy('Reviewing relevant passages', '审查相关条文', '審查相關條文')
+    case 'saving': return sourceReaderCopy('Saving review results', '保存审查结果', '儲存審查結果')
+    case 'recovering': return sourceReaderCopy('Restoring saved work', '恢复已保存的工作', '恢復已儲存的工作')
+    default: return sourceReaderCopy('Processing', '正在处理', '正在處理')
+  }
+}
+function readerProgressMessage(message: string) {
+  if (message === '读取本次范围的完整来源单元。') return sourceReaderCopy('Preparing the selected document text for review.', '准备本次范围内的文件文字。', '準備本次範圍內的檔案文字。')
+  const read = /^Reading project text: (\d+) \/ (\d+) sections processed\.$/.exec(message)
+  if (read) return sourceReaderCopy(message, `正在读取项目文字：已处理 ${read[1]} / ${read[2]} 段。`, `正在讀取項目文字：已處理 ${read[1]} / ${read[2]} 段。`)
+  const stages: Record<string, [string, string]> = {
+    'Reading the selected project text.': ['正在读取选定的项目文字。', '正在讀取選定的項目文字。'],
+    'Checking the contract text for rule-based issues.': ['正在检查合同文字中的规则问题。', '正在檢查合約文字中的規則問題。'],
+    'Preparing the selected passages.': ['正在准备选中的条文。', '正在準備選中的條文。'],
+    'Checking the review input size.': ['正在检查审查输入的大小。', '正在檢查審查輸入的大小。'],
+    'Rechecking the model response.': ['正在重新检查模型回答。', '正在重新檢查模型回答。'],
+    'The model is reviewing the selected passages.': ['模型正在审查选中的条文。', '模型正在審查選中的條文。'],
+    'Checking quotations and source versions.': ['正在核对引文和来源版本。', '正在核對引文和來源版本。'],
+    'Saving these review results.': ['正在保存本步审查结果。', '正在儲存本步審查結果。'],
+    'This review step failed.': ['本步审查失败。', '本步審查失敗。'],
+    'Finished reviewing these passages.': ['已完成本次条文审查。', '已完成本次條文審查。']
+  }
+  const separator = message.lastIndexOf(': '), action = separator < 0 ? message : message.slice(separator + 2)
+  const translated = stages[action]
+  if (translated) return `${separator < 0 ? '' : message.slice(0, separator + 2)}${sourceReaderCopy(action, translated[0], translated[1])}`
+  return message
+}
+const projectTextQuery = ref(''), projectTextAllSources = ref(false), projectTextSearching = ref(false), projectTextError = ref('')
+const projectTextResult = ref<ProjectTextSearchResult | null>(null)
+let projectTextSequence = 0
+function projectTextOriginalUrl(hit: ProjectTextSearchResult['hits'][number]) {
+  const file = files.value.find(row => row.documentId === hit.documentId)
+  if (!file || file.originalSourceSha256 !== hit.originalSourceSha256
+    || !(file.sourceHash ? file.sourceHash === hit.sourceHash : sourceReaderPins(file))) return null
+  const pageMatch = /^P?(\d+)$/i.exec(hit.pageNo?.trim() ?? '')
+  const page = pageMatch ? Number(pageMatch[1]) : 1
+  if (file.fileName.toLowerCase().endsWith('.pdf') && (!Number.isSafeInteger(page) || page < 1 || page > 100000 || file.pageCount > 0 && page > file.pageCount)) return null
+  return sourceReaderOriginalUrl(file, page)
+}
+
+async function searchProjectText() {
+  const id = projectId.value, query = projectTextQuery.value.trim(), epoch = viewEpoch
+  if (!id || !query || projectTextSearching.value) return
+  const sequence = ++projectTextSequence
+  projectTextSearching.value = true; projectTextError.value = ''; projectTextResult.value = null
+  try {
+    const result = await vettingApi.searchProjectText(id, query, projectTextAllSources.value)
+    if (!disposed && epoch === viewEpoch && sequence === projectTextSequence && id === projectId.value) projectTextResult.value = result
+  } catch {
+    if (!disposed && epoch === viewEpoch && sequence === projectTextSequence && id === projectId.value)
+      projectTextError.value = sourceReaderCopy('Search could not be completed. Check the project files and search index, then try again.', '检索未完成。请检查项目文件和检索索引后重试。', '檢索未完成。請檢查項目檔案和檢索索引後重試。')
+  } finally {
+    if (!disposed && epoch === viewEpoch && sequence === projectTextSequence) projectTextSearching.value = false
+  }
+}
 
 const GROUPS = ['reference', 'conflict', 'language', 'risk', 'gap', 'substantive', 'requirement'] as const
 
@@ -271,15 +335,18 @@ const BUCKET_LABELS: Record<string, { zhHans: string; zhHant: string; en: string
 }
 
 const selectedFinding = computed(() => selectedDetail.value)
+const partialJobResults = computed(() => job.value?.status === 'FAILED' && job.value.result?.partialResults === true)
+const hasPublishedRunResults = computed(() => job.value?.status === 'COMPLETED' || partialJobResults.value)
+const failedRunReadOnly = computed(() => job.value?.status === 'FAILED')
 const handoffOpening = ref(false)
 const handoffDisabled = computed(() => !projectId.value || !selectedFinding.value || handoffOpening.value || evidenceLoading.value || running.value || job.value?.sourceVerification === 'NOT_CHECKED' || sourceRoleSaving.value !== null || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
-const jobDetailsPending = computed(() => job.value?.status === 'COMPLETED' && job.value.sourceVerification === 'NOT_CHECKED')
+const jobDetailsPending = computed(() => hasPublishedRunResults.value && job.value?.sourceVerification === 'NOT_CHECKED')
 const running = computed(() => starting.value || isActiveJob(job.value) || jobDetailsPending.value)
 const reviewActive = computed(() => starting.value || isActiveJob(job.value))
 const jobModelIdentity = computed(() => job.value?.modelIdentity ?? job.value?.result?.modelIdentity)
 const recordedJobModel = computed(() => jobModelIdentity.value?.model || job.value?.result?.model)
 const jobFailureMessages = computed(() => [...new Set([readerJobMessage(job.value?.error), readerJobMessage(job.value?.message)].filter(Boolean))])
-const exportDisabled = computed(() => running.value || sourceRoleSaving.value !== null || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || job.value?.sourceSetStale === true || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED')
+const exportDisabled = computed(() => running.value || sourceRoleSaving.value !== null || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || job.value?.sourceSetStale === true || !hasPublishedRunResults.value || job.value?.sourceVerification === 'NOT_CHECKED')
 const coverage = computed(() => job.value?.coverage ?? job.value?.result?.coverage ?? null)
 const sourceRoleBlocked = computed(() => running.value || uploading.value || exporting.value || sourceRoleSaving.value !== null
   || sourceRoleNeedsRefresh.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
@@ -569,10 +636,6 @@ async function confirmSourceRole(file: VettingFile) {
     if (epoch === viewEpoch && id === projectId.value) sourceRoleSaving.value = null
   }
 }
-const jobPercent = computed(() => {
-  if (!job.value?.totalUnits) return null
-  return Math.min(100, Math.max(0, Math.round(job.value.completedUnits / job.value.totalUnits * 100)))
-})
 function isExcludedDrawing(file: VettingFile) {
   return file.exclusionReason === 'drawing_outside_scope'
     || (file.documentScope === 'drawing' && (file.parseStatus === 'EXCLUDED' || file.status === 'EXCLUDED'))
@@ -623,17 +686,18 @@ function originalSourceUrl(item: FindingEvidence) {
   return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(String(item.documentId))}/original?${new URLSearchParams({ sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256, sourceRole: item.sourceRole! })}${fragment}`
 }
 
-function isOrdinaryDocx(item: FindingEvidence) {
-  return !item.canonicalEvidence && !item.fixedBaselineEvidence && item.fileName.toLowerCase().endsWith('.docx')
+function isProjectDocx(item: FindingEvidence) {
+  return !item.fixedBaselineEvidence && item.fileName.toLowerCase().endsWith('.docx')
 }
 
 function openOriginalSource(item: FindingEvidence) {
-  if (!isOrdinaryDocx(item) || !originalSourceUrl(item)) return
+  if (!isProjectDocx(item) || !originalSourceUrl(item)) return
   sourceCitation.value = {
     evidenceId: selectedFinding.value?.code, documentId: String(item.documentId),
     fileLabel: item.fileName, pageNo: item.pageNo ?? '', anchor: item.anchor ?? '', content: item.quote, score: 0,
     sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256,
-    sourceRole: item.sourceRole, nativePositions: item.nativePositions
+    sourceRole: item.sourceRole, nativePositions: item.nativePositions,
+    ...(item.canonicalEvidence ? { canonicalEvidence: [item.canonicalEvidence] } : {})
   }
 }
 
@@ -855,6 +919,8 @@ watch(projectId, () => {
   closeSourceOriginalPreview()
   closeParsedText()
   viewEpoch++
+  projectTextSequence++
+  projectTextSearching.value = false; projectTextResult.value = null; projectTextError.value = ''; projectTextQuery.value = ''
   jobSequence++
   evidenceSequence++
   stopPolling()
@@ -985,7 +1051,7 @@ function closeDrawer() {
 }
 
 async function updateStatus(status: string) {
-  if (!selectedFinding.value || statusSaving.value || reviewSaving.value || running.value || sourceRoleSaving.value !== null || reviewChanged.value) return
+  if (!selectedFinding.value || statusSaving.value || reviewSaving.value || running.value || failedRunReadOnly.value || sourceRoleSaving.value !== null || reviewChanged.value) return
   const id = projectId.value
   const shown = selectedFinding.value, code = shown.code, version = findingVersion(shown), binding = findingBinding(shown)
   if (!binding) { reviewChanged.value = true; return }
@@ -1065,7 +1131,7 @@ async function refreshFinding() {
 }
 
 async function saveReview() {
-  if (!selectedFinding.value || reviewSaving.value || statusSaving.value || running.value || sourceRoleSaving.value !== null || !reviewDirty.value || reviewChanged.value) return
+  if (!selectedFinding.value || reviewSaving.value || statusSaving.value || running.value || failedRunReadOnly.value || sourceRoleSaving.value !== null || !reviewDirty.value || reviewChanged.value) return
   const id = projectId.value, code = selectedFinding.value.code, epoch = viewEpoch
   const version = findingVersion(selectedFinding.value), binding = findingBinding(selectedFinding.value)
   if (!binding) { reviewChanged.value = true; return }
@@ -1182,7 +1248,8 @@ watch(() => job.value?.id, () => {
 })
 
 async function openChecklist(event?: Event) {
-  if ((event && !(event.target as HTMLDetailsElement).open) || checklist.value || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED') return
+  if ((event && !(event.target as HTMLDetailsElement).open) || checklist.value || !hasPublishedRunResults.value || !job.value
+    || job.value.sourceSetStale === true || job.value.sourceVerification === 'NOT_CHECKED') return
   const id = projectId.value, runId = job.value.id, epoch = viewEpoch, sequence = ++checklistSequence
   checklistLoading.value = true
   try {
@@ -1283,7 +1350,7 @@ function tagClass(group: string) {
         <button class="btn" type="button" :disabled="running || sourceRoleSaving !== null || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="chooseUploadFiles">
           <AppIcon name="upload" :size="15" />{{ t('vetting.actions.upload') }}
         </button>
-        <button class="btn primary" type="button" :disabled="running || sourceRoleSaving !== null || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed)" @click="runVetting">
+        <button class="btn primary" type="button" :disabled="running || projectTextSearching || sourceRoleSaving !== null || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed)" @click="runVetting">
           <AppIcon name="play" :size="15" />
           {{ reviewActive ? t('vetting.actions.running') : t('vetting.actions.run') }}
         </button>
@@ -1302,7 +1369,41 @@ function tagClass(group: string) {
     </div>
 
     <p class="small" data-generated-output-language>{{ t('common.generatedOutputLanguage') }}</p>
-    <p class="small muted" data-sl-reference-scope>{{ sourceReaderCopy('SL reference retrieval uses the project editions saved in “SL editions and library” above; project adoption remains unconfirmed.', 'SL 参考检索使用顶部“SL 版本与资料库”中本项目已保存的版本；项目采用状态仍待确认。', 'SL 參考檢索使用頂部「SL 版本與資料庫」中本項目已儲存的版本；項目採用狀態仍待確認。') }}</p>
+    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="vetting" />
+
+    <section class="surface section-gap" aria-live="polite" data-project-text-search>
+      <div class="surface-body">
+        <strong>{{ sourceReaderCopy('Search project documents', '检索项目文件', '檢索項目檔案') }}</strong>
+        <p class="small muted">{{ sourceReaderCopy('Find relevant passages before review. This search does not call the language model; search SL editions using the control above.', '审查前查找相关原文。此检索不调用大模型；SL 版本可通过上方入口检索。', '審查前查找相關原文。此檢索不呼叫大型語言模型；SL 版本可透過上方入口檢索。') }}</p>
+        <form class="row section-gap" @submit.prevent="searchProjectText">
+          <label>{{ sourceReaderCopy('What are you looking for?', '要查找什么？', '要查找甚麼？') }}
+            <input v-model="projectTextQuery" type="search" maxlength="1000" :disabled="projectTextSearching" />
+          </label>
+          <label>{{ sourceReaderCopy('Search scope', '检索范围', '檢索範圍') }}
+            <select v-model="projectTextAllSources" :disabled="projectTextSearching">
+              <option :value="false">{{ sourceReaderCopy('Tender documents', '招标合同文件', '招標合約檔案') }}</option>
+              <option :value="true">{{ sourceReaderCopy('All selected project documents', '所有选定项目文件', '所有選定項目檔案') }}</option>
+            </select>
+          </label>
+          <button class="btn" type="submit" :disabled="!projectId || !projectTextQuery.trim() || projectTextSearching || running || uploading || sourceRoleSaving !== null">
+            {{ sourceReaderCopy('Search', '检索', '檢索') }}
+          </button>
+        </form>
+        <p v-if="projectTextSearching" class="small muted">{{ sourceReaderCopy('Searching project text. Preparing a missing index may take several minutes.', '正在检索项目文字；如需准备索引，可能需要数分钟。', '正在檢索項目文字；如需準備索引，可能需要數分鐘。') }}</p>
+        <p v-if="projectTextError" class="warning-note" role="alert">{{ projectTextError }}</p>
+        <template v-if="projectTextResult">
+          <p class="small muted">{{ sourceReaderCopy('Documents available for search', '可检索文件', '可檢索檔案') }}: {{ projectTextResult.availableDocuments }} / {{ projectTextResult.selectedDocuments }}</p>
+          <p v-if="!projectTextResult.hits.length">{{ sourceReaderCopy('No matching passages were returned.', '未找到匹配的原文。', '未找到符合的原文。') }}</p>
+          <article v-for="(hit, index) in projectTextResult.hits" :key="index" class="section-gap">
+            <strong>{{ hit.fileName }}</strong><span v-if="hit.pageNo || hit.anchor"> · {{ [hit.pageNo, hit.anchor].filter(Boolean).join(' · ') }}</span>
+            <p class="quote">{{ hit.text }}</p>
+            <a v-if="projectTextOriginalUrl(hit)" class="btn small" :href="projectTextOriginalUrl(hit)!"
+              :target="hit.fileName.toLowerCase().endsWith('.pdf') ? '_blank' : undefined"
+              :download="hit.fileName.toLowerCase().endsWith('.pdf') ? undefined : hit.fileName">{{ hit.fileName.toLowerCase().endsWith('.pdf') ? t('vetting.drawer.openOriginal') : sourceReaderCopy('Download original', '下载原件', '下載原件') }}</a>
+          </article>
+        </template>
+      </div>
+    </section>
 
     <div v-if="job || pollingPaused" class="surface section-gap vetting-run-panel" aria-live="polite">
       <div class="surface-body">
@@ -1311,39 +1412,31 @@ function tagClass(group: string) {
           <span v-if="job" class="tag" :class="job.status === 'FAILED' ? 'danger' : 'info'">
             {{ t(`vetting.job.status.${job.status}`) }}
           </span>
-          <span v-if="job?.totalUnits" class="mono muted small">{{ t('vetting.job.progressLabel') }}: {{ job.completedUnits }} / {{ job.totalUnits }}</span>
           <span class="spacer" />
           <button v-if="pollingPaused" class="btn" type="button" @click="retryPolling">
             <AppIcon name="refresh" :size="14" />{{ t('vetting.job.resume') }}
           </button>
         </div>
         <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="warning-note">{{ t('vetting.job.executionCompleteNote') }}</p>
-        <div v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="small">
+        <p v-if="partialJobResults && !jobDetailsPending" class="warning-note" role="status" data-partial-review-results>{{ t('vetting.job.partialFailureNote') }}</p>
+        <p v-if="job?.status === 'FAILED' && job.result?.partialResults !== true" class="warning-note">{{ sourceReaderCopy('Any findings shown below were saved by an earlier review; this interrupted review produced no published results.', '下方如有审查意见，来自之前保存的审查；本次中断的审查没有发布结果。', '下方如有審查意見，來自之前儲存的審查；本次中斷的審查沒有發布結果。') }}</p>
+        <div v-if="hasPublishedRunResults && !jobDetailsPending" class="small">
           <p v-if="coverage">{{ t('vetting.job.documentSummary', { reviewed: coverage.reviewedDocuments, total: coverage.totalDocuments }) }}</p>
-          <p>{{ t('vetting.job.findingSummary', { total: metrics?.total ?? job.result?.total ?? t('vetting.coverage.unknownCount'), listed: findings.length, pending: pendingListFindings }) }}</p>
+          <p>{{ t('vetting.job.findingSummary', { total: metrics?.total ?? job?.result?.total ?? t('vetting.coverage.unknownCount'), listed: findings.length, pending: pendingListFindings }) }}</p>
         </div>
-        <p v-if="running && job?.status !== 'FAILED' && job?.message" class="small">{{ readerJobMessage(job.message) }}</p>
+        <p v-if="isActiveJob(job) && job" class="small"><strong>{{ sourceReaderCopy('Current step', '当前步骤', '目前步驟') }}:</strong> {{ jobStep(job.phase) }}</p>
+        <p v-if="isActiveJob(job) && job?.message" class="small">{{ readerProgressMessage(job.message) }}</p>
+        <p v-if="starting && !isActiveJob(job)" class="small">{{ sourceReaderCopy('Submitting the review…', '正在提交审查…', '正在提交審查…') }}</p>
         <template v-if="job?.status === 'FAILED'">
           <p v-for="message in jobFailureMessages" :key="message" class="run-error" role="alert">{{ message }}</p>
         </template>
         <p v-if="job?.recoveryStatus === 'NEEDS_RERUN'" class="warning-note">{{ t('vetting.recovery.NEEDS_RERUN') }}</p>
-        <p v-if="job" class="muted small">{{ recordedJobModel ? `${t('llm.recordedModel')}: ${recordedJobModel}` : t('llm.identityUnknown') }}</p>
-        <details v-if="job" class="small section-gap">
-          <summary>{{ t('vetting.job.executionDetails') }}</summary>
-          <p v-if="!running && job.status !== 'FAILED' && job.message">{{ job.message }}</p>
-          <template v-if="job.status === 'FAILED'">
-            <h5>{{ t('vetting.job.rawFailureRecord') }}</h5>
-            <pre v-if="job.message">{{ job.message }}</pre>
-            <pre v-if="job.error && job.error !== job.message">{{ job.error }}</pre>
-          </template>
-          <p v-if="job.recoveryStatus">{{ t(`vetting.recovery.${job.recoveryStatus}`) }}</p>
-          <p v-if="jobModelIdentity" class="muted">{{ jobModelIdentity.profileId }} · {{ jobModelIdentity.provider }}</p>
-          <p v-if="jobModelIdentity" class="muted">{{ t('llm.identityNote') }}</p>
-          <details v-if="job.reliablePackets?.length"><summary>{{ t('vetting.recovery.reliablePackets') }} · {{ job.reliablePackets.length }}</summary>
-            <div v-for="saved in job.reliablePackets" :key="saved.packet.packetId" class="small section-gap"><strong>{{ checkStateLabel(saved.packet.checkState) }}</strong> · {{ saved.packet.status }}<p class="mono" style="overflow-wrap:anywhere">{{ saved.packet.packetId }} · {{ saved.packet.sourceSnapshotSha256 }}</p><p v-for="warning in saved.warnings" :key="warning" class="warning-note">{{ warning }}</p><details><summary>{{ t('vetting.drawer.evidence') }}</summary><pre>{{ JSON.stringify(saved, null, 2) }}</pre></details></div>
-          </details>
+        <p v-if="recordedJobModel" class="muted small">{{ t('llm.recordedModel') }}: {{ recordedJobModel === 'qwen3.8-27b' ? 'Qwen3.8 27B' : recordedJobModel }}</p>
+        <details v-if="job?.status === 'FAILED' && (job.message || job.error)" class="small section-gap">
+          <summary>{{ sourceReaderCopy('View failure details', '查看失败详情', '查看失敗詳情') }}</summary>
+          <pre v-if="job.message">{{ job.message }}</pre>
+          <pre v-if="job.error && job.error !== job.message">{{ job.error }}</pre>
         </details>
-        <progress v-if="reviewActive && jobPercent !== null" class="vetting-progress" :value="jobPercent" max="100" :aria-label="t('vetting.job.title')" />
         <p v-if="pollingPaused" class="warning-note">{{ t(jobDetailsPending ? 'vetting.job.sourceCheckPaused' : 'vetting.job.connectionPaused') }}</p>
         <p v-else-if="jobDetailsPending" class="muted small" role="status">{{ t('vetting.job.checkingSources') }}</p>
         <p v-else-if="reviewActive" class="muted small">{{ t('vetting.job.background') }}</p>
@@ -1401,7 +1494,7 @@ function tagClass(group: string) {
       <button class="btn" type="button" @click="retainedChecklists = []">{{ pick(versionCopy.discard) }}</button>
     </details>
 
-    <details v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="surface checklist-panel section-gap" @toggle="openChecklist">
+    <details v-if="hasPublishedRunResults && !jobDetailsPending" class="surface checklist-panel section-gap" @toggle="openChecklist">
       <summary>{{ t('vetting.checklist.title') }}</summary>
       <p class="muted small">{{ t('vetting.checklist.note') }}</p>
       <p v-if="checklist?.items.some(item => item.dependencyStatus === 'required_member_dependencies_unknown')" class="muted small">{{ t('vetting.checklist.dependencyUnknown') }}</p>
@@ -1513,7 +1606,7 @@ function tagClass(group: string) {
                   <strong>{{ checkStateLabel(topic.checkState) }}</strong>
                   <span class="tag" :class="['failed', 'partial', 'incomplete', 'not_submitted'].includes(reviewScopeStatus(topic)) ? 'warn' : 'neutral'">{{ t(`vetting.coverage.aggregateStates.${reviewScopeStatus(topic)}`) }}</span>
                   <div class="small muted">{{ t('vetting.coverage.globalCall') }}: {{ callStatusLabel(topic.globalCallStatus ?? topic.status) }}</div>
-                  <div v-if="topic.error" class="warning-note">{{ topic.error }}</div>
+                  <div v-if="topic.error" class="warning-note">{{ readerJobMessage(topic.error) }}</div>
                 </td>
                 <td>
                   <div>{{ t('vetting.coverage.pendingRequests') }}: {{ topic.pendingSourceRequestCount ?? t('vetting.coverage.unknownCount') }} / {{ topic.sourceRequestCount ?? t('vetting.coverage.unknownCount') }}</div>
@@ -1527,8 +1620,8 @@ function tagClass(group: string) {
                       <div class="muted">{{ t(`vetting.coverage.budgetStates.${packetBudgetStatus(packet.inputBudgetStatus)}`) }}</div>
                       <div>{{ t('vetting.coverage.actualSubmission') }}: {{ packet.actualGatewayCallStarted === true ? t('vetting.coverage.submitted') : packet.actualGatewayCallStarted === false ? t('vetting.coverage.notSubmitted') : t('vetting.coverage.unknownCount') }}</div>
                       <div v-if="packet.inputBudgetMetadata?.observation">{{ t('vetting.coverage.tokenCounts') }}: {{ packet.inputBudgetMetadata.observation.inputTokens ?? t('vetting.coverage.unknownCount') }} + {{ packet.inputBudgetMetadata.observation.outputReserveTokens ?? t('vetting.coverage.unknownCount') }} / {{ packet.inputBudgetMetadata.observation.effectiveContextTokens ?? t('vetting.coverage.unknownCount') }}</div>
-                      <div v-if="packet.failureKind" class="warning-note">{{ t('vetting.coverage.failureReason') }}: {{ packet.failureKind }}</div>
-                      <div v-if="packet.error" class="warning-note">{{ packet.error }}</div>
+                      <div v-if="packet.failureKind && !packet.error" class="warning-note">{{ t('vetting.coverage.failureReason') }}: {{ readerJobMessage(packet.failureKind) }}</div>
+                      <div v-if="packet.error" class="warning-note">{{ readerJobMessage(packet.error) }}</div>
                       <details><summary>{{ t('vetting.coverage.packetIdentity') }}</summary>
                         <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ packet.packetId }}</div>
                         <div v-if="packet.sourceObservationPacketId" class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.sourceObservationPacket') }}: {{ packet.sourceObservationPacketId }}</div>
@@ -1821,8 +1914,8 @@ function tagClass(group: string) {
                   <span class="tag" :class="item.located ? 'ok' : 'warn'">{{ item.located ? t('vetting.drawer.located') : t('vetting.drawer.unverified') }}</span>
                 </div>
                 <div class="quote">{{ item.quote }}</div>
-                <button v-if="isOrdinaryDocx(item) && originalSourceUrl(item)" class="btn" type="button" @click="openOriginalSource(item)">{{ t('vetting.drawer.openOriginal') }}</button>
-                <a v-else-if="originalSourceUrl(item)" class="btn" :href="originalSourceUrl(item) ?? undefined"
+                <button v-if="isProjectDocx(item) && originalSourceUrl(item)" class="btn" type="button" @click="openOriginalSource(item)">{{ t('vetting.drawer.openOriginal') }}</button>
+                <a v-if="originalSourceUrl(item)" class="btn" :href="originalSourceUrl(item) ?? undefined"
                   :target="item.fileName.toLowerCase().endsWith('.pdf') ? '_blank' : undefined"
                   :download="item.fileName.toLowerCase().endsWith('.pdf') ? undefined : item.fileName" rel="noopener noreferrer">
                   {{ t(item.fileName.toLowerCase().endsWith('.pdf') ? 'vetting.drawer.openOriginal' : 'vetting.drawer.downloadOriginal') }}
@@ -1830,12 +1923,13 @@ function tagClass(group: string) {
                 <p v-if="!item.located" class="warning-note">{{ t('vetting.drawer.notLocated') }}</p>
                 <FixedBaselineEvidencePanel v-if="item.fixedBaselineEvidence" :pointer="item.fixedBaselineEvidence" :locale="store.locale" />
                 <CanonicalEvidencePanel v-else-if="item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" />
+                <p v-if="selectedFinding.source === 'rule'" class="muted small">{{ t('vetting.coverage.ruleEvidence') }}</p>
                 <details v-if="item.packetId || item.packetSourceSnapshotSha256" class="small evidence-technical-details">
                   <summary>{{ t('vetting.coverage.packetIdentity') }}</summary>
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ item.packetId ?? t('vetting.coverage.unknownCount') }}</div>
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.packetSnapshot') }}: {{ item.packetSourceSnapshotSha256 ?? t('vetting.coverage.unknownCount') }}</div>
                 </details>
-                <p v-else class="muted small">{{ t('vetting.coverage.legacyPacketUnknown') }}</p>
+                <p v-else-if="selectedFinding.source !== 'rule'" class="muted small">{{ t('vetting.coverage.legacyPacketUnknown') }}</p>
               </div>
             </div>
             <div v-else-if="!evidenceLoading && !evidenceFailed" class="evidence-missing">
@@ -1856,15 +1950,15 @@ function tagClass(group: string) {
               <h5>{{ t('vetting.review.team') }}</h5>
               <label class="review-field">
                 <span>{{ t('vetting.review.remarks') }}</span>
-                <textarea v-model="reviewDraft.reviewRemarks" rows="3" maxlength="4000" :disabled="reviewSaving || running || sourceRoleSaving !== null" />
+                <textarea v-model="reviewDraft.reviewRemarks" rows="3" maxlength="4000" :disabled="reviewSaving || running || failedRunReadOnly || sourceRoleSaving !== null" />
               </label>
               <label class="review-field">
                 <span>{{ t('vetting.review.actionTaken') }}</span>
-                <textarea v-model="reviewDraft.actionTaken" rows="3" maxlength="4000" :disabled="reviewSaving || running || sourceRoleSaving !== null" />
+                <textarea v-model="reviewDraft.actionTaken" rows="3" maxlength="4000" :disabled="reviewSaving || running || failedRunReadOnly || sourceRoleSaving !== null" />
               </label>
               <label class="review-field">
                 <span>{{ t('vetting.review.addendum') }}</span>
-                <select v-model="reviewDraft.addendum" :disabled="reviewSaving || running || sourceRoleSaving !== null">
+                <select v-model="reviewDraft.addendum" :disabled="reviewSaving || running || failedRunReadOnly || sourceRoleSaving !== null">
                   <option value="undecided">{{ t('vetting.review.undecided') }}</option>
                   <option value="required">{{ t('vetting.review.required') }}</option>
                   <option value="notRequired">{{ t('vetting.review.notRequired') }}</option>
@@ -1876,7 +1970,7 @@ function tagClass(group: string) {
                 <button class="btn" type="button" :disabled="reviewSaving || statusSaving" @click="refreshFinding">{{ pick(versionCopy.refresh) }}</button>
               </p>
               <div class="row">
-                <button class="btn primary" type="button" :disabled="reviewSaving || statusSaving || running || sourceRoleSaving !== null || reviewChanged || !reviewDirty" @click="saveReview">{{ t('vetting.review.save') }}</button>
+                <button class="btn primary" type="button" :disabled="reviewSaving || statusSaving || running || failedRunReadOnly || sourceRoleSaving !== null || reviewChanged || !reviewDirty" @click="saveReview">{{ t('vetting.review.save') }}</button>
                 <button class="btn" type="button" :disabled="reviewSaving || !reviewDirty" @click="discardReview">{{ t('vetting.review.discard') }}</button>
                 <span v-if="reviewDirty" class="small muted">{{ t('vetting.review.unsaved') }}</span>
               </div>
@@ -1884,7 +1978,7 @@ function tagClass(group: string) {
             <button
               class="btn success"
               type="button"
-              :disabled="statusSaving || reviewSaving || running || sourceRoleSaving !== null || reviewChanged || selectedFinding.status.toUpperCase() === 'HANDLED'"
+              :disabled="statusSaving || reviewSaving || running || failedRunReadOnly || sourceRoleSaving !== null || reviewChanged || selectedFinding.status.toUpperCase() === 'HANDLED'"
               @click="updateStatus('Handled')"
             >
               <AppIcon name="check" :size="15" />{{ t('vetting.drawer.markHandled') }}
@@ -1892,12 +1986,12 @@ function tagClass(group: string) {
             <button
               class="btn"
               type="button"
-              :disabled="statusSaving || reviewSaving || running || sourceRoleSaving !== null || reviewChanged || selectedFinding.status.toUpperCase() === 'ASSIGNED'"
+              :disabled="statusSaving || reviewSaving || running || failedRunReadOnly || sourceRoleSaving !== null || reviewChanged || selectedFinding.status.toUpperCase() === 'ASSIGNED'"
               @click="updateStatus('Assigned')"
             >
               <AppIcon name="external" :size="15" />{{ t('vetting.drawer.assign') }}
             </button>
-            <button class="btn" type="button" :disabled="statusSaving || reviewSaving || running || sourceRoleSaving !== null || reviewChanged || selectedFinding.status.toUpperCase() === 'OPEN'" @click="updateStatus('Open')">
+            <button class="btn" type="button" :disabled="statusSaving || reviewSaving || running || failedRunReadOnly || sourceRoleSaving !== null || reviewChanged || selectedFinding.status.toUpperCase() === 'OPEN'" @click="updateStatus('Open')">
               {{ t('vetting.review.reopen') }}
             </button>
           </div>

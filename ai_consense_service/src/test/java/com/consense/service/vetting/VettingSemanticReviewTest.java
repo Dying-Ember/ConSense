@@ -99,7 +99,7 @@ class VettingSemanticReviewTest {
         assertTrue(result.getCandidates().isEmpty());assertEquals(1,result.getTopicAudits().get(0).getIssueAssessments());
         assertEquals(1,result.getTopicAudits().get(0).getRejectedRecords());assertEquals(0,result.getTopicAudits().get(0).getAcceptedFindings());
         assertEquals("completed_with_rejections",result.getTopicAudits().get(0).getStatus());
-        assertEquals(new HashSet<>(Arrays.asList("origin","other")),result.getReviewedChunkIds());
+        assertTrue(result.getReviewedChunkIds().isEmpty(),"Rejected comparisons retain transport audit without completed semantic coverage");
     }
     @Test void nonIssueDeclarationsKeepTransportCountsButRejectPassOnKnownMissingMembers() {
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
@@ -116,7 +116,7 @@ class VettingSemanticReviewTest {
         assertEquals(1,result.getTopicAudits().get(0).getConsistentAssessments());assertEquals(1,result.getTopicAudits().get(0).getInsufficientContextAssessments());
         assertEquals(1,result.getTopicAudits().get(0).getRejectedRecords());assertEquals("completed_with_rejections",result.getTopicAudits().get(0).getStatus());
         assertEquals(0,result.getTopicAudits().get(0).getVerifiedConsistentAssessments());assertEquals(1,result.getTopicAudits().get(0).getVerifiedInsufficientContextAssessments());assertEquals("insufficient_evidence",result.getTopicAudits().get(0).getCheckState());
-        assertEquals(Collections.singleton("origin"),result.getReviewedChunkIds());
+        assertTrue(result.getReviewedChunkIds().isEmpty(),"A rejected pass plus a pending evidence need completes no source assessment");
     }
     @Test void includesLabelledStandardAndProjectContextWithoutInventingTenderRole() {
         AiGateway ai=mock(AiGateway.class); when(ai.available()).thenReturn(true); when(ai.chatModel()).thenReturn("test");
@@ -134,7 +134,7 @@ class VettingSemanticReviewTest {
             assertEquals("tender",actualRoles.get(VettingTokenFixture.reference(prompt,tender)));assertEquals("standard",actualRoles.get(VettingTokenFixture.reference(prompt,standard)));assertEquals("project_fact",actualRoles.get(VettingTokenFixture.reference(prompt,fact)));assertEquals("package_manifest",actualRoles.get(VettingTokenFixture.reference(prompt,manifest)));return VettingTokenFixture.records(prompt,chunks,Collections.singletonList(record("reference",quote("s",standard.getContent()))));
         });
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",chunks,"en",(n,s)->{});
-        assertEquals(new HashSet<>(Arrays.asList("t","s","f","m")), result.getReviewedChunkIds());
+        assertTrue(result.getReviewedChunkIds().isEmpty(),"Context submitted to a rejected baseline-only finding is not completed review");
         assertTrue(result.getCandidates().isEmpty(), "A finding needs an adopted tender passage, not just a baseline quote.");
     }
     @Test void unresolvedAdoptedReferencePreventsConfirmedConflictButAllowsLocatedClarification() {
@@ -172,7 +172,7 @@ class VettingSemanticReviewTest {
             assertTrue(result.getWarnings().stream().anyMatch(w -> w.contains("未完成语义检查")));
         }
     }
-    @Test void successfulEmptyModelResponseCountsOnlyActuallySubmittedSource() {
+    @Test void successfulEmptyModelResponseRetainsSubmissionWithoutClaimingACompletedAssessment() {
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
         ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);
         VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
@@ -181,7 +181,8 @@ class VettingSemanticReviewTest {
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(a));
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.emptyList());
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,notRetrieved),"en",(n,s)->{});
-        assertEquals(Collections.singleton("a"),result.getReviewedChunkIds());assertTrue(result.getCandidates().isEmpty());
+        assertTrue(result.getReviewedChunkIds().isEmpty());assertTrue(result.getCandidates().isEmpty());
+        assertEquals(Collections.singletonList("a"),result.getTopicAudits().get(0).getSubmittedChunkIds());
     }
     @Test void distinctQuotedSentencesAtTheSameSourceAnchorCannotInventTwoProvisions() {
         Random random=new Random(7931);

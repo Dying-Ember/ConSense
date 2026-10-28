@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ocr_runtime import create_ocr_engine
 
 from window_runtime import WindowRuntime
-from token_windows import WindowError
+from token_windows import WindowError, canonical_chunks
 MODEL_DTYPE = os.environ.get('CONSENSE_MODEL_DTYPE', 'float32')
 if MODEL_DTYPE not in {'float32', 'float16'}:
     raise ValueError('CONSENSE_MODEL_DTYPE must be explicit float32 or float16')
@@ -168,9 +168,8 @@ def project_key(value):
 
 def digest(value):
     result = hashlib.sha256()
-    encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-    for part in encoder.iterencode(value):
-        result.update(part.encode('utf-8'))
+    for part in canonical_chunks(value, allow_nan=True):
+        result.update(part)
     return result.hexdigest()
 
 

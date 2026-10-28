@@ -17,12 +17,12 @@ const completed = () => ({ id: 'run-1', status: 'COMPLETED', phase: 'done', comp
   modelIdentity: { profileId: 'saved-minimax-profile', provider: 'saved-provider-protocol', model: 'Saved MiniMax model' },
   coverage: { reviewedDocuments: 1, totalDocuments: 2, warnings: ['Raw canonical UTF16 parser warning'], documents: [] } })
 
-async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = { total: 10 }, job = completed(), pendingDetails = false, pendingRefresh = false, preparedExport = false, pendingExport = false } = {}) {
+async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = { total: 10 }, job = completed(), pendingDetails = false, pendingRefresh = false, preparedExport = false, pendingExport = false, checklistResult = null, pendingTextSearch = false, textSearchResult = null } = {}) {
   const notifications = [], apiCalls = []
   const revokedReports = [], preparedDecisions = [], pendingReport = deferred()
   let reportSequence = 0
   const store = vue.reactive({ activeProjectId: 'project-a', locale, notify(message) { notifications.push(message) }, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
-  const deferredDetail = deferred()
+  const deferredDetail = deferred(), deferredTextSearch = deferred()
   let detailReads = 0, fullRunReads = 0
   const empty = { render: () => null }
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), { boundaries: {
@@ -32,6 +32,7 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
     '@/composables/useLocalized': { useLocalized: () => ({ currentKey: vue.computed(() => locale === 'en' ? 'en' : locale === 'zh-Hant' ? 'zhHant' : 'zhHans'), pick: value => typeof value === 'string' ? value : value?.en ?? '' }) },
     '@/api/client': { ApiError: class ApiError extends Error {} },
     '@/api': { vettingApi: { files: async () => files, findings: async () => findings, metrics: async () => metrics,
+      searchProjectText: async (...args) => { apiCalls.push(['textSearch', ...args]); return pendingTextSearch ? deferredTextSearch.promise : textSearchResult ?? { selectedDocuments: 2, availableDocuments: 1, readableUnits: 5, unavailableUnits: 1, hits: [{ documentId: '1', fileName: 'NTT.pdf', pageNo: '2', anchor: 'NTT 3', text: 'The tender shall be signed.', sourceHash: 'source-a', originalSourceSha256: 'original-a' }] } },
       sourceProgress: async () => files.map(source => ({ id: source.documentId ?? source.key, fileName: source.fileName, parseStatus: source.parseStatus ?? source.status, parseMessage: source.parseMessage, pageCount: source.pageCount })),
       latestRunProgress: async () => job, getRun: async () => { fullRunReads++; return job },
       getRunDisplay: async () => { detailReads++; return pendingDetails || pendingRefresh && detailReads > 1 ? deferredDetail.promise : job },
@@ -44,24 +45,117 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
           if (!accepted) revokedReports.push(prepared.url)
         }
       }, evidence: async () => ({ located: true, items: [] }),
-      startRun: async (...args) => { apiCalls.push(['run', ...args]); return job } } },
+      startRun: async (...args) => { apiCalls.push(['run', ...args]); return job },
+      checklist: async (...args) => { apiCalls.push(['checklist', ...args]); return structuredClone(checklistResult) },
+      saveChecklist: async (...args) => { apiCalls.push(['saveChecklist', ...args]); return structuredClone(checklistResult) },
+      updateStatus: async (...args) => { apiCalls.push(['updateStatus', ...args]); return { ...findings[0], status: args[2] } },
+      updateReview: async (...args) => { apiCalls.push(['updateReview', ...args]); return findings[0] } } },
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
     '@/components/AppIcon.vue': { default: empty },
     '@/components/AppModal.vue': { default: { props: ['open', 'title'], setup: (props, { slots }) => () => props.open ? vue.h('div', { class: 'test-modal' }, slots.default?.()) : null } },
     '@/components/CanonicalEvidencePanel.vue': { default: empty },
     '@/components/FixedBaselineEvidencePanel.vue': { default: empty },
     '@/components/AdviceSourceReader.vue': { default: empty }
-  }, globals: { URLSearchParams, URL: { revokeObjectURL: url => revokedReports.push(url) }, window: { setTimeout, clearTimeout } } })
+  }, globals: { structuredClone, URLSearchParams, URL: { revokeObjectURL: url => revokedReports.push(url) }, window: { setTimeout, clearTimeout } } })
   const i18n = loaded.loadLocal(path.join(__dirname, '../src/i18n/index.ts')).i18n
   i18n.global.locale.value = locale
   const h = renderer(), app = h.createApp(loaded.default)
   app.use(i18n); app.mount(h.root); await settle()
-  return { ...h, notifications, apiCalls, store, revokedReports, preparedDecisions, resolveExport: () => pendingReport.resolve(), detailReads: () => detailReads, fullRunReads: () => fullRunReads,
-    dispose: () => app.unmount(), resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
+  return { ...h, notifications, apiCalls, store, revokedReports, preparedDecisions, translate: (...args) => i18n.global.t(...args), resolveExport: () => pendingReport.resolve(), detailReads: () => detailReads, fullRunReads: () => fullRunReads,
+    dispose: () => app.unmount(), resolveTextSearch: async value => { deferredTextSearch.resolve(value); await settle() }, resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
     const button = find(h.root, node => node.tag === 'button' && text(node).trim() === i18n.global.t('vetting.actions.source'))
     assert.ok(button); button.props.onClick(); await settle()
   } }
 }
+
+test('project text search displays selected passages and incomplete scope without running a model review', async () => {
+  const h = await mount({ locale: 'en', files: [file('NTT', { documentId: '1', sourceHash: 'source-a', originalSourceSha256: 'original-a' })] })
+  try {
+    const panel = find(h.root, node => node.props && Object.hasOwn(node.props, 'data-project-text-search'))
+    assert.ok(panel)
+    find(panel, node => node.tag === 'input').props['onUpdate:modelValue']('signed tender'); await settle()
+    await find(panel, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    assert.deepEqual(h.apiCalls.filter(call => call[0] === 'textSearch'), [['textSearch', 'project-a', 'signed tender', false]])
+    assert.equal(h.apiCalls.some(call => call[0] === 'run'), false)
+    assert.match(text(panel), /Documents available for search: 1 \/ 2/)
+    assert.match(text(panel), /NTT\.pdf.*NTT 3.*The tender shall be signed\./s)
+  } finally { h.dispose() }
+})
+
+test('search results can open stamped originals while rejecting mismatched identities', async () => {
+  const original = 'a'.repeat(64), legacy = 'b'.repeat(64)
+  const result = { selectedDocuments: 1, availableDocuments: 1, hits: [{ documentId: '1', fileName: 'NTT.pdf', pageNo: '2', anchor: 'NTT 3', text: 'The tender shall be signed.', sourceHash: legacy, originalSourceSha256: original }] }
+  for (const [overrides, expected] of [
+    [{ originalSourceSha256: original, routingSha256: 'c'.repeat(64), businessContentSha256: 'd'.repeat(64) }, true],
+    [{ originalSourceSha256: 'e'.repeat(64), routingSha256: 'c'.repeat(64), businessContentSha256: 'd'.repeat(64) }, false],
+    [{ originalSourceSha256: original, sourceHash: 'f'.repeat(64), routingSha256: 'c'.repeat(64), businessContentSha256: 'd'.repeat(64) }, false],
+    [{ originalSourceSha256: original }, false]
+  ]) {
+    const h = await mount({ locale: 'en', files: [file('NTT', { documentId: '1', pageCount: 10, ...overrides })], textSearchResult: result })
+    try {
+      const panel = find(h.root, node => node.props && Object.hasOwn(node.props, 'data-project-text-search'))
+      find(panel, node => node.tag === 'input').props['onUpdate:modelValue']('signed tender'); await settle()
+      await find(panel, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle()
+      const originalLink = find(panel, node => node.tag === 'a' && String(node.props?.href ?? '').includes('/reader-original?'))
+      assert.equal(Boolean(originalLink), expected)
+      if (expected) assert.match(originalLink.props.href, /#page=2$/)
+    } finally { h.dispose() }
+  }
+})
+
+test('a PDF search result opens its cited physical page', async () => {
+  const original = 'a'.repeat(64)
+  const hit = { documentId: '1', fileName: 'NTT.pdf', pageNo: 'P2', anchor: 'page 2', text: 'Original text.', sourceHash: 'b'.repeat(64), originalSourceSha256: original }
+  const h = await mount({ locale: 'en', files: [file('NTT', { documentId: '1', pageCount: 9, originalSourceSha256: original, routingSha256: 'c'.repeat(64), businessContentSha256: 'd'.repeat(64) })], textSearchResult: { selectedDocuments: 1, availableDocuments: 1, hits: [hit] } })
+  try {
+    const panel = find(h.root, node => node.props && Object.hasOwn(node.props, 'data-project-text-search'))
+    find(panel, node => node.tag === 'input').props['onUpdate:modelValue']('original text'); await settle()
+    await find(panel, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    const link = find(panel, node => node.tag === 'a' && String(node.props?.href ?? '').includes('/reader-original?'))
+    assert.match(link.props.href, /#page=2$/)
+  } finally { h.dispose() }
+})
+
+test('a Word search result offers a direct original download', async () => {
+  const original = 'a'.repeat(64), legacy = 'b'.repeat(64)
+  const hit = { documentId: '1', fileName: 'NTT.docx', pageNo: null, anchor: 'body/1/paragraph', text: 'Original text.', sourceHash: legacy, originalSourceSha256: original }
+  const h = await mount({ locale: 'en', files: [file('NTT', { documentId: '1', fileName: hit.fileName, originalSourceSha256: original, routingSha256: 'c'.repeat(64), businessContentSha256: 'd'.repeat(64) })], textSearchResult: { selectedDocuments: 1, availableDocuments: 1, hits: [hit] } })
+  try {
+    const panel = find(h.root, node => node.props && Object.hasOwn(node.props, 'data-project-text-search'))
+    find(panel, node => node.tag === 'input').props['onUpdate:modelValue']('original text'); await settle()
+    await find(panel, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    const link = find(panel, node => node.tag === 'a' && node.props?.download === hit.fileName)
+    assert.ok(link)
+    assert.match(text(link), /Download original/)
+    assert.notEqual(link.props.target, '_blank')
+  } finally { h.dispose() }
+})
+
+test('a project switch discards an unfinished text search', async () => {
+  const h = await mount({ locale: 'en', pendingTextSearch: true })
+  try {
+    const panel = find(h.root, node => node.props && Object.hasOwn(node.props, 'data-project-text-search'))
+    find(panel, node => node.tag === 'input').props['onUpdate:modelValue']('signed tender'); await settle()
+    const pending = find(panel, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle()
+    assert.match(text(panel), /Searching project text/)
+    h.store.activeProjectId = 'project-b'; await settle()
+    await h.resolveTextSearch({ selectedDocuments: 1, availableDocuments: 1, readableUnits: 1, unavailableUnits: 0, hits: [{ documentId: '1', fileName: 'old.pdf', text: 'Old project result' }] })
+    await pending; await settle()
+    assert.doesNotMatch(text(panel), /Old project result/)
+  } finally { h.dispose() }
+})
+
+test('running review shows its current action without a misleading overall percentage or provider protocol', async () => {
+  const job = { ...completed(), status: 'RUNNING', phase: 'reading', completedUnits: 1, totalUnits: 3, message: 'Reading project text: 256 / 300 sections processed.' }
+  const h = await mount({ locale: 'en', job })
+  try {
+    const panel = find(h.root, node => String(node.props?.class ?? '').includes('vetting-run-panel'))
+    assert.match(text(panel), /Current step\s*:\s*Reading project text/)
+    assert.match(text(panel), /256 \/ 300 sections processed/)
+    assert.doesNotMatch(text(panel), /Execution progress: 1 \/ 3|saved-provider-protocol|independently attested/)
+    assert.equal(find(panel, node => node.tag === 'progress'), undefined)
+  } finally { h.dispose() }
+})
 
 test('generated report keeps a readable direct download and its actual format without another request', async () => {
   const h = await mount({ locale: 'en', files: [file('SCC')], preparedExport: true })
@@ -147,7 +241,8 @@ test('reader summary keeps snapshot documents, total findings and filtered pendi
       const main = visibleText(h.root)
       for (const expected of [coverageText, findingText, pendingText, riskText, 'Saved MiniMax model']) assert.ok(main.includes(expected), expected)
       assert.ok(!text(h.root).includes('a'.repeat(64)), 'Report snapshot identity stays in the saved run, outside reader controls')
-      for (const raw of ['saved-provider-protocol', 'saved-minimax-profile', 'Raw canonical UTF16 parser warning', 'Raw worker completion message']) {
+      for (const raw of ['saved-provider-protocol', 'saved-minimax-profile', 'Raw worker completion message']) assert.ok(!text(h.root).includes(raw), `Internal task detail is not shown: ${raw}`)
+      for (const raw of ['Raw canonical UTF16 parser warning']) {
         assert.ok(text(h.root).includes(raw), `Raw record retained: ${raw}`)
         assert.ok(!main.includes(raw), `Raw record initially folded: ${raw}`)
         assert.ok(all(h.root, node => node.text?.includes(raw)).every(closedAncestor), `Raw record has a closed details ancestor: ${raw}`)
@@ -217,6 +312,111 @@ test('failure, rerun and changed-source risks remain visible and continue to blo
   }
 })
 
+test('an interrupted review labels earlier findings and explains the interruption in the interface language', async () => {
+  const reason='来源、模型或审查配方与检查点不兼容，需要重新运行；可靠包和人工记录已保留。'
+  const h=await mount({ locale: 'en', job: { ...completed(), status: 'FAILED', message: reason, error: reason, recoveryStatus: 'NEEDS_RERUN' } })
+  try {
+    const main=visibleText(h.root)
+    assert.match(main,/This review was interrupted and could not be resumed safely/)
+    assert.match(main,/findings shown below were saved by an earlier review/)
+    assert.doesNotMatch(main,/来源、模型或审查配方/)
+  } finally { h.dispose() }
+})
+
+const partialFailure = (overrides = {}) => ({ ...completed(), status: 'FAILED', error: 'Actual partial review failure', message: 'A later source packet failed',
+  recoveryStatus: 'NEEDS_RERUN', result: { total: 10, partialResults: true }, ...overrides })
+const checklistPanel = root => find(root, node => node.tag === 'details' && String(node.props?.class).includes('checklist-panel'))
+const exportControl = h => find(h.root, node => node.tag === 'button' && text(node).trim().startsWith(h.translate('vetting.actions.export')))
+
+test('committed failed partial results have a first-level localized summary without changing the failure state', async () => {
+  for (const [locale, notice, coverageText, findingText] of [
+    ['en', 'Accepted results were retained for reading and partial-report export', '1 / 2 documents', '10 review findings in total'],
+    ['zh-Hans', '已采纳的部分结果已保留，可供阅读和导出部分报告', '1 / 2 份文件', '审查意见共 10 条'],
+    ['zh-Hant', '已採納的部分結果已保留，可供閱讀和匯出部分報告', '1 / 2 份文件', '審查意見共 10 條']
+  ]) {
+    const h = await mount({ locale, job: partialFailure(), files: [file('SCC')], findings: [finding('F1','OPEN')] })
+    try {
+      const summary = find(h.root, node => Object.hasOwn(node.props ?? {}, 'data-partial-review-results'))
+      assert.ok(summary); assert.ok(text(summary).includes(notice)); assert.equal(closedAncestor(summary), false)
+      const main = visibleText(h.root)
+      for (const expected of [coverageText, findingText, 'Actual partial review failure', 'A later source packet failed', h.translate('vetting.recovery.NEEDS_RERUN')]) assert.ok(main.includes(expected), expected)
+      const badge = find(h.root, node => node.tag === 'span' && text(node) === h.translate('vetting.job.status.FAILED'))
+      assert.ok(badge.props.class.includes('danger')); assert.ok(!main.includes(h.translate('vetting.job.executionCompleteNote')))
+      assert.ok(checklistPanel(h.root)); assert.equal(exportControl(h).props.disabled, false)
+      const run = find(h.root, node => node.tag === 'button' && text(node).trim() === h.translate('vetting.actions.run'))
+      await run.props.onClick(); await settle()
+      assert.ok(!h.notifications.includes(h.translate('vetting.run.finished', { count: 10 })), 'A failed partial run never emits a completed notification')
+    } finally { h.dispose() }
+  }
+})
+
+test('unmarked or nonboolean failed results retain disabled export and no checklist or partial summary', async () => {
+  for (const marker of [undefined, false, 'true']) {
+    const h = await mount({ locale: 'en', job: partialFailure({ result: { total: 10, partialResults: marker } }) })
+    try {
+      assert.equal(exportControl(h).props.disabled, true); await exportControl(h).props.onClick(); await settle()
+      assert.equal(checklistPanel(h.root), undefined)
+      assert.equal(find(h.root, node => Object.hasOwn(node.props ?? {}, 'data-partial-review-results')), undefined)
+      assert.equal(h.apiCalls.filter(call => call[0] === 'export').length, 0)
+    } finally { h.dispose() }
+  }
+})
+
+test('partial export and checklist reading retain changed-source and unchecked-source guards', async () => {
+  for (const change of [{ sourceSetStale: true }, { sourceVerification: 'NOT_CHECKED' }]) {
+    const h = await mount({ locale: 'en', job: partialFailure(change) })
+    try {
+      assert.equal(exportControl(h).props.disabled, true); await exportControl(h).props.onClick(); await settle()
+      const panel = checklistPanel(h.root)
+      if (panel) { await panel.props.onToggle({ target: { open: true } }); await settle() }
+      assert.equal(h.apiCalls.filter(call => ['export', 'checklist'].includes(call[0])).length, 0)
+    } finally { h.dispose() }
+  }
+  const h = await mount({ locale: 'en', job: partialFailure(), pendingExport: true })
+  try {
+    const pending = exportControl(h).props.onClick(); await settle()
+    assert.equal(exportControl(h).props.disabled, true, 'The existing export busy guard remains active')
+    h.resolveExport(); await pending; await settle()
+    assert.equal(h.apiCalls.filter(call => call[0] === 'export').length, 1)
+  } finally { h.dispose() }
+})
+
+test('failed partial checklists remain read-only even if an inconsistent response claims writable', async () => {
+  for (const writable of [false, true]) {
+    const checklistResult = { runId: 'run-1', runSnapshotSha256: 'a'.repeat(64), sourceSnapshotSha256: 'b'.repeat(64), writable,
+      items: [{ id: 'APP-I-1', clause: 'APP-I 1', section: 'General', description: 'Authored review direction', status: 'unchecked', remarks: '' }], automaticResults: [], logicalGroups: [] }
+    const h = await mount({ locale: 'en', job: partialFailure(), checklistResult })
+    try {
+      const panel = checklistPanel(h.root); assert.ok(panel)
+      await panel.props.onToggle({ target: { open: true } }); await settle()
+      assert.equal(h.apiCalls.filter(call => call[0] === 'checklist').length, 1)
+      const status = find(panel, node => node.tag === 'select'), remarks = find(panel, node => node.tag === 'textarea')
+      assert.equal(status.props.disabled, true); assert.equal(remarks.props.disabled, true)
+      status.props['onUpdate:modelValue']('fulfilled'); remarks.props['onUpdate:modelValue']('Synthetic attempted edit'); await settle()
+      const save = find(panel, node => node.tag === 'button' && text(node) === h.translate('vetting.checklist.save'))
+      assert.equal(save.props.disabled, true); await save.props.onClick(); await settle()
+      assert.equal(h.apiCalls.filter(call => call[0] === 'saveChecklist').length, 0)
+    } finally { h.dispose() }
+  }
+})
+
+test('failed-run finding review and status stay blocked at the controls and handler boundaries', async () => {
+  const saved = { ...finding('F1','OPEN'), runId: 'run-1', generatedRevisionSha256: 'g'.repeat(64), sourceSnapshotSha256: 's'.repeat(64) }
+  const h = await mount({ locale: 'en', job: partialFailure(), findings: [saved] })
+  try {
+    const open = find(h.root, node => node.tag === 'button' && String(node.props?.class).split(' ').includes('finding') && text(node).includes('F1'))
+    await open.props.onClick(); await settle()
+    const drawer = find(h.root, node => node.tag === 'aside'), fields = find(drawer, node => String(node.props?.class).includes('review-fields'))
+    for (const control of all(fields, node => ['textarea','select'].includes(node.tag))) assert.equal(control.props.disabled, true)
+    find(fields, node => node.tag === 'textarea').props['onUpdate:modelValue']('Synthetic attempted review'); await settle()
+    for (const label of ['vetting.review.save','vetting.drawer.markHandled','vetting.drawer.assign','vetting.review.reopen']) {
+      const control = find(drawer, node => node.tag === 'button' && text(node).trim() === h.translate(label))
+      assert.equal(control.props.disabled, true); await control.props.onClick(); await settle()
+    }
+    assert.equal(h.apiCalls.filter(call => ['updateReview','updateStatus'].includes(call[0])).length, 0)
+  } finally { h.dispose() }
+})
+
 test('known technical failures have one localized reader alert, retain raw evidence and do not repeat it in a toast', async () => {
   const failures = [
     'Model response source attribution invalid: [{"quotedSourceBindings":[{"chunkId":"canonical:' + 'a'.repeat(64) + '"}]}]',
@@ -282,6 +482,20 @@ test('expanded source request states keep full input identities optional while s
   }
 })
 
+test('partial record rejections are readable and remain pending', async () => {
+  for (const [locale, business, attribution] of [
+    ['zh-Hans', '部分记录待补充业务信息', '部分记录的条文归属待核对'],
+    ['zh-Hant', '部分記錄待補充業務資訊', '部分記錄的條文歸屬待核對'],
+    ['en', 'Some records need complete review details', 'Some records need their clause attribution checked']
+  ]) {
+    const job = completed(); job.coverage.semanticTopics = [{ topicIndex: 1, topic: 'Partial records', status: 'completed_with_rejections', aggregateReviewStatus: 'partial',
+      sourceRequestCount: 2, pendingSourceRequestCount: 2, sourceRequests: ['partial_business_shape_rejection', 'partial_source_attribution_rejection'].map((status, index) => ({ requestId: `r${index}`, transportStatus: 'already_global', reviewExecutionStatus: status, requiredChunkIds: [], missingChunkIds: [] })),
+      submittedChunkIds: [], submittedChars: 0, issueAssessments: 0, consistentAssessments: 0, insufficientContextAssessments: 0, acceptedFindings: 0, rejectedRecords: 2, budgetDroppedGroups: 0, partialContextGroups: 0, unresolvedSegments: 0 }]
+    const h = await mount({ locale, job })
+    try { assert.ok(text(h.root).includes(business)); assert.ok(text(h.root).includes(attribution)) } finally { h.dispose() }
+  }
+})
+
 test('bounded review and pending topic counts remain visible before opening the call ledger', async () => {
   const topic = (topicIndex, name, aggregateReviewStatus, reviewKind = 'topic') => ({
     topicIndex, topic: name, reviewKind, aggregateReviewStatus, status: 'completed', checkState: 'not_completed',
@@ -339,6 +553,21 @@ test('ordinary observed requests show pending review without claiming a bounded 
     assert.ok(main.includes('This record covers observed source requests only; 1 / 1 topics still need follow-up or review'))
     assert.ok(main.includes('Needs review 1 · failed 0'))
     assert.ok(!main.includes('bounded first review'), 'An ordinary run must not inherit the bounded-first-pass warning')
+  } finally { h.dispose() }
+})
+
+test('the review ledger explains attribution failures without exposing raw records', async () => {
+  const job = completed(), raw = 'Model response source attribution invalid: [{"recordIndex":0,"clauseId":"1.08"}]'
+  job.coverage.semanticTopics = [{ topicIndex: 1, topic: 'Specification', status: 'failed', checkState: 'not_completed', aggregateReviewStatus: 'failed',
+    error: raw, packetAudits: [{ packetIndex: 0, packetId: 'packet-1', status: 'failed', failureKind: 'source_attribution_invalid', error: raw }],
+    submittedChunkIds: [], submittedChars: 0, issueAssessments: 0, consistentAssessments: 0, insufficientContextAssessments: 0,
+    acceptedFindings: 0, rejectedRecords: 0, budgetDroppedGroups: 0, partialContextGroups: 0, unresolvedSegments: 0 }]
+  const h = await mount({ locale: 'en', job })
+  try {
+    const ledger = find(h.root, node => node.tag === 'summary' && text(node).includes('Semantic call ledger')).parent
+    assert.match(text(ledger), /clause attribution could not be verified against the quoted source/)
+    assert.doesNotMatch(text(ledger), /recordIndex|source_attribution_invalid/)
+    assert.equal(job.coverage.semanticTopics[0].error, raw)
   } finally { h.dispose() }
 })
 
@@ -447,7 +676,7 @@ test('review status stays above all historical source records for the complete p
       assert.equal(closedAncestor(panel), false, 'Task status stays outside collapsed details')
       assert.equal(panel.props['aria-live'], 'polite')
       assert.ok(visibleText(panel).includes(status === 'FAILED' ? 'Source preparation failed' : 'Preparing complete source package'))
-      assert.ok(visibleText(panel).includes('0 / 33'), 'Document progress stays immediately visible')
+      assert.ok(!visibleText(panel).includes('0 / 33'), 'Internal work units are not presented as document coverage')
     } finally { h.dispose() }
   }
 })

@@ -54,7 +54,7 @@ class VettingPromptPolicyTest {
         assertEquals(0,restored.getMetrics().getGap());assertEquals(0,restored.getMetrics().getSubstantive());assertEquals(0,restored.getMetrics().getRequirement());
     }
     @Test void finalPacketSystemsRetainCustomTextAndRequireEvidenceForUntypedLiteralRoles()throws Exception {
-        VettingSemanticReview review=new VettingSemanticReview(null,new com.consense.config.ConsenseProperties(),null);
+        VettingSemanticReview review=new VettingSemanticReview(new com.consense.ai.AiGateway(org.mockito.Mockito.mock(com.consense.ai.LlmClient.class)),new com.consense.config.ConsenseProperties(),null);
         java.lang.reflect.Method system=VettingSemanticReview.class.getDeclaredMethod("effectiveSystem",String.class,boolean.class);system.setAccessible(true);
         String custom="AUTHORED_USER_STYLE keep supported review comments concise";
         try(VettingSemanticReview.SupplementScope ignored=review.bindSupplement(custom)){

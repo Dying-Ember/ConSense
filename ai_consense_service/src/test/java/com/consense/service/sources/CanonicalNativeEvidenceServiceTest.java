@@ -114,6 +114,14 @@ class CanonicalNativeEvidenceServiceTest {
         unavailable=true;assertThrows(CanonicalEvidenceException.class,()->service.pointer("native-test",42L,b.getProjectionSha256(),"table","vetting"));
         assertThrows(CanonicalEvidenceException.class,()->service.snapshot("native-test",42L,b.getProjectionSha256(),"vetting"));
     }
+    @Test void selectedNativePointersShareOneFreshRegistryReadAndRejectUnavailableSource() {
+        CanonicalSourceBinding b=register();String first=snapshot.path("chunks").get(0).path("unitId").asText(),second=snapshot.path("chunks").get(1).path("unitId").asText();
+        EvidencePointer expectedFirst=service.pointer("native-test",42L,b.getProjectionSha256(),first,"vetting");
+        EvidencePointer expectedSecond=service.pointer("native-test",42L,b.getProjectionSha256(),second,"vetting");
+        int before=snapshotReads;Map<String,EvidencePointer> selected=service.selectedPointers("native-test",42L,b.getProjectionSha256(),Arrays.asList(first,second),"vetting");
+        assertEquals(1,snapshotReads-before);assertEquals(JsonUtils.write(expectedFirst),JsonUtils.write(selected.get(first)));assertEquals(JsonUtils.write(expectedSecond),JsonUtils.write(selected.get(second)));
+        unavailable=true;assertThrows(CanonicalEvidenceException.class,()->service.selectedPointers("native-test",42L,b.getProjectionSha256(),Arrays.asList(first,second),"vetting"));
+    }
     @Test void v1HealthAndIncompleteNativeAlgorithmsCannotAdoptNative() {
         ((ObjectNode)health.path("oer")).remove("nativeCanonical");assertThrows(CanonicalEvidenceException.class,this::register);assertTrue(saved.isEmpty());
         ((ObjectNode)health.path("oer")).set("nativeCanonical",NativeCanonicalFixture.capability());((ObjectNode)health.path("retrieval").path("sourceWindows").path("algorithms")).remove("native_projection_transport.py");

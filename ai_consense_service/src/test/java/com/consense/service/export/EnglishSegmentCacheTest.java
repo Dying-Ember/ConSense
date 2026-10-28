@@ -24,6 +24,7 @@ class EnglishSegmentCacheTest {
     final AtomicInteger calls=new AtomicInteger();
     final List<String> submitted=new ArrayList<>();
     final Map<String,String> translations=new HashMap<>(),languages=new HashMap<>();
+    final Set<Integer> emptyCalls=new HashSet<>();
     Runnable afterResponse=()->{};
 
     final class Fixture {
@@ -38,7 +39,7 @@ class EnglishSegmentCacheTest {
             org.springframework.beans.BeanUtils.copyProperties(props.getLlm(),props.getMinimaxCn());props.getMinimaxCn().setApiKey("authored-placeholder");
             when(client.available()).thenReturn(true);
             doAnswer(call->{
-                calls.incrementAndGet();List<LlmClient.ChatTurn> turns=call.getArgument(0);
+                int number=calls.incrementAndGet();if(emptyCalls.contains(number))return "[]";List<LlmClient.ChatTurn> turns=call.getArgument(0);
                 JsonNode input=JsonUtils.parse(turns.get(1).getContent());ArrayNode result=JsonUtils.mapper().createArrayNode();
                 for(JsonNode item:input){String text=item.path("text").asText();submitted.add(text);boolean changed=translations.containsKey(text);
                     result.addObject().put("id",item.path("id").asText()).put("sourceLanguage",languages.getOrDefault(text,changed?"fr":"en"))
@@ -56,6 +57,15 @@ class EnglishSegmentCacheTest {
         assertEquals(text,new Fixture().output.text(text,"report:second",()->{}));
         assertEquals(1,calls.get(),"A new report reference must not repeat exact validated language work");
         assertEquals(List.of(text),submitted);
+    }
+
+    @Test void fullyValidatedBatchesSurviveALaterFailureWithoutPublishingPartialOutput()throws Exception{
+        Fixture fixture=new Fixture();ArrayNode notes=JsonUtils.mapper().createArrayNode();for(int i=0;i<65;i++)notes.add("English report segment "+i);
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);emptyCalls.addAll(List.of(2,3));
+        assertThrows(BizException.class,()->fixture.output.json(source,"report:later-failure",()->{}));assertEquals(3,calls.get());
+        try(Stream<Path> files=Files.list(root.resolve("english-file-output").resolve(EnglishFileOutput.POLICY))){assertEquals(32,files.filter(path->path.getFileName().toString().startsWith("segment-")).count());}
+        submitted.clear();emptyCalls.clear();assertEquals(source,fixture.output.json(source,"report:retry",()->{}));
+        assertEquals(5,calls.get());assertEquals(33,submitted.size());assertEquals("English report segment 32",submitted.get(0));
     }
 
     @Test void changedListReusesEnglishAndTranslatedSegmentsButAssessesNewText(){

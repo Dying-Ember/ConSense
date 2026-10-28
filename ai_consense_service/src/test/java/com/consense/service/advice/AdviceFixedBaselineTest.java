@@ -80,6 +80,33 @@ class AdviceFixedBaselineTest {
     private AdviceService.AnswerRecord answer(String basis){return JsonUtils.read(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED explanation\",\"citations\":[\"[1]\"],\"basisScope\":"+JsonUtils.write(basis)+"}"),AdviceService.AnswerRecord.class);}
     private AskRequest reference(){AskRequest request=new AskRequest("Explain the authored standard.","fullset");request.setBasisScope("reference_only");return request;}
 
+    @Test void qwenFlowchartAskSendsOnlyTheDrawingContractAndPersistsTheDraftThroughNormalHistory() {
+        ConsenseProperties props=(ConsenseProperties)ReflectionTestUtils.getField(advice,"props");
+        ConsenseProperties.Llm configured=LlmProfiles.configuration(props,"qwen");configured.setEnabled(true);configured.setApiKey("AUTHORED-ONLY");
+        com.consense.ai.HttpSupport http=mock(com.consense.ai.HttpSupport.class);
+        com.consense.ai.QwenChatClient client=new com.consense.ai.QwenChatClient(configured,http);
+        com.consense.ai.LlmOperation selected=new LlmProfiles(props,llm,mock(LlmClient.class),client,mock(LlmClient.class)).resolve("qwen");
+        when(ai.capture()).thenReturn(selected);
+        ReflectionTestUtils.setField(advice,"qwenUsage",new com.consense.service.llm.QwenChatUsagePreflight(props,mock(com.consense.service.llm.QwenGenerationLedger.class)));
+        ReflectionTestUtils.setField(advice,"adviceSettings",new AdviceModelProperties());
+        List<JsonNode> calls=new ArrayList<>();
+        String graph="{\"tool\":\"draw_flowchart\",\"nodes\":[{\"id\":\"start\",\"label\":\"Start\"},{\"id\":\"end\",\"label\":\"Decision issued\"}],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"label\":\"After written request\"}],\"citations\":[\"[1]\"]}";
+        when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenAnswer(call->{
+            JsonNode body=JsonUtils.parse(call.getArgument(1));calls.add(body);String content=body.path("max_tokens").asInt()==1?"{":graph;
+            return "{\"object\":\"chat.completion\",\"model\":"+JsonUtils.write(selected.getIdentity().getModel())+",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":"+JsonUtils.write(content)+"}}],\"usage\":{\"prompt_tokens\":42,\"completion_tokens\":1,\"total_tokens\":43}}";
+        });
+        AskRequest request=reference();request.setQuestion("Summarise the dispute process as a flowchart.");
+        AskResponseVO response=advice.ask("authored-project",request);
+        assertFalse(response.isGrounded());assertEquals("insufficient",response.getBasisScope());assertTrue(response.getContent().getEn().contains("```mermaid\nflowchart TD"));
+        assertTrue(response.getContent().getEn().contains("project adoption is not established"));assertEquals(Collections.singletonList("[1]"),response.getCitations());
+        assertEquals(2,calls.size());String system=calls.get(1).path("messages").get(0).path("content").asText(),user=calls.get(1).path("messages").get(1).path("content").asText();
+        assertTrue(system.contains("draw_flowchart"));assertTrue(system.contains("Tool schema"));assertFalse(user.contains("few independent sections"));assertFalse(user.contains("mandatory application contract"));
+        assertFalse(system.contains("R10"));assertFalse(user.contains("RAW_AUDIT_SENTINEL"));
+        ChatMessage assistant=saved.stream().filter(row->ChatMessage.ROLE_ASSISTANT.equals(row.getRole())).findFirst().orElseThrow(AssertionError::new);
+        assertEquals(response.getContent().getEn(),assistant.getContent());assertEquals("fullset",assistant.getSourceScope());
+        assertEquals("draw_flowchart",JsonUtils.parse(assistant.getAdviceChecksJson()).path("applicationTool").asText());
+    }
+
     @Test void explicitReferenceOnlyUsesFixedStandardsWithoutInventingAProjectCanonicalSession() {
         AskResponseVO response=advice.ask("authored-project",reference());
         assertTrue(response.isGrounded());assertEquals("reference_only",response.getBasisScope());

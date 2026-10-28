@@ -14,6 +14,52 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class QwenChatUsagePreflightTest {
+    @Test void paidCapOneObservationHasScalarTelemetryAndReuseDoesNotPretendToDispatchAgain(){
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OpenAiLlmClient.class);ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> trace=new ch.qos.logback.core.read.ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");
+            try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:scalar-preflight",()->{})){
+                VettingInputBudget.Input input=op.input("PRIVATE SYSTEM SENTINEL","PRIVATE SOURCE SENTINEL",JsonUtils.parse("{\"type\":\"array\",\"items\":{\"type\":\"object\"}}"),SOURCE);
+                assertEquals(42,op.observe(input,"planner",()->{}).getInputTokens());assertEquals(42,op.observe(input,"final",()->{}).getInputTokens());
+            }
+            List<String> logs=trace.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).collect(java.util.stream.Collectors.toList());
+            assertEquals(1,logs.stream().filter(x->x.contains("stage=provider_started")).count());String end=logs.stream().filter(x->x.contains("stage=provider_finished")).findFirst().orElseThrow();assertTrue(end.contains("phase=preflight"));assertTrue(end.contains("requestedMaxTokens=1"));assertTrue(end.contains("reportedPromptTokens=42"));assertTrue(end.contains("finishReason=length"));
+            String all=String.join("\n",logs);assertFalse(all.contains("PRIVATE SYSTEM SENTINEL"));assertFalse(all.contains("PRIVATE SOURCE SENTINEL"));assertFalse(all.contains("AUTHORED-QWEN-SECRET"));
+        }finally{logger.detachAppender(trace);}
+    }
+    @Test void defaultVettingBudgetAdmits27DirectionsWithInitialSupplementAndRepairsAndStopsAt108Answers() {
+        com.consense.repository.QwenGenerationActionRepository actions=mock(com.consense.repository.QwenGenerationActionRepository.class);
+        org.springframework.transaction.PlatformTransactionManager manager=mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(manager.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+        java.util.concurrent.atomic.AtomicReference<com.consense.domain.QwenGenerationAction> saved=new java.util.concurrent.atomic.AtomicReference<>();
+        when(actions.lockAction("vetting:all-directions")).thenAnswer(call->Optional.ofNullable(saved.get()));
+        when(actions.saveAndFlush(any())).thenAnswer(call->{saved.set(call.getArgument(0));return saved.get();});
+        QwenGenerationLedger actualLedger=new QwenGenerationLedger(actions,manager);
+        QwenChatUsagePreflight.Operation op=new QwenChatUsagePreflight(props,actualLedger).capture(chat("qwen"),"vetting");
+        try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("vetting:all-directions",()->{})) {
+            String identity=op.getIdentity().getConfigurationSha256();
+            for(int direction=1;direction<=27;direction++)for(int round=1;round<=2;round++)for(int attempt=1;attempt<=2;attempt++) {
+                String input="AUTHORED direction "+direction+" round "+round+" attempt "+attempt;
+                actualLedger.reserve("vetting:all-directions",identity,"planner",VettingCorpus.hash(input+" planner"),false);
+                actualLedger.reserve("vetting:all-directions",identity,"final",VettingCorpus.hash(input+" final"),false);
+                actualLedger.reserve("vetting:all-directions",identity,"answer",VettingCorpus.hash(input),true);
+            }
+            assertEquals(216,saved.get().getPreflights());assertEquals(108,saved.get().getAnswers());assertEquals(324,saved.get().getTotal());
+            String before=saved.get().getReservationsJson();
+            QwenGenerationLedger.ActionBudgetExhaustedException exhausted=assertThrows(QwenGenerationLedger.ActionBudgetExhaustedException.class,
+                    ()->actualLedger.reserve("vetting:all-directions",identity,"answer",VettingCorpus.hash("AUTHORED one-hundred-ninth answer"),true));
+            assertEquals("qwen_generation_ceiling_exceeded",exhausted.getMessage());assertEquals(before,saved.get().getReservationsJson());
+        }
+        verifyNoInteractions(http);
+    }
+    @Test void explicitVettingCapsStillOverrideTheLargerDefaults() {
+        props.getQwenUsagePreflight().setVettingMaxPreflights(3);props.getQwenUsagePreflight().setVettingMaxAnswers(2);props.getQwenUsagePreflight().setVettingMaxTotal(5);
+        QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");
+        try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("vetting:configured",()->{})) { }
+        org.mockito.ArgumentCaptor<QwenGenerationLedger.Limits> limits=org.mockito.ArgumentCaptor.forClass(QwenGenerationLedger.Limits.class);
+        verify(ledger).open(eq("vetting:configured"),anyString(),limits.capture());
+        assertEquals(3,limits.getValue().preflights);assertEquals(2,limits.getValue().answers);assertEquals(5,limits.getValue().total);
+    }
     @Test void advisoryActionHasFourSealedAnswersForOneDraftAndOneSupplementWithRepairs() {
         QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"advice",3);
         try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("advice:bounded",()->{})) { }

@@ -538,7 +538,7 @@ public class CanonicalEvidenceService {
     /** Read all registered bytes without reconstructing unrequested source graphs or parents. */
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds){
-        validModule(module);require("advisory".equals(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()
+        validModule(module);require(Arrays.asList("advisory","vetting").contains(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()
                 &&selectedIds!=null&&!selectedIds.isEmpty()&&entityManager!=null,HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         for(String id:selectedIds)require(id!=null&&!id.trim().isEmpty(),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         List<CanonicalSourceBinding> retained=new ArrayList<>();Map<Long,List<List<Object>>> histories=new LinkedHashMap<>();
@@ -782,12 +782,27 @@ public class CanonicalEvidenceService {
         require(scope!=null&&scope.owner==this,HttpStatus.CONFLICT,"CANONICAL_COMPACT_SCOPE_OWNER_MISMATCH");
         if(!"vetting".equals(scope.module)){for(CanonicalSourceBinding binding:scope.selected)assertCompactMemberCurrent(scope,binding);return;}
         Map<Long,SourceDocument> current=sources.currentVettingMetadata(scope.project);
+        require(scope.histories.equals(compactHistories(scope)),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
         for(CanonicalSourceBinding binding:scope.selected){
             SourceDocument source=current.get(binding.getDocumentId());require(source!=null,HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
             sources.requireCurrentStamp(scope.sources.get(binding.getDocumentId()),source);
             sources.requireOriginalFreshness(source,scope.registryPins.get(binding.getDocumentId()).original);
-            require(scope.histories.get(binding.getDocumentId()).equals(compactHistory(scope.project,binding.getDocumentId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
         }
+    }
+    private Map<Long,List<List<Object>>> compactHistories(CompactBindingScope scope){
+        List<Long> selected=scope.selected.stream().map(CanonicalSourceBinding::getId).collect(java.util.stream.Collectors.toList());
+        require(!selected.isEmpty()&&!selected.contains(null)&&new java.util.HashSet<>(selected).size()==selected.size(),HttpStatus.CONFLICT,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
+        int expected=scope.histories.values().stream().mapToInt(List::size).sum();
+        List<CanonicalSourceBindingRepository.CompactMetadata> rows=bindings.findCompactHistoriesForSelected(scope.project,selected,org.springframework.data.domain.PageRequest.of(0,Math.addExact(expected,1)));
+        require(rows.size()==expected,HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+        Map<Long,List<List<Object>>> result=new LinkedHashMap<>();Map<Long,Long> previous=new HashMap<>();
+        for(CanonicalSourceBindingRepository.CompactMetadata row:rows){
+            CanonicalSourceBinding value=compactBinding(row);Long before=previous.put(value.getDocumentId(),value.getId());
+            require(value.getId()!=null&&(before==null||value.getId()<before)&&scope.histories.containsKey(value.getDocumentId())
+                    &&value.getSnapshotContentSha256()!=null&&value.getSnapshotContentSha256().equals(value.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
+            result.computeIfAbsent(value.getDocumentId(),key->new ArrayList<>()).add(bindingState(value));
+        }
+        return result;
     }
     private List<List<Object>> compactHistory(String project,Long document,Long selectedId){
         List<List<Object>> result=new ArrayList<>();Long before=null;org.springframework.data.domain.Pageable one=org.springframework.data.domain.PageRequest.of(0,1);
@@ -813,10 +828,32 @@ public class CanonicalEvidenceService {
         JsonNode snapshot=view.snapshot,chunk=null;JsonNode candidates=snapshot.path("chunks");
         for(JsonNode candidate:candidates)if(unitId.equals(candidate.path("unitId").asText())){require(chunk==null,HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");chunk=candidate;}
         require(chunk!=null,HttpStatus.NOT_FOUND,"CANONICAL_UNIT_UNAVAILABLE");
-        assertCurrent(binding,module);
+        assertCurrent(binding,module,view.sourceStamp);
         EvidencePointer pointer=pointer(binding,snapshot,chunk,module,view.collection?NativeDocumentCollectionContract.unitUnknowns(snapshot,unitId):unknowns(snapshot));
         pointer.setNativeWordSourceScopesContext(wordSourceScopeContext(binding,snapshot,chunk));
-        assertCurrent(binding,module);return pointer;
+        assertCurrent(binding,module,view.sourceStamp);return pointer;
+    }
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public Map<String,EvidencePointer> selectedPointers(String projectId,Long documentId,String projection,List<String> unitIds,String module){
+        require(unitIds!=null&&!unitIds.isEmpty()&&unitIds.stream().allMatch(id->id!=null&&!id.trim().isEmpty())
+                &&new LinkedHashSet<>(unitIds).size()==unitIds.size(),HttpStatus.BAD_REQUEST,"CANONICAL_UNIT_SELECTION_INVALID");
+        BindingView view=readBindingView(projectId,documentId,projection,module);CanonicalSourceBinding binding=view.binding;
+        Set<String> requested=new HashSet<>(unitIds);Map<String,JsonNode> chunks=new HashMap<>();
+        for(JsonNode candidate:view.snapshot.path("chunks")){
+            String unitId=candidate.path("unitId").asText();
+            if(requested.contains(unitId))require(chunks.putIfAbsent(unitId,candidate)==null,HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");
+        }
+        require(chunks.size()==requested.size(),HttpStatus.NOT_FOUND,"CANONICAL_UNIT_UNAVAILABLE");
+        assertCurrent(binding,module,view.sourceStamp);Map<String,EvidencePointer> selected=new LinkedHashMap<>();
+        NormalSourceCandidateGraph.SelectionIndex wordIndex=NormalObservedContract.isNormal(view.snapshot)
+                ?new NormalSourceCandidateGraph.SelectionIndex(view.snapshot.path("manifest").path("candidateGraph")):null;
+        for(String unitId:unitIds){JsonNode chunk=chunks.get(unitId);
+            EvidencePointer value=pointer(binding,view.snapshot,chunk,module,view.collection?NativeDocumentCollectionContract.unitUnknowns(view.snapshot,unitId):unknowns(view.snapshot));
+            value.setNativeWordSourceScopesContext(wordSourceScopeContext(binding,view.snapshot,chunk,wordIndex));selected.put(unitId,value);
+        }
+        assertCurrent(binding,module,view.sourceStamp);
+        return selected;
     }
 
     /** One actual selected model member; whole-corpus address enumeration never expands Word chapters. */
@@ -824,7 +861,7 @@ public class CanonicalEvidenceService {
     public JsonNode wordSourceScopeContext(String projectId,Long documentId,String projection,String chunkId,String module){
         BindingView view=readBindingView(projectId,documentId,projection,module);
         JsonNode context=wordSourceScopeContext(view.binding,view.snapshot,chunkById(view.snapshot,chunkId));
-        assertCurrent(view.binding,module);return context;
+        assertCurrent(view.binding,module,view.sourceStamp);return context;
     }
 
     /** One source validation for all addresses, instead of hashing a large original once per chunk. */

@@ -75,25 +75,13 @@ public class AiGateway {
     }
 
     private void logResponse(String raw) {
-        if (!log.isInfoEnabled()) {
-            return;
-        }
-        log.info("\n================ 模型原始返回 ({} 字符) ================\n{}\n"
-                        + "================ 模型返回结束 ================",
-                raw == null ? 0 : raw.length(), raw);
+        try{log.info("ConSense gateway stage=response_received thread={} responseCharacters={}",Thread.currentThread().getId(),raw==null?null:raw.length());}
+        catch(Throwable ignored){/* Diagnostics cannot replace the result. */}
     }
 
     private void logPrompt(String tag, String systemPrompt, String userPrompt) {
-        if (!log.isInfoEnabled()) {
-            return;
-        }
-        log.info("\n================ {} ================\n"
-                        + "---- [system prompt] ({} 字符) ----\n{}\n"
-                        + "---- [user prompt] ({} 字符) ----\n{}\n"
-                        + "================ 结束 ================",
-                tag,
-                systemPrompt == null ? 0 : systemPrompt.length(), systemPrompt,
-                userPrompt == null ? 0 : userPrompt.length(), userPrompt);
+        try{log.info("ConSense gateway stage=request_ready thread={} systemCharacters={} userCharacters={}",Thread.currentThread().getId(),systemPrompt==null?null:systemPrompt.length(),userPrompt==null?null:userPrompt.length());}
+        catch(Throwable ignored){/* Diagnostics cannot replace the result. */}
     }
 
     public String chat(List<LlmClient.ChatTurn> turns) {
@@ -117,7 +105,7 @@ public class AiGateway {
         try {
             return JsonUtils.read(JsonUtils.extractJson(raw), type);
         } catch (Exception first) {
-            log.warn("首次 JSON 解析失败，触发重试: {}", first.getMessage());
+            try{log.warn("ConSense gateway stage=json_retry reason={}",first.getClass().getSimpleName());}catch(Throwable ignored){/* Diagnostics only. */}
             String retry = complete(systemPrompt + JSON_INSTRUCTION,
                     userPrompt + "\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。");
             try {
@@ -150,7 +138,7 @@ public class AiGateway {
         try {
             return parseList(raw, elementType);
         } catch (Exception first) {
-            log.warn("首次 JSON 数组解析失败，触发重试: {}", first.getMessage());
+            try{log.warn("ConSense gateway stage=json_array_retry reason={}",first.getClass().getSimpleName());}catch(Throwable ignored){/* Diagnostics only. */}
             String retry = complete(systemPrompt + JSON_INSTRUCTION
                             + " 顶层必须直接输出一个扁平的 JSON 数组 [ ... ]，元素不要嵌套。",
                     userPrompt + "\n\n重要：上一次输出不是合法 JSON 数组。");
@@ -203,6 +191,13 @@ public class AiGateway {
         return systemPrompt+(recordsObject
                 ? "\nReturn only one JSON object with exactly one key, \"records\". Its value must be an array conforming to this schema:\n"
                 : "\nReturn only a JSON array conforming to this schema:\n")+JsonUtils.write(schema);
+    }
+
+    /** Strict decoding only; application-owned merges must pass the same schema without another generation. */
+    public static <T> List<T> decodeStructuredJson(String raw,Class<T> elementType,JsonNode schema,boolean recordsObject) {
+        StructuredJsonValidator.Schema validated=StructuredJsonValidator.compile(schema);
+        return recordsObject?StructuredJsonValidator.decodeRecords(raw,elementType,validated)
+                :StructuredJsonValidator.decode(raw,elementType,validated);
     }
 
     private <T> List<T> completeStructuredJsonList(String systemPrompt, String userPrompt,

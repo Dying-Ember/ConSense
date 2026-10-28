@@ -5,6 +5,8 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -23,6 +25,7 @@ import static com.consense.ai.StructuredOutputValidationException.Reason.*;
  * Evidence/source truth and semantic quality remain separate checks after this structural gate.
  */
 final class StructuredJsonValidator {
+    private static final Logger LOG = LoggerFactory.getLogger(StructuredJsonValidator.class);
     // Independent mapper: ordinary/Drafting JSON extraction and mapping retain their existing settings.
     private static final ObjectMapper STRICT_MAPPER = JsonUtils.mapper().copy()
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -58,15 +61,30 @@ final class StructuredJsonValidator {
     }
 
     private static <T> List<T> decodeArray(JsonNode root,Class<T> elementType,Schema schema) {
-        if (root == null || !root.isArray()) throw failure(SCHEMA_MISMATCH);
-        for (JsonNode item : root) {
-            if (item == null || item.isNull() || item.isArray()) throw failure(SCHEMA_MISMATCH);
-        }
-        validate(root, schema);
+        String rejectionReason = "none";
         try {
-            return STRICT_MAPPER.convertValue(root,
-                    STRICT_MAPPER.getTypeFactory().constructCollectionType(List.class, elementType));
-        } catch (Exception incompatibleElementType) { throw failure(ELEMENT_MAPPING_FAILED); }
+            if (root == null || !root.isArray()) throw failure(SCHEMA_MISMATCH);
+            for (JsonNode item : root) {
+                if (item == null || item.isNull() || item.isArray()) throw failure(SCHEMA_MISMATCH);
+            }
+            validate(root, schema);
+            try {
+                return STRICT_MAPPER.convertValue(root,
+                        STRICT_MAPPER.getTypeFactory().constructCollectionType(List.class, elementType));
+            } catch (Exception incompatibleElementType) { throw failure(ELEMENT_MAPPING_FAILED); }
+        } catch (StructuredOutputValidationException rejected) {
+            rejectionReason = rejected.getReason().name();
+            throw rejected;
+        } finally {
+            try {
+                LOG.info("Structured array decode rootType={} arrayItems={} expectedMinItems={} expectedMaxItems={} rejectionReason={} threadId={}",
+                        root == null ? "MISSING" : root.getNodeType().name(),
+                        root != null && root.isArray() ? root.size() : -1,
+                        schema.minimum == null ? -1 : schema.minimum,
+                        schema.maximum == null ? -1 : schema.maximum,
+                        rejectionReason, Thread.currentThread().getId());
+            } catch (Throwable ignored) { /* Diagnostics cannot change structured decoding. */ }
+        }
     }
 
     private static Schema compileNode(JsonNode node, int depth) {

@@ -458,7 +458,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         assertTrue(hydrated.stream().allMatch(ids->ids.size()==1),"An old unlinked receipt must hydrate only checked ranked sources");
         assertEquals(Collections.singleton(42L),hydrated.stream().flatMap(Collection::stream).collect(java.util.stream.Collectors.toSet()));assertEquals(2,snapshotCounts().get("42"));assertEquals(2,snapshotReads.get());assertTrue(sourceReadCalls.get()>=2,"Complete catalog entry and exit proofs must surround the actual ready-index status");assertTrue(events.contains("status:end"));assertEquals(1,paid.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
         String generation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",documents.findScopeSourcesByProjectId(PROJECT));
-        assertTrue(canonicalRetrieval.sourceGenerationLinked(eager.indexKey,generation),"The unchanged legacy receipt must gain its exact source-generation attestation before paid work");
+        assertTrue(canonicalRetrieval.sourceGenerationLinked("advisory",eager.indexKey,generation),"The unchanged legacy receipt must gain its exact source-generation attestation before paid work");
         assertEquals(0,indexCalls.get(),"Attesting an existing unchanged ready index must not rebuild it");
         ObjectNode receipt=JsonUtils.mapper().createObjectNode();receipt.put("fixture","authoredExistingUnattestedReceiptUpgrade");receipt.put("sourceGenerationLinked",true);receipt.put("canonicalReads",snapshotReads.get());receipt.put("sourceReadHttpCalls",sourceReadCalls.get());receipt.put("indexCalls",indexCalls.get());receipt.put("paidBoundaries",paid.get());receipt.put("modelCalls",chatCalls.get());receipt.put("historyRows",history.count());receipt.put("realModelOrSourceAcceptance",false);write("legacy-receipt-source-generation-upgrade.json",receipt);
     }
@@ -485,7 +485,7 @@ class CanonicalRecheckAdviceRealSeamTest {
 
     private void assertUnlinkedSourceGeneration(String indexKey){
         String generation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",documents.findScopeSourcesByProjectId(PROJECT));
-        assertFalse(canonicalRetrieval.sourceGenerationLinked(indexKey,generation),"An incomplete or legacy build must not publish a checked source-generation attestation");
+        assertFalse(canonicalRetrieval.sourceGenerationLinked("advisory",indexKey,generation),"An incomplete or legacy build must not publish a checked source-generation attestation");
     }
 
     private OerBusinessEvidence.Session linkedQuerySession(){
@@ -508,6 +508,52 @@ class CanonicalRecheckAdviceRealSeamTest {
             NormalSourceSql.reads.clear();frame.beforeWait();frame.revalidate();frame.close();
             assertTrue(NormalSourceSql.reads.isEmpty(),"Owned normal frame guards must not reload source CLOBs: "+NormalSourceSql.reads);
         }finally{NormalSourceSql.capture=false;}
+        assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"selected","single","word_context"})
+    void selectedNormalReadersReuseVerifiedSourceStamp(String operation) throws Exception {
+        CanonicalSourceBinding normal=prepareNormalConditionalFixture();resetCounters();
+        JsonNode chunk=snapshots.get(43L).path("chunks").get(0);
+        NormalSourceSql.reads.clear();NormalSourceSql.capture=true;
+        try {
+            if("selected".equals(operation))assertEquals(1,evidence.selectedPointers(PROJECT,43L,normal.getProjectionSha256(),Collections.singletonList(chunk.path("unitId").asText()),"advisory").size());
+            else if("single".equals(operation))assertNotNull(evidence.pointer(PROJECT,43L,normal.getProjectionSha256(),chunk.path("unitId").asText(),"advisory"));
+            else evidence.wordSourceScopeContext(PROJECT,43L,normal.getProjectionSha256(),chunk.path("id").asText(),"advisory");
+            assertEquals(1,NormalSourceSql.reads.size(),"One selected-source operation must load complete normal content once, then retain its verified stamp");
+        } finally {NormalSourceSql.capture=false;}
+        verify(reader,never()).assertSourceCurrent(any(),eq("advisory"));
+        assertEquals(1,snapshotReads.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"db_parsed","original_same_length_restored_mtime","superseded_binding","routing"})
+    void selectedNormalPointersKeepFinalFreshnessGate(String change) throws Exception {
+        CanonicalSourceBinding normal=prepareNormalConditionalFixture();resetCounters();AtomicInteger checks=new AtomicInteger();
+        doAnswer(call->{
+            if(checks.incrementAndGet()==4){
+                if("superseded_binding".equals(change))jdbc.update("UPDATE canonical_source_binding SET projection_sha256=? WHERE id=?",VettingCorpus.hash("AUTHORED superseding projection"),normal.getId());
+                else if("routing".equals(change))jdbc.update("UPDATE source_document SET review_role='standard' WHERE id=43");
+                else mutate(43L,change);
+            }
+            return call.callRealMethod();
+        }).when(reader).assertSourceStampCurrent(any(),eq("advisory"),any());
+        String unit=snapshots.get(43L).path("chunks").get(0).path("unitId").asText();
+        assertThrows(RuntimeException.class,()->evidence.selectedPointers(PROJECT,43L,normal.getProjectionSha256(),Collections.singletonList(unit),"advisory"));
+        assertEquals(4,checks.get(),"Mutation must occur at the selected-pointer final check, after the initial view was verified");
+        assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+
+    @Test void selectedNormalPointersKeepCompleteReadFallbackWithoutSourceStamp() throws Exception {
+        CanonicalSourceBinding normal=prepareNormalConditionalFixture();
+        jdbc.execute("drop trigger if exists source_document_content_digests");
+        jdbc.update("update source_document set text_content_sha256=null,structured_content_sha256=null,parse_coverage_sha256=null,normal_candidate_sha256=null,business_content_sha256=null where id=43");
+        try(java.sql.Connection connection=jdbc.getDataSource().getConnection()){SourceContentDigestMigration.install(connection);}
+        resetCounters();NormalSourceSql.reads.clear();NormalSourceSql.capture=true;
+        String unit=snapshots.get(43L).path("chunks").get(0).path("unitId").asText();
+        try {assertEquals(1,evidence.selectedPointers(PROJECT,43L,normal.getProjectionSha256(),Collections.singletonList(unit),"advisory").size());}
+        finally {NormalSourceSql.capture=false;}
+        assertTrue(NormalSourceSql.reads.size()>1,"Missing content stamps must retain full source-validation fallback");
+        verify(reader,atLeastOnce()).assertSourceCurrent(any(),eq("advisory"));
         assertEquals(0,chatCalls.get());assertEquals(0,history.count());
     }
 
@@ -907,7 +953,7 @@ class CanonicalRecheckAdviceRealSeamTest {
                 int count=snapshots.get(id).path("chunks").size();row.put("chunkCount",count);total+=count;manifests.add(VettingCorpus.hash("AUTHORED semantic manifest "+id));
             }
             if(request.has("normalProofVersion")){result.set("normalProofVersion",request.path("normalProofVersion"));ArrayNode proofs=result.putArray("normalProofs");for(JsonNode address:request.path("projectionSha256")){
-                Long id=idForProjection(address.asText());JsonNode snapshot=snapshots.get(id);ObjectNode proof=proofs.addObject();for(String field:Arrays.asList("projectionSha256","producerKind","projectionIdentity","projectionRevisionSha256","sourceHash","source"))proof.set(field,snapshot.path(field).deepCopy());proof.set("sourceBinding",snapshot.path("manifest").path("sourceBinding").deepCopy());proof.put("snapshotSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(snapshot))));proof.put("parentSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(snapshot.path("chunks")))));
+                Long id=idForProjection(address.asText());JsonNode snapshot=snapshots.get(id);ObjectNode proof=proofs.addObject();for(String field:Arrays.asList("projectionSha256","producerKind","projectionIdentity","projectionRevisionSha256","sourceHash","source"))proof.set(field,snapshot.path(field).deepCopy());proof.set("sourceBinding",snapshot.path("manifest").path("sourceBinding").deepCopy());proof.put("snapshotSha256",shaBytes(rawSnapshots.get(id).getBytes(StandardCharsets.UTF_8)));proof.put("parentSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(snapshot.path("chunks")))));
             }}
             result.putObject("coverage").put("status","prepared").put("totalOrigins",total);runOnce(semanticPrepareMutation);
             // The native prepare owner verifies actual dependencies on exit before returning its receipt.
@@ -1070,6 +1116,74 @@ class CanonicalRecheckAdviceRealSeamTest {
         SourceDocument source=documents.findById(43L).orElseThrow();com.consense.document.DocumentBlock block=new com.consense.document.DocumentBlock();
         block.setId("normal:body:0");block.setSource("native");block.setLocation("body/0/paragraph");block.setText("AUTHORED selected normal source for Vetting registration");
         source.setTextContent(block.getText());source.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));source.setParseCoverageJson("{\"complete\":true}");documents.saveAndFlush(source);
+    }
+    @Test void vettingSelectedNormalTextUsesTheRealServiceEntryWithoutWholeSourceMaterialization()throws Exception{
+        replaceReviewedDocxWithUnregisteredNormal();configureVettingSemanticPreparation();assertTrue(evidence.prepareNormalObserved(PROJECT,43L,"vetting"));
+        SourceDocument captured=documents.findById(43L).orElseThrow();List<SourceDocument> selected=Collections.singletonList(captured);
+        List<CanonicalSourceBinding> candidates=evidence.compactNormalCandidates(PROJECT,"vetting",selected);assertNotNull(candidates);
+        JsonNode original=snapshots.get(43L).path("chunks").get(0);String id=original.path("id").asText();resetCounters();NormalSourceSql.bindingReads.clear();NormalSourceSql.capture=true;
+        CanonicalEvidenceService.SelectedNormalTextSources text;
+        try{text=evidence.selectedNormalTextSources(PROJECT,"vetting",selected,candidates,Collections.singleton(id));}finally{NormalSourceSql.capture=false;}
+        assertNotNull(text);assertEquals(Collections.singleton(id),text.chunks().keySet());assertEquals(original,text.chunks().get(id));
+        assertEquals("vetting",text.scope().bindings().get(0).getDeclaredModule());
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=CanonicalEvidenceService.compactNormalPointer(text.scope().bindings().get(0),text.headers().get(43L),text.chunks().get(id),"vetting");
+        assertEquals("vetting",pointer.getModule());assertEquals(captured.getSourceSha256(),pointer.getOriginalSourceSha256());assertEquals(id,pointer.getCanonicalChunkId());
+        assertTrue(NormalSourceSql.bindingReads.isEmpty(),"The actual selected-text entry must not load binding snapshot CLOBs through ORM");assertEquals(0,chatCalls.get());assertEquals(0,retrieveCalls.get());
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"none","member_text","member_offset","source_stamp","binding","original_bytes","cas_bytes","raw_snapshot"})
+    void vettingTextFirstQuoteBindingUsesOnlySelectedRegisteredParents(String change)throws Exception{
+        replaceReviewedDocxWithUnregisteredNormal();configureVettingSemanticPreparation();assertTrue(evidence.prepareNormalObserved(PROJECT,43L,"vetting"));
+        CanonicalSourceBinding binding=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0);
+        List<SourceDocument> selected=Collections.singletonList(documents.findScopeSourcesByProjectId(PROJECT).stream().filter(source->source.getId()==43L).findFirst().orElseThrow());
+        JsonNode raw=snapshots.get(43L).path("chunks").get(0);String id=raw.path("id").asText();
+        ((ObjectNode)health.path("oer").path("sourceRead")).putObject("semanticPreparation").put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+        OerBusinessEvidence.Session session=business.loadSemantic(PROJECT,"vetting",selected);
+        verify(evidence).attestCompactNormalSources(any(),any());assertEquals(1,compactAdvicePrepareCasReads.get());
+        OerCanonicalRetrievalClient.SemanticSources sources=org.springframework.test.util.ReflectionTestUtils.invokeMethod(OerSemanticBusinessEvidenceTest.class,"semanticSources",binding,1,false,256,true);
+        ObjectNode member=org.springframework.test.util.ReflectionTestUtils.invokeMethod(OerSemanticBusinessEvidenceTest.class,"semanticOrigin",raw,binding);
+        member.put("producerKind",NormalObservedContract.PRODUCER);
+        if("member_text".equals(change)){member.put("text","AUTHORED altered selected text");((ObjectNode)member.path("parts").get(0)).put("text",member.path("text").asText()).put("endOffset",member.path("text").asText().length());}
+        if("member_offset".equals(change))((ObjectNode)member.path("parts").get(0)).put("startOffset",1).put("endOffset",member.path("parts").get(0).path("text").asText().length()+1);
+        doAnswer(call->{ObjectNode result=JsonUtils.mapper().createObjectNode();result.putArray("origins").add(member.deepCopy());result.putNull("nextCursor");
+            ObjectNode unit=result.putArray("units").addObject();unit.put("status","complete_observed_unit").put("unitId",VettingCorpus.hash("AUTHORED selected quote unit"));unit.putArray("requiredMemberIds").add(id);unit.putArray("members").add(member.deepCopy());
+            result.putObject("coverage").put("status","complete").put("processedOrigins",1);return result;
+        }).when(canonicalRetrieval).readSemanticSources(eq(sources),any());
+        // The real preparation owns the registry pins; this transport fixture supplies the selected text-first scan.
+        org.springframework.test.util.ReflectionTestUtils.setField(session,"semanticSources",sources);
+        VettingCorpus.Chunk chunk=business.scan(session).get(0);
+        com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(chunk,"source",chunk.getContent());assertTrue(quote.isLocated());
+        if("source_stamp".equals(change))mutate(43L,"db_parsed");
+        if("binding".equals(change))mutate(43L,"binding_revision");
+        if("original_bytes".equals(change))mutate(43L,"original_same_length_restored_mtime");
+        if("cas_bytes".equals(change))changeExactLengthRestoredMtime(normalCasRoots.get(43L).resolve(snapshots.get(43L).path("observationManifestRef").path("relativePath").asText()));
+        if("raw_snapshot".equals(change))jdbc.update("UPDATE canonical_source_binding SET snapshot_json=? WHERE document_id=?",binding.getSnapshotJson()+" ",43L);
+        resetCounters();NormalSourceSql.reads.clear();NormalSourceSql.bindingReads.clear();NormalSourceSql.capture=true;
+        try {
+            if("none".equals(change)){
+                business.bindReviewEvidence(session,Collections.singletonList(quote));assertTrue(quote.isLocated());
+                assertEquals(id,quote.getCanonicalEvidence().getCanonicalChunkId());assertEquals(raw.path("parts"),quote.getCanonicalEvidence().getParts());
+                assertNull(quote.getCanonicalEvidence().getNativeWordSourceScopesContext());
+                verify(evidence).selectedNormalTextSources(eq(PROJECT),eq("vetting"),anyList(),anyList(),eq(Collections.singleton(id)));
+                assertTrue(NormalSourceSql.reads.isEmpty(),"Exact text quotation binding must not reload complete source graphs");
+                assertTrue(NormalSourceSql.bindingReads.isEmpty(),"Only selected registered parents may be materialized");
+                assertEquals(1,unchangedSnapshotReads.get(),"The selected native CAS is still rechecked against its preparation receipt");
+            }else assertThrows(RuntimeException.class,()->business.bindReviewEvidence(session,Collections.singletonList(quote)));
+        }finally{NormalSourceSql.capture=false;}
+        verify(evidence,never()).selectedPointers(anyString(),anyLong(),anyString(),anyList(),anyString());
+        assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"wrong_module","ineligible_module","source_revision"})
+    void vettingSelectedNormalTextRealServiceStillRejectsForeignOrChangedProof(String change)throws Exception{
+        replaceReviewedDocxWithUnregisteredNormal();configureVettingSemanticPreparation();assertTrue(evidence.prepareNormalObserved(PROJECT,43L,"vetting"));
+        SourceDocument captured=documents.findById(43L).orElseThrow();List<SourceDocument> selected=Collections.singletonList(captured);
+        List<CanonicalSourceBinding> candidates=evidence.compactNormalCandidates(PROJECT,"vetting",selected);assertNotNull(candidates);
+        String id=snapshots.get(43L).path("chunks").get(0).path("id").asText();
+        if("ineligible_module".equals(change))candidates.get(0).setEligibleModulesJson("[\"advisory\"]");
+        if("source_revision".equals(change))jdbc.update("update source_document set text_content=? where id=43","AUTHORED changed after selected-text capture");
+        String requested="wrong_module".equals(change)?"advisory":"vetting";
+        CanonicalEvidenceException failure=assertThrows(CanonicalEvidenceException.class,()->evidence.selectedNormalTextSources(PROJECT,requested,selected,candidates,Collections.singleton(id)));
+        assertTrue(failure.getMessage().contains("STALE")||failure.getMessage().contains("ELIGIBLE"),failure.getMessage());assertEquals(0,chatCalls.get());assertEquals(0,retrieveCalls.get());
     }
     @Test void vettingWarmNormalRegistrationUsesConditionalEntryAndOwnerCloseWithoutPublication()throws Exception{
         replaceReviewedDocxWithUnregisteredNormal();configureVettingSemanticPreparation();assertTrue(evidence.prepareNormalObserved(PROJECT,43L,"vetting"));
@@ -1481,7 +1595,7 @@ class CanonicalRecheckAdviceRealSeamTest {
             if(ready&&!"capability_absent".equals(change)){
                 assertTrue(currentAdviceReceiptGenerationKnown(key));
                 String generation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",documents.findScopeSourcesByProjectId(PROJECT));
-                assertTrue(canonicalRetrieval.sourceGenerationLinked(key,generation));
+                assertTrue(canonicalRetrieval.sourceGenerationLinked("advisory",key,generation));
                 assertThrows(CancellationException.class,()->askUntilPaidBoundary(paid,null));assertEquals(1,paid.get());assertEquals(Collections.singleton("42"),snapshotCounts().keySet());
             }
             receipt.put("paidBoundaries",paid.get());receipt.put("canonicalReadsAfterAsk",snapshotReads.get());receipt.put("indexCalls",indexCalls.get());receipt.put("modelCalls",chatCalls.get());receipt.put("historyRows",history.count());receipt.put("realModelOrSourceAcceptance",false);write("readiness-bootstrap33-"+change+".json",receipt);
@@ -1537,7 +1651,7 @@ class CanonicalRecheckAdviceRealSeamTest {
                 JsonNode fresh=availabilityRequests.get(availabilityRequests.size()-1);assertTrue(fresh.has("expectedGeneration"));
                 if(currentGeneration==null)assertTrue(fresh.path("expectedGeneration").isNull());else assertEquals(currentGeneration,fresh.path("expectedGeneration").asText());
             }
-            assertTrue(canonicalRetrieval.sourceGenerationLinked(key,sourceGeneration));assertEquals(currentGeneration,currentAdviceReceiptIndexGeneration(key));
+            assertTrue(canonicalRetrieval.sourceGenerationLinked("advisory",key,sourceGeneration));assertEquals(currentGeneration,currentAdviceReceiptIndexGeneration(key));
             assertEquals(0,snapshotReads.get());assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());
             assertEquals(0,events.stream().filter("status:start"::equals).count());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
         }finally{releaseFirstResponse.countDown();NormalSourceSql.capture=false;caller.shutdownNow();assertTrue(caller.awaitTermination(10,TimeUnit.SECONDS));}
@@ -1590,7 +1704,7 @@ class CanonicalRecheckAdviceRealSeamTest {
             if(unchanged){
                 assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());assertEquals(4,sourceReadCalls.get());
                 String generation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",documents.findScopeSourcesByProjectId(PROJECT));
-                assertTrue(canonicalRetrieval.sourceGenerationLinked(published.getIndexKey(),generation),"A later equivalent response must retain the healthy shared receipt");
+                assertTrue(canonicalRetrieval.sourceGenerationLinked("advisory",published.getIndexKey(),generation),"A later equivalent response must retain the healthy shared receipt");
                 if("known_generation".equals(change))assertTrue(currentAdviceReceiptGenerationKnown(published.getIndexKey()),"A delayed cold status must not downgrade an established generation pin");
             }
             assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());

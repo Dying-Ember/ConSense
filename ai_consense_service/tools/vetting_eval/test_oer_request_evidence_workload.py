@@ -10,6 +10,46 @@ from oer_request_evidence import RequestEvidence
 
 
 class JournalWorkloadTest(unittest.TestCase):
+    def test_compact_journal_source_adapter_is_exact(self):
+        import oer_request_evidence
+        import portable_index_signature as adapter
+        from token_windows import WindowError
+        current = Path(oer_request_evidence.__file__).read_text(encoding='utf-8')
+        compact = """        elif stage == 'parent-bm25-candidates':
+            scores = payload.get('allScopeScores', [])
+            selected = set(payload.get('orderedCandidateIds', []))
+            payload = {key: value for key, value in payload.items() if key != 'allScopeScores'}
+            payload.update(scoredScopeCount=len(scores),
+                           candidateScores=[row for row in scores if row['id'] in selected],
+                           recording='selected_candidates_only')
+"""
+        self.assertEqual(1, current.count(compact))
+        previous = current.replace(compact, '')
+        adapter.computation_proof('oer_request_evidence.py', previous, current)
+        before = {'signatureVersion': 6, 'algorithms': {'oer_request_evidence.py': hashlib.sha256(previous.encode()).hexdigest()}}
+        after = {'signatureVersion': 6, 'algorithms': {'oer_request_evidence.py': hashlib.sha256(current.encode()).hexdigest()}}
+        self.assertTrue(adapter.transport_candidate(before, after))
+        with self.assertRaises(WindowError):
+            adapter.computation_proof('oer_request_evidence.py', previous, current + '\nUNREVIEWED_CHANGE = True\n')
+
+    def test_retrieval_journal_keeps_candidate_scores_without_copying_the_full_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            journal = RequestEvidence(temporary)
+            scores = [{"id": str(index), "score": float(index)} for index in range(17509)]
+            payload = {"allScopeScores": scores, "orderedCandidateIds": ["5", "9000"]}
+            with journal.operation("/retrieve", {"projectId": "whole-scope"}):
+                journal.observe("parent-bm25-candidates", payload)
+            directory = next(Path(temporary).iterdir())
+            raw = (directory / "events.jsonl").read_bytes()
+            event = json.loads(raw)["payload"]
+            self.assertLess(len(raw), 4000)
+            self.assertEqual(17509, event["scoredScopeCount"])
+            self.assertEqual([scores[5], scores[9000]], event["candidateScores"])
+            self.assertNotIn("allScopeScores", event)
+            self.assertIs(scores, payload["allScopeScores"])
+            receipt = json.loads((directory / "receipt.json").read_bytes())
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), receipt["events"]["sha256"])
+
     def test_index_wrapper_records_summary_without_dumping_or_changing_actual_request(self):
         class IndexRequest:
             projectId = "complete-authored-scope"

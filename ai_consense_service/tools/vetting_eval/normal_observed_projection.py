@@ -13,7 +13,7 @@ from pathlib import Path
 from artifact_store import ArtifactStore
 from competition_scope import MODULES, SOURCE_PURPOSES
 from oer_source_registry import SourceRegistryError, _identity, _serialize
-from token_windows import paragraph_map, utf16_length
+from token_windows import canonical_chunks, paragraph_map, utf16_length
 
 
 MAX_NORMAL_MESSAGE_BYTES = 1024 * 1024 * 1024
@@ -46,8 +46,7 @@ def _hash(value):
 
 
 def _canonical_chunks(value):
-    encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
-    return (chunk.encode('utf-8') for chunk in encoder.iterencode(value))
+    return canonical_chunks(value)
 
 
 def _serialized_equal(left, right):

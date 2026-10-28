@@ -101,7 +101,7 @@ class VettingWorkflowTest {
             try { SourceContentDigestMigration.install(connection); return null; }
             catch (Exception failure) { throw new java.sql.SQLException(failure); }
         });
-        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         // Explicit renderer replacement: workflow persistence/dispatch only, not LibreOffice acceptance.
         org.mockito.Mockito.doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));

@@ -138,6 +138,32 @@ class VettingQwenUsagePreflightWorkflowTest {
         assertEquals("[]}",packet(saved).path("attempts").get(0).path("rawResponse").asText());assertEquals("[{}]",packet(saved).path("attempts").get(1).path("rawResponse").asText());
         assertLedger(queued,2,2,Arrays.asList("final","answer","repair","answer"));assertEquals(4,bodies.size());verifyNoInteractions(local,miniMax);
     }
+    @Test void missingEvidencePatchUsesItsOwnQwenAdmissionAndKeepsTheOriginalAnswerBudget()throws Exception {
+        String quote="The minimum amount for interim payment shall be twenty dollars.";
+        JsonNode original=JsonUtils.parse(new VettingBusinessShapeRepairTest.Fixture().raw("amend",false,quote));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)original.get(0)).remove("evidence");
+        String first="{\"records\":"+original+"}",patch="{\"records\":"+VettingEvidenceRepairTest.patch(0,"R1",quote)+"}";
+        answers.add(first);answers.add(patch);answers.add("{\"records\":[]}");
+        String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
+        assertEquals("COMPLETED",saved.path("status").asText());JsonNode attempts=packet(saved).path("attempts");assertEquals(2,attempts.size());
+        assertEquals("SCHEMA_MISMATCH",attempts.get(0).path("validationReason").asText());assertEquals("decoded",attempts.get(1).path("status").asText());
+        assertEquals(first,attempts.get(0).path("rawResponse").asText());assertEquals(patch,attempts.get(1).path("rawResponse").asText());
+        JsonNode before=attempts.get(0).path("input"),after=attempts.get(1).path("input");
+        assertNotEquals(before.path("schema"),after.path("schema"));assertTrue(after.path("schema").path("items").path("properties").has("recordIndex"));
+        assertEquals(before.path("sourceSnapshotSha256"),after.path("sourceSnapshotSha256"));
+        assertEquals(after.path("serializedInputSha256"),attempts.get(1).path("inputBudget").path("serializedInputSha256"));
+        assertEquals(bodies.get(2).path("messages"),bodies.get(3).path("messages"),"Paid preflight and generation must bind the exact patch prompt and schema envelope");
+        assertLedger(queued,2,2,Arrays.asList("final","answer","repair","answer"));assertEquals(4,bodies.size());assertEquals(1,answers.size());verifyNoInteractions(local,miniMax);
+    }
+    @Test void evidencePatchStillCannotPassTheFiniteQwenAdmissionCeiling()throws Exception {
+        props.getQwenUsagePreflight().setVettingMaxPreflights(1);props.getQwenUsagePreflight().setVettingMaxAnswers(2);props.getQwenUsagePreflight().setVettingMaxTotal(3);
+        JsonNode original=JsonUtils.parse(new VettingBusinessShapeRepairTest.Fixture().raw("amend",false,"The minimum amount for interim payment shall be twenty dollars."));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)original.get(0)).remove("evidence");
+        answers.add("{\"records\":"+original+"}");answers.add("{\"records\":[]}");
+        String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
+        assertEquals("FAILED",saved.path("status").asText());assertEquals(1,packet(saved).path("attempts").size());
+        assertLedger(queued,1,1,Arrays.asList("final","answer"));assertEquals(2,bodies.size());assertEquals(1,answers.size());verifyNoInteractions(local,miniMax);
+    }
     @Test void durablePreflightCeilingStopsTheNewRepairInputBeforeAnotherPaidDispatch()throws Exception {
         props.getQwenUsagePreflight().setVettingMaxPreflights(1);props.getQwenUsagePreflight().setVettingMaxAnswers(2);props.getQwenUsagePreflight().setVettingMaxTotal(3);
         answers.add("[]}");answers.add("{\"records\":[]}");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());

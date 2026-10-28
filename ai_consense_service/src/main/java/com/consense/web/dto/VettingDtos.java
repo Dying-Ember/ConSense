@@ -14,6 +14,24 @@ public final class VettingDtos {
     private VettingDtos() {
     }
 
+    @Data @NoArgsConstructor
+    public static class ProjectTextSearchRequest {
+        @javax.validation.constraints.NotBlank @Size(max=1000)
+        private String query;
+        private boolean allSources;
+    }
+
+    @Data @AllArgsConstructor
+    public static class ProjectTextSearchHit {
+        private String documentId, fileName, pageNo, anchor, text, sourceHash, originalSourceSha256;
+    }
+
+    @Data @AllArgsConstructor
+    public static class ProjectTextSearchResult {
+        private int selectedDocuments, availableDocuments;
+        private List<ProjectTextSearchHit> hits;
+    }
+
     /** 审查源集里的一份文件 */
     @Data
     @NoArgsConstructor
@@ -140,6 +158,7 @@ public final class VettingDtos {
     @Data @NoArgsConstructor
     public static class ChecklistAssessmentVO {
         private String producerVersion="pm-checklist-packet-v1",itemId,status,reason,policySha256,packetId,sourceSnapshotSha256,issueTypeCode;
+        private Integer verifiedAssessmentIndex;
         private List<FindingEvidence> evidence=new java.util.ArrayList<>();
         private List<String> evidenceChunkIds=new java.util.ArrayList<>();
         /** Server-produced requirement relation only; model support is not a verified verdict. */
@@ -193,6 +212,9 @@ public final class VettingDtos {
         private String model;
         private com.consense.ai.ModelIdentity modelIdentity;
         private java.util.Map<String,String> promptPolicy;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Boolean partialResults;
+        public RunResultVO(int total,MetricsVO metrics,List<String> messages,String model,com.consense.ai.ModelIdentity identity,java.util.Map<String,String> policy){this(total,metrics,messages,model,identity,policy,null);}
         public RunResultVO(int total,MetricsVO metrics,List<String> messages,String model){this(total,metrics,messages,model,null,null);}
         public RunResultVO(int total,MetricsVO metrics,List<String> messages,String model,com.consense.ai.ModelIdentity identity){this(total,metrics,messages,model,identity,null);}
     }
@@ -232,6 +254,13 @@ public final class VettingDtos {
         private List<com.fasterxml.jackson.databind.JsonNode> nativePositions;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private String businessContentSha256;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String clauseId;
+        /** Preserve the former Lombok full constructor when adding the readable clause label. */
+        public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256,String sourceRole,List<com.fasterxml.jackson.databind.JsonNode> nativePositions,String businessContentSha256) {
+            this(code,pageNo,text,side,documentId,fileKey,fileName,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence,originalSourceSha256);
+            this.sourceRole=sourceRole;this.nativePositions=nativePositions;this.businessContentSha256=businessContentSha256;
+        }
         public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256) {
             this(code,pageNo,text,side,documentId,fileKey,fileName,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence);this.originalSourceSha256=originalSourceSha256;
         }
@@ -362,6 +391,13 @@ public final class VettingDtos {
         /** Current selected source revisions, checked without materializing saved bodies. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private String sourceStampSha256;
+        /** Fixed-reference choice captured before preparation and retained across recovery. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String fixedReferenceSelectionSha256;
+        /** Preserve the previous full constructor for saved callers. */
+        public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,List<Long> canonicalSourceDocumentIds,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger,com.fasterxml.jackson.databind.JsonNode packageIdentityReview,com.fasterxml.jackson.databind.JsonNode packageIdentityMirrorAudit,com.fasterxml.jackson.databind.JsonNode semanticSourceRead,String sourceStampSha256) {
+            this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,canonicalSourceDocumentIds,checklistDependencyLedger,packageIdentityReview,packageIdentityMirrorAudit,semanticSourceRead,sourceStampSha256,null);
+        }
         public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger,com.fasterxml.jackson.databind.JsonNode packageIdentityReview,com.fasterxml.jackson.databind.JsonNode packageIdentityMirrorAudit) {
             this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,null,checklistDependencyLedger,packageIdentityReview,packageIdentityMirrorAudit,null,null);
         }
@@ -406,6 +442,8 @@ public final class VettingDtos {
     @Data @NoArgsConstructor
     public static class SemanticPacketVO {
         private String packetId,sourceObservationPacketId,kind,status,failureKind,error,rawResponseSha256,sourceSnapshotSha256,promptEnvelopeSha256;
+        private String parentPacketId,requestedEvidenceNeedId;
+        private List<SemanticEvidenceNeedVO> evidenceNeeds=new java.util.ArrayList<>();
         private java.util.Map<String,String> sourceReferenceBindings=new java.util.LinkedHashMap<>();
         private int packetIndex,submittedChars;
         private List<String> submittedChunkIds = new java.util.ArrayList<>(), requestIds = new java.util.ArrayList<>();
@@ -432,6 +470,13 @@ public final class VettingDtos {
             stages.put("independentlyReviewed","not_recorded");return stages;
         }
     }
+    /** Server-bound evidence request; historical assessments remain in their parent packet. */
+    @Data @NoArgsConstructor
+    public static class SemanticEvidenceNeedVO {
+        private String needId,query;
+        private List<String> checklistItemIds=new java.util.ArrayList<>(),affectedChunkIds=new java.util.ArrayList<>();
+        private List<Integer> verifiedAssessmentIndexes=new java.util.ArrayList<>();
+    }
     @Data @NoArgsConstructor
     public static class SemanticAttemptVO {
         private int ordinal;
@@ -442,6 +487,10 @@ public final class VettingDtos {
     public static class VerifiedAssessmentVO {
         private String assessment,title,comment;
         private List<FindingEvidence> evidence;
+        private List<String> pendingFacts=new java.util.ArrayList<>();
+        public VerifiedAssessmentVO(String assessment,String title,String comment,List<FindingEvidence> evidence){
+            this(assessment,title,comment,evidence,new java.util.ArrayList<>());
+        }
     }
     @Data @NoArgsConstructor
     public static class SemanticSourceRequestVO {

@@ -26,12 +26,134 @@ import static org.mockito.Mockito.*;
 
 /** Authored compact protocol doubles; no database, source OCR, retrieval model or LLM calls. */
 class OerSemanticBusinessEvidenceTest {
+    @SuppressWarnings("unchecked") @Test void namedManifestRankingKeepsTheWholeRegistryAndFiltersBeforeRanking()throws Exception{
+        Fixture f=reviewTextFixture();
+        Map<Long,SourceDocument> documents=(Map<Long,SourceDocument>)ReflectionTestUtils.getField(f.session,"semanticDocuments");
+        SourceDocument target=documents.get(42L);target.setFileKey("APU");target.setReviewRole("package_manifest");
+        Consumer<ObjectNode> previous=f.transformOrigin;f.transformOrigin=origin->{previous.accept(origin);origin.put("role","package_manifest");};
+        List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);VettingCorpus.Chunk seed=scanned.get(1);
+        CanonicalEvidenceService.CompactBindingScope scope=(CanonicalEvidenceService.CompactBindingScope)ReflectionTestUtils.getField(f.session,"semanticScope");
+        CanonicalSourceBinding other=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(scope.bindings().get(0),other);other.setDocumentId(43L);other.setOriginalSourceSha256(sha("unrelated original"));
+        List<CanonicalSourceBinding> registry=Arrays.asList(scope.bindings().get(0),other);ReflectionTestUtils.setField(scope,"selected",registry);
+        SourceDocument unrelated=new SourceDocument();unrelated.setId(43L);unrelated.setProjectId("authored");unrelated.setFileKey("PRE");unrelated.setReviewRole("tender");
+        Map<Long,SourceDocument> both=new LinkedHashMap<>(documents);both.put(43L,unrelated);ReflectionTestUtils.setField(f.session,"semanticDocuments",both);
+        installRepeatedReviewSeed(f,seed);OerBusinessEvidence.Session queryScope=(OerBusinessEvidence.Session)ReflectionTestUtils.getField(f.session,"reviewQuery");
+        ReflectionTestUtils.setField(queryScope,"queryScope",registry);Set<String> targets=Collections.singleton(seed.getOriginalSourceSha256());
+        when(f.retrieval.retrieveCompact(eq("vetting"),anyString(),eq("APU.A010"),eq("package_manifest"),anyList(),anyString(),any(),any(),any(),eq(true),eq(targets))).thenAnswer(call->{
+            assertEquals(Arrays.asList(42L,43L),((List<CanonicalSourceBinding>)call.getArgument(4)).stream().map(CanonicalSourceBinding::getDocumentId).collect(java.util.stream.Collectors.toList()));
+            Map<String,VettingCorpus.Chunk> byId=(Map<String,VettingCorpus.Chunk>)ReflectionTestUtils.getField(queryScope,"byId");byId.put(seed.getId(),JsonUtils.read(JsonUtils.write(seed),VettingCorpus.Chunk.class));
+            ObjectNode response=JsonUtils.mapper().createObjectNode();response.putArray("hits").addObject().put("id",seed.getId());response.putObject("sourceUnits").putArray("units");return response;
+        });
+        List<VettingCorpus.Chunk> result=f.service.retrieveRequiredProjectText(f.session,"APU.A010",()->{},10000);
+        assertFalse(result.isEmpty());assertTrue(result.stream().allMatch(chunk->"package_manifest".equals(chunk.getRole())&&targets.contains(chunk.getOriginalSourceSha256())));
+        verify(f.retrieval).retrieveCompact(eq("vetting"),anyString(),eq("APU.A010"),eq("package_manifest"),anyList(),anyString(),any(),any(),any(),eq(true),eq(targets));
+        clearInvocations(f.retrieval);assertTrue(f.service.retrieveRequiredProjectText(f.session,"APB.A010",()->{},10000).isEmpty());verifyNoInteractions(f.retrieval);
+    }
+    @Test void reviewTextSummaryCountsOnlyTheSelectedRetrievalAndNeverCopiesEvidence()throws Exception {
+        Fixture f=reviewTextFixture();List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);
+        VettingCorpus.Chunk seed=scanned.get(1);installRepeatedReviewSeed(f,seed);clearInvocations(f.retrieval,f.evidence);
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs=new ch.qos.logback.core.read.ListAppender<>();logs.start();logger.addAppender(logs);
+        String query="PRIVATE_QUERY_"+"x".repeat(1500);
+        try{
+            List<VettingCorpus.Chunk> selected=f.service.retrieveReviewText(f.session,query,"tender",()->{},seed.getContent().length());
+            assertEquals(Collections.singletonList(seed.getId()),ids(selected));
+            List<String> summaries=new ArrayList<>();for(ch.qos.logback.classic.spi.ILoggingEvent event:logs.list)
+                if(event.getFormattedMessage().startsWith("Vetting evidence flow "))summaries.add(event.getFormattedMessage());
+            assertEquals(7,summaries.size());String[] phases={"source_guard","index_readiness","ranking","seed_binding","context_selection","selected_copy"};
+            for(int i=0;i<phases.length;i++)assertTrue(summaries.get(i).contains("status=started phase="+phases[i]),"The entered phase must be visible before its work can stall");String completed=summaries.get(6);
+            assertTrue(completed.contains("status=completed phase=selected_copy"));assertTrue(completed.contains("queryChars="+query.length()+" queryPrefixChars=1024"));
+            assertTrue(completed.contains("seeds=1 seedChars="+seed.getContent().length()));assertTrue(completed.contains("candidates=3 "));
+            assertTrue(completed.contains("selected=1 selectedChars="+seed.getContent().length()));assertTrue(completed.contains("contextChunks=0 contextChars=0 selectedSources=1 tenderChunks=1"));
+            assertTrue(completed.contains("budgetOmittedChunks=2 budgetOmittedChars="+(scanned.get(0).getContent().length()+scanned.get(2).getContent().length())));
+            assertTrue(completed.matches(".*sessionFingerprint=[0-9a-f]{16} queryFingerprint=[0-9a-f]{16} .*"));
+            for(String summary:summaries){assertTrue(summary.length()<850);assertFalse(summary.contains(query));assertFalse(summary.contains("PRIVATE_QUERY"));
+                for(VettingCorpus.Chunk chunk:scanned){assertFalse(summary.contains(chunk.getContent()));assertFalse(summary.contains(chunk.getId()));}
+                assertFalse(summary.contains(seed.getSourceHash()));assertFalse(summary.contains(seed.getOriginalSourceSha256()));}
+        }finally{logger.detachAppender(logs);logs.stop();}
+        verify(f.retrieval,times(1)).retrieveCompact(eq("vetting"),anyString(),eq(query),eq("tender"),anyList(),anyString(),any(),any(),any(),eq(true));
+        verify(f.retrieval,never()).readSemanticSources(any(),any());verify(f.retrieval,never()).readSources(anyString(),any(),anyList());
+        verify(f.evidence,never()).verifiedBindings(anyString(),anyString(),anyList());verify(f.evidence,never()).verifiedSemanticBindings(anyString(),anyString(),anyList());
+        verify(f.evidence,never()).currentBindings(anyString(),anyString(),anyList());assertEquals(1,f.scans);
+    }
+    @Test void reviewTextFailureSummaryPreservesTheGuardFailureWithoutEchoingIt()throws Exception {
+        Fixture f=reviewTextFixture();f.service.scan(f.session);clearInvocations(f.retrieval);
+        IllegalStateException failure=new IllegalStateException("PRIVATE_GUARD_SOURCE_BODY");
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs=new ch.qos.logback.core.read.ListAppender<>();logs.start();logger.addAppender(logs);
+        try{
+            assertSame(failure,assertThrows(IllegalStateException.class,()->f.service.retrieveReviewText(f.session,"PRIVATE_QUERY","tender",()->{throw failure;},200)));
+            List<String> summaries=new ArrayList<>();for(ch.qos.logback.classic.spi.ILoggingEvent event:logs.list)
+                if(event.getFormattedMessage().startsWith("Vetting evidence flow "))summaries.add(event.getFormattedMessage());
+            assertEquals(2,summaries.size());assertTrue(summaries.get(1).contains("status=failed phase=source_guard"));
+            assertTrue(summaries.get(1).contains("seeds=0 seedChars=0"));for(String summary:summaries){assertFalse(summary.contains("PRIVATE_"));assertTrue(summary.length()<850);}
+        }finally{logger.detachAppender(logs);logs.stop();}
+        verifyNoInteractions(f.retrieval);
+    }
+    @Test void reviewTextObservationFailureCannotChangeItsReturnedEvidence()throws Exception {
+        Fixture f=reviewTextFixture();List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);installRepeatedReviewSeed(f,scanned.get(1));clearInvocations(f.retrieval);
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);
+        ch.qos.logback.core.AppenderBase<ch.qos.logback.classic.spi.ILoggingEvent> broken=new ch.qos.logback.core.AppenderBase<ch.qos.logback.classic.spi.ILoggingEvent>(){
+            @Override protected void append(ch.qos.logback.classic.spi.ILoggingEvent event){if(event.getFormattedMessage().startsWith("Vetting evidence flow "))throw new AssertionError("AUTHORED observer failure");}
+        };broken.start();logger.addAppender(broken);
+        try{assertEquals(Arrays.asList("unit-0","unit-1","unit-2"),ids(f.service.retrieveReviewText(f.session,"Review notice obligations","tender",()->{},10000)));}
+        finally{logger.detachAppender(broken);broken.stop();}
+        verify(f.retrieval,times(1)).retrieveCompact(eq("vetting"),anyString(),anyString(),eq("tender"),anyList(),anyString(),any(),any(),any(),eq(true));
+    }
     @Test void dictionaryScanUsesAdvertisedCeilingAndPreservesOldServerFallback()throws Exception {
         Fixture wide=new Fixture(300,true,1024);wide.onScan=demand->assertEquals(1024,demand.path("maxItems").asInt());
         assertEquals(300,wide.service.scan(wide.session).size());assertEquals(1,wide.scans);
         Fixture old=new Fixture(300,true);old.onScan=demand->assertEquals(256,demand.path("maxItems").asInt());
-        assertEquals(300,old.service.scan(old.session).size());assertEquals(2,old.scans);
+        List<String> updates=new ArrayList<>();
+        assertEquals(300,old.service.scan(old.session,(processed,total)->updates.add(processed+"/"+total)).size());assertEquals(2,old.scans);
+        assertEquals(Arrays.asList("256/300","300/300"),updates);
     }
+    @Test void modelReviewStillRequiresItsCompleteScanBeforeRetrieval() throws Exception {
+        Fixture fixture=new Fixture(1,true);
+        assertThrows(IllegalStateException.class,()->fixture.service.retrieveReviewText(fixture.session,"authored query","tender",()->{}));
+        assertEquals(0,fixture.scans);
+    }
+    @Test void compactReviewExpandsItsScannedTextAndNamedFollowupWithoutHeavyReads()throws Exception {
+        Fixture f=reviewTextFixture();List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);
+        installRepeatedReviewSeed(f,scanned.get(1));clearInvocations(f.retrieval,f.evidence);
+        List<VettingCorpus.Chunk> first=f.service.retrieveReviewText(f.session,"Review notice obligations","tender",()->{},10000);
+        assertEquals(Arrays.asList("unit-0","unit-1","unit-2"),ids(first));
+        assertTrue(OerBusinessEvidence.rankedReviewOrigin(first,first.get(1)));
+        assertFalse(OerBusinessEvidence.rankedReviewOrigin(first,first.get(0)),"Context cannot replace the actual ranked tender anchor during later budgeting");
+        List<VettingCorpus.Chunk> next=f.service.retrieveReviewText(f.session,"Retrieve clause 8.1 for the earlier notice",null,()->{},20000);
+        assertEquals(Arrays.asList("unit-0","unit-1","unit-2","unit-3","unit-4"),ids(next));
+        assertEquals(scanned.get(4).getContent(),next.get(4).getContent());
+        assertEquals(JsonUtils.serializedSha256(scanned.get(4).getCanonicalEvidence()),JsonUtils.serializedSha256(next.get(4).getCanonicalEvidence()));
+        assertEquals("unknown",next.get(4).getCanonicalPayload().path("semanticUnit").path("status").asText());
+        verify(f.evidence,never()).verifiedBindings(anyString(),anyString(),anyList());
+        verify(f.evidence,never()).verifiedSemanticBindings(anyString(),anyString(),anyList());
+        verify(f.evidence,never()).currentBindings(anyString(),anyString(),anyList());
+        verify(f.retrieval,never()).readSemanticSources(any(),any());
+        verify(f.retrieval,never()).readSources(anyString(),any(),anyList());
+        assertEquals(1,f.scans);
+    }
+    @Test void compactReviewContextStillRejectsChangedSelectedTextAndCurrentSource()throws Exception {
+        Fixture f=reviewTextFixture();List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);installRepeatedReviewSeed(f,scanned.get(1));
+        f.service.retrieveReviewText(f.session,"Review notice obligations","tender",()->{},10000);
+        scanned.get(2).setContent("AUTHORED changed continuation");
+        assertTrue(assertThrows(IllegalStateException.class,()->f.service.retrieveReviewText(f.session,"Review notice obligations","tender",()->{},10000)).getMessage().contains("selected semantic view changed"));
+        doThrow(new IllegalStateException("AUTHORED current revision changed")).when(f.evidence).assertCompactCurrent(any());
+        assertEquals("AUTHORED current revision changed",assertThrows(IllegalStateException.class,()->f.service.retrieveReviewText(f.session,"Review notice obligations","tender",()->{},10000)).getMessage());
+    }
+    private static Fixture reviewTextFixture()throws Exception {
+        Fixture f=new Fixture(6,true,256,true,true);String[] texts={"5.7 Notice obligations","The Contractor shall give notice.","The notice shall include particulars.","8.1 Employer response","The Employer shall respond within fourteen days.","9.1 Unrelated payments"};
+        f.transformOrigin=origin->{int index=Integer.parseInt(origin.path("id").asText().substring(5));String text=texts[index];origin.put("text",text);origin.put("sourceOrder",index);
+            ObjectNode part=(ObjectNode)origin.path("parts").get(0);part.put("text",text);part.put("endOffset",text.length());};return f;
+    }
+    @SuppressWarnings("unchecked") private static void installRepeatedReviewSeed(Fixture f,VettingCorpus.Chunk seed)throws Exception {
+        Constructor<?> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);constructor.setAccessible(true);
+        OerBusinessEvidence.Session ranked=(OerBusinessEvidence.Session)constructor.newInstance("authored","vetting",Collections.singletonList(42L),Collections.emptyList(),new LinkedHashMap<>(),Collections.emptyMap());
+        ReflectionTestUtils.setField(ranked,"queryScope",Collections.emptyList());ReflectionTestUtils.setField(ranked,"querySourceGeneration","AUTHORED generation");ReflectionTestUtils.setField(f.session,"reviewQuery",ranked);
+        when(f.retrieval.retrieveCompact(eq("vetting"),anyString(),anyString(),nullable(String.class),anyList(),anyString(),any(),any(),any(),eq(true))).thenAnswer(call->{
+            Map<String,VettingCorpus.Chunk> byId=(Map<String,VettingCorpus.Chunk>)ReflectionTestUtils.getField(ranked,"byId");byId.put(seed.getId(),JsonUtils.read(JsonUtils.write(seed),VettingCorpus.Chunk.class));
+            ObjectNode response=JsonUtils.mapper().createObjectNode();response.putArray("hits").addObject().put("id",seed.getId());response.putObject("sourceUnits").putArray("units");return response;});
+    }
+    private static List<String> ids(List<VettingCorpus.Chunk> chunks){return chunks.stream().map(VettingCorpus.Chunk::getId).collect(java.util.stream.Collectors.toList());}
     @Test void sharedDictionaryGroupHasOneSessionTemplateAndOneModelSubmission()throws Exception {
         Fixture f=new Fixture(2,true);List<VettingCorpus.Chunk> chunks=f.service.scan(f.session);
         assertSame(chunks.get(0).getCanonicalPayload().path("semanticUnit"),chunks.get(1).getCanonicalPayload().path("semanticUnit"));
@@ -156,16 +278,83 @@ class OerSemanticBusinessEvidenceTest {
         Fixture f=new Fixture(2);VettingCorpus.Chunk chunk=f.service.scan(f.session).get(0);com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(chunk,"tender",chunk.getContent());
         assertTrue(quote.isLocated());assertNull(quote.getBbox());com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer original=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class);original.setAddressKind("normal_observed_unit");original.setProjectionSchema("consense.normal-observed.v1");original.setOriginalGeometryStatus("unknown");
         com.consense.web.dto.VettingDtos.FindingEvidence fixed=new com.consense.web.dto.VettingDtos.FindingEvidence();fixed.setLocated(true);fixed.setFixedBaselineEvidence(JsonUtils.parse("{\"authority\":\"authored-fixed-library\"}"));
-        when(f.evidence.pointer(eq("authored"),eq(42L),anyString(),eq("source-unit-0"),eq("vetting"))).thenReturn(original);f.service.bindReviewEvidence(f.session,Arrays.asList(quote,fixed,quote));
+        when(f.evidence.selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"))).thenReturn(Collections.singletonMap("source-unit-0",original));f.service.bindReviewEvidence(f.session,Arrays.asList(quote,fixed,quote));
         assertTrue(fixed.isLocated());assertNull(fixed.getCanonicalEvidence());assertEquals("authored-fixed-library",fixed.getFixedBaselineEvidence().path("authority").asText());
-        assertTrue(quote.isLocated());assertEquals("unknown",quote.getCanonicalEvidence().getOriginalGeometryStatus());assertNull(quote.getBbox());verify(f.evidence).pointer(eq("authored"),eq(42L),anyString(),eq("source-unit-0"),eq("vetting"));
+        assertTrue(quote.isLocated());assertEquals("unknown",quote.getCanonicalEvidence().getOriginalGeometryStatus());assertNull(quote.getBbox());verify(f.evidence).selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"));
+    }
+    @Test void severalQuotesFromOneSourceReadOnlyTheirSelectedOriginalUnitsTogether()throws Exception {
+        Fixture f=new Fixture(2);List<VettingCorpus.Chunk> chunks=f.service.scan(f.session);
+        com.consense.web.dto.VettingDtos.FindingEvidence first=VettingCorpus.evidence(chunks.get(0),"tender",chunks.get(0).getContent());
+        com.consense.web.dto.VettingDtos.FindingEvidence second=VettingCorpus.evidence(chunks.get(1),"tender",chunks.get(1).getContent());
+        Map<String,com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> originals=new LinkedHashMap<>();
+        for(VettingCorpus.Chunk chunk:chunks)originals.put(chunk.getCanonicalEvidence().getUnitId(),JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class));
+        List<String> units=Arrays.asList("source-unit-0","source-unit-1");
+        when(f.evidence.selectedPointers(eq("authored"),eq(42L),anyString(),eq(units),eq("vetting"))).thenReturn(originals);
+        f.service.bindReviewEvidence(f.session,Arrays.asList(first,second));
+        assertTrue(first.isLocated());assertTrue(second.isLocated());
+        verify(f.evidence).selectedPointers(eq("authored"),eq(42L),anyString(),eq(units),eq("vetting"));
+        verify(f.evidence,never()).pointer(anyString(),anyLong(),anyString(),anyString(),anyString());
+    }
+    @Test void deferredNormalScanKeepsExactTextAndPrivateSeedEligibilityWithoutMandatoryClosureRequests()throws Exception{
+        Fixture f=new Fixture(1030,true,1024,true,true);List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);
+        assertEquals(1030,scanned.size());for(int i=0;i<scanned.size();i++){assertEquals("unit-"+i,scanned.get(i).getId());assertEquals("AUTHORED obligation "+i,scanned.get(i).getContent());}
+        assertEquals(1030,OerBusinessEvidence.deferredTextOrigins(scanned).size());assertEquals(2,f.scans);
+        List<VettingRetrievalSourceUnits.Unit> units=VettingRetrievalSourceUnits.attached(scanned);assertTrue(units.stream().allMatch(unit->"unknown".equals(unit.status)&&unit.ids.isEmpty()));
+        VettingSemanticReview.FirstPass pass=VettingSemanticReview.firstPass(scanned);assertFalse(pass.deferredTextOrigins.isEmpty());assertTrue(pass.omittedOrigins>0);
+        VettingContextBuilder.Selection global=new VettingContextBuilder(pass.corpus).build("Records",pass.subjects,Collections.emptyMap(),20000);
+        VettingSourceRequestPacks.Result plan=new VettingSourceRequestPacks(pass.corpus,pass.deferredTextOrigins).planBounded("Records",pass.subjects,global,pass.units);
+        assertTrue(plan.getRequests().stream().noneMatch(request->"retrieved_structural_unit".equals(request.getKind())),"Unrequested deferred closure is not a mandatory failed source request");
+        assertEquals(pass.units.stream().map(unit->unit.originId).collect(java.util.stream.Collectors.toList()),plan.getOriginalRetrievedIds());
+        assertTrue(units.stream().allMatch(unit->Boolean.FALSE.equals(unit.trace.get("semanticScopeVerified"))));
+        com.consense.web.dto.VettingDtos.SemanticTopicVO audit=new com.consense.web.dto.VettingDtos.SemanticTopicVO();audit.setStatus("completed_empty");
+        com.consense.web.dto.VettingDtos.SemanticPacketVO packet=VettingPacketCoverage.packet(1,0,"full_scope",global.getChunks(),Collections.emptyList());packet.setInputBudgetStatus("observed_tokens");packet.setActualGatewayCallStarted(true);
+        VettingPacketCoverage.callResult(audit,packet);audit.getPacketAudits().add(packet);VettingPacketCoverage.finish(audit,plan);
+        assertEquals("not_completed",audit.getCheckState(),"Deferred context and a decoded packet never establish complete review coverage");
+    }
+    @Test void publicDeferredUnknownGroupsCannotCreateThePrivateSeedCapability()throws Exception{
+        Fixture f=new Fixture(1030,true,1024,true,true);List<VettingCorpus.Chunk> scanned=f.service.scan(f.session);
+        List<VettingCorpus.Chunk> publicCopy=new VettingRetrievalSourceUnits.RankedChunks(new ArrayList<>(scanned),VettingRetrievalSourceUnits.attached(scanned));
+        assertTrue(OerBusinessEvidence.deferredTextOrigins(publicCopy).isEmpty());VettingSemanticReview.FirstPass pass=VettingSemanticReview.firstPass(publicCopy);assertTrue(pass.deferredTextOrigins.isEmpty());
+        VettingContextBuilder.Selection global=new VettingContextBuilder(pass.corpus).build("Records",pass.subjects,Collections.emptyMap(),20000);
+        VettingSourceRequestPacks.Result plan=new VettingSourceRequestPacks(pass.corpus).planBounded("Records",pass.subjects,global,pass.units);
+        assertTrue(plan.getRequests().stream().anyMatch(request->"retrieved_structural_unit".equals(request.getKind())&&request.getUnknownReason()!=null));
+    }
+    @Test void deferredNormalQuoteStillRequestsAndChecksItsFullCurrentMember()throws Exception{
+        Fixture f=new Fixture(2,true,256,true,true);VettingCorpus.Chunk chunk=f.service.scan(f.session).get(0);
+        com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(chunk,"tender",chunk.getContent());
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class);
+        when(f.evidence.selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"))).thenReturn(Collections.singletonMap("source-unit-0",pointer));f.service.bindReviewEvidence(f.session,Collections.singletonList(quote));
+        assertTrue(quote.isLocated());verify(f.retrieval).readSemanticSources(any(),argThat(request->"ids".equals(request.path("operation").asText())&&request.path("originIds").size()==1&&"unit-0".equals(request.path("originIds").get(0).asText())));
+    }
+    @Test void deferredRankedCopyRetainsItsExactSourceQuoteBinding()throws Exception{
+        Fixture f=new Fixture(2,true,256,true,true);VettingCorpus.Chunk scanned=f.service.scan(f.session).get(0);
+        VettingCorpus.Chunk ranked=JsonUtils.read(JsonUtils.write(scanned),VettingCorpus.Chunk.class);
+        assertEquals(JsonUtils.serializedSha256(scanned.getCanonicalEvidence()),JsonUtils.serializedSha256(ranked.getCanonicalEvidence()));
+        com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(ranked,"source",ranked.getContent());
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer original=JsonUtils.read(JsonUtils.write(scanned.getCanonicalEvidence()),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class);
+        when(f.evidence.selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"))).thenReturn(Collections.singletonMap("source-unit-0",original));
+        f.service.bindReviewEvidence(f.session,Collections.singletonList(quote));
+        assertTrue(quote.isLocated(),"A ranked copy of an unchanged scanned source must remain locatable");
+    }
+    @Test void deferredRankedCopyStillRejectsAChangedSourceIdentity()throws Exception{
+        Fixture f=new Fixture(2,true,256,true,true);VettingCorpus.Chunk scanned=f.service.scan(f.session).get(0);
+        VettingCorpus.Chunk ranked=JsonUtils.read(JsonUtils.write(scanned),VettingCorpus.Chunk.class);
+        ranked.getCanonicalEvidence().setProjectionSha256(sha("AUTHORED changed projection"));
+        com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(ranked,"source",ranked.getContent());
+        f.service.bindReviewEvidence(f.session,Collections.singletonList(quote));
+        assertFalse(quote.isLocated());assertNull(quote.getCanonicalEvidence());
+        verify(f.evidence,never()).selectedPointers(anyString(),anyLong(),anyString(),anyList(),anyString());
+    }
+    @Test void interruptedDeferredScanCannotPublishEvenItsPrivateAdmissionSet()throws Exception{
+        Fixture f=new Fixture(1030,true,1024,true,true);f.onScan=request->{if(f.scans>0)throw new IllegalStateException("AUTHORED scan interrupted before complete exit");};
+        assertThrows(IllegalStateException.class,()->f.service.scan(f.session));assertEquals(0,f.session.chunkCount());assertTrue(OerBusinessEvidence.deferredTextOrigins(f.session.chunks()).isEmpty());
     }
     @Test void textFirstQuoteAttributionReadsTheSelectedFullMemberOnly()throws Exception {
         Fixture f=new Fixture(2,true,256,true);VettingCorpus.Chunk chunk=f.service.scan(f.session).get(0);
         assertFalse(chunk.getCanonicalPayload().has("sourceQuality"));
         com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(chunk,"tender",chunk.getContent());
         com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer original=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class);
-        when(f.evidence.pointer(eq("authored"),eq(42L),anyString(),eq("source-unit-0"),eq("vetting"))).thenReturn(original);
+        when(f.evidence.selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"))).thenReturn(Collections.singletonMap("source-unit-0",original));
         f.service.bindReviewEvidence(f.session,Collections.singletonList(quote));
         assertTrue(quote.isLocated());
         verify(f.retrieval).readSemanticSources(any(),argThat(demand->"ids".equals(demand.path("operation").asText())&&"unit-0".equals(demand.path("originIds").get(0).asText())));
@@ -362,6 +551,30 @@ class OerSemanticBusinessEvidenceTest {
         assertEquals(Arrays.asList(0,0),locatorCalls,"The actual OerBusinessEvidence locator loader must not run before a text-only gateway request");
         assertEquals(Arrays.asList(0,0),sourceLoads,"No complete normal source may be loaded before the model returns evidence needing it");verify(reader,never()).normalDocument(anyString(),anyLong(),anyString());
     }
+    @Test void qwenRepairNamesMissingEvidenceAndStillRequiresTheSuppliedSource()throws Exception {
+        SemanticCase f=semanticCase(true);QwenRun q=new QwenRun(f);
+        String supported=unknownRecord(f.chunks.get(0),"The quoted source text is available; the remaining procedure needs confirmation.");
+        ObjectNode missing=(ObjectNode)JsonUtils.parse(supported);((ObjectNode)missing.path("records").get(0)).remove("evidence");
+        String patch="{\"records\":"+VettingEvidenceRepairTest.patch(0,"R1",f.chunks.get(0).getContent())+"}";
+        q.answer=JsonUtils.write(missing);q.afterAnswer=()->q.answer=patch;
+        q.action(()->{
+            VettingSemanticReview.Result result=q.review();assertEquals(2,result.getActualGatewayCallCount());
+            assertEquals("SCHEMA_MISMATCH",packet(result).getAttempts().get(0).getValidationReason());
+            assertTrue(packet(result).getAttempts().get(1).getInput().path("messages").get(1).path("content").asText()
+                    .contains("zero-based recordIndex in [0]"));
+            assertEquals(patch,packet(result).getAttempts().get(1).getRawResponse());
+            assertEquals(1,packet(result).getVerifiedAssessments().size());return null;
+        });
+    }
+    @Test void qwenRankedCopyKeepsAnExactSourceAssessment()throws Exception {
+        SemanticCase f=semanticCase(true);QwenRun q=new QwenRun(f);
+        q.answer=unknownRecord(f.chunks.get(0),"The quoted source text is available; the remaining procedure needs confirmation.");
+        List<VettingCorpus.Chunk> ranked=new ArrayList<>();for(VettingCorpus.Chunk chunk:f.chunks)ranked.add(JsonUtils.read(JsonUtils.write(chunk),VettingCorpus.Chunk.class));
+        q.action(()->{
+            VettingSemanticReview.Result result=q.review(ranked);assertEquals(1,result.getActualGatewayCallCount());
+            assertEquals(1,packet(result).getVerifiedAssessments().size());assertTrue(packet(result).getVerifiedAssessments().get(0).getEvidence().get(0).isLocated());return null;
+        });
+    }
     @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"json","schema","business","foreignReference","noClaim"})
     void qwenSemanticUnusableOrClaimFreeRepliesDoNotLoadNormalLocators(String kind)throws Exception {
         SemanticCase f=semanticCase(true);QwenRun q=new QwenRun(f);CanonicalCurrentSourceReader reader=(CanonicalCurrentSourceReader)ReflectionTestUtils.getField(f.observed,"currentSources");clearInvocations(reader);
@@ -449,7 +662,7 @@ class OerSemanticBusinessEvidenceTest {
         if(normal){SourceDocument source=frozenQwenSource("normal-source",ObservedSourceClauseLocatorsTest::authoredSource);JsonNode graph=NormalSourceCandidateGraph.requireBound(source),canonical=null;
             for(JsonNode unit:graph.path("units"))for(JsonNode part:unit.path("parts"))if(part.path("text").asText().startsWith("NTT1 "))canonical=CanonicalWordSourceContextTest.canonical(graph,unit);
             assertNotNull(canonical);NormalFixture f=new NormalFixture(source,canonical,true);
-            when(f.evidence.pointer(eq(source.getProjectId()),eq(source.getId()),eq(f.binding.getProjectionSha256()),anyString(),eq("vetting"))).thenAnswer(call->f.selectedPointer());return new SemanticCase(f.service,f.session);}
+            when(f.evidence.selectedPointers(eq(source.getProjectId()),eq(source.getId()),eq(f.binding.getProjectionSha256()),anyList(),eq("vetting"))).thenAnswer(call->{Map<String,com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> selected=new LinkedHashMap<>();for(String unit:call.<List<String>>getArgument(3))selected.put(unit,f.selectedPointer());return selected;});return new SemanticCase(f.service,f.session);}
         OerBusinessEvidenceTest.Wire w=new OerBusinessEvidenceTest.Wire(true);w.document.setFileName("AUTHORED native.docx");
         Class<?> viewType=Class.forName(CanonicalEvidenceService.class.getName()+"$BindingView");Constructor<?> view=viewType.getDeclaredConstructor(CanonicalSourceBinding.class,JsonNode.class,boolean.class);view.setAccessible(true);
         Constructor<?> frames=CanonicalEvidenceService.VerifiedBindingFrame.class.getDeclaredConstructor(CanonicalEvidenceService.class,CanonicalEvidenceService.class,String.class,String.class,List.class);frames.setAccessible(true);
@@ -477,7 +690,17 @@ class OerSemanticBusinessEvidenceTest {
         void guard(){guards++;f.observed.assertCurrent(f.session);}
         <T>T action(java.util.concurrent.Callable<T> work)throws Exception {try(com.consense.ai.LlmProfiles.Scope profile=profiles.bind(chat);VettingSemanticReview.OperationScope operation=review.bindOperation(selected);com.consense.service.llm.QwenChatUsagePreflight.Operation.ActionScope action=selected.getQwen().openAction("vetting:AUTHORED_CONTEXT",this::guard)){return work.call();}}
         VettingInputBudget.Input input(List<VettingCorpus.Chunk> chunks)throws Exception{return completeInput(review,chunks,this::guard);}
-        VettingSemanticReview.Result review()throws Exception {Method method=VettingSemanticReview.class.getDeclaredMethod("reviewScanned",String.class,VettingSemanticReview.Result.class,List.class,List.class,String.class,List.class,Runnable.class,VettingReviewProbe.class);method.setAccessible(true);return (VettingSemanticReview.Result)method.invoke(review,f.session.projectId,new VettingSemanticReview.Result(),f.chunks,f.chunks,"en",null,(Runnable)this::guard,VettingReviewProbe.start(properties,null,"AUTHORED_CONTEXT"));}
+        VettingSemanticReview.Result review()throws Exception {return review(f.chunks);}
+        VettingSemanticReview.Result review(List<VettingCorpus.Chunk> submitted)throws Exception {
+            // These tests exercise source proof at the shared packet receiver; direction scheduling has its own hybrid fixtures.
+            VettingSemanticReview.Result result=new VettingSemanticReview.Result();result.setPlannedCallCount(1);
+            com.consense.web.dto.VettingDtos.SemanticTopicVO audit=new com.consense.web.dto.VettingDtos.SemanticTopicVO();audit.setTopicIndex(1);audit.setStatus("not_submitted");result.getTopicAudits().add(audit);
+            VettingContextBuilder.Selection selection=new VettingContextBuilder.Selection();selection.setChunks(submitted);selection.setContentChars(submitted.stream().mapToInt(c->c.getContent().length()).sum());
+            com.consense.web.dto.VettingDtos.SemanticPacketVO packet=VettingPacketCoverage.packet(1,0,"full_scope",submitted,Collections.emptyList());audit.getPacketAudits().add(packet);
+            Method method=VettingSemanticReview.class.getDeclaredMethod("executePacket",VettingSemanticReview.Result.class,com.consense.web.dto.VettingDtos.SemanticTopicVO.class,com.consense.web.dto.VettingDtos.SemanticPacketVO.class,VettingContextBuilder.Selection.class,String.class,String.class,boolean.class,List.class,int.class,VettingReviewProbe.Call.class,VettingInputBudget.Result.class,List.class,FixedVettingReferences.class,List.class,Runnable.class);method.setAccessible(true);
+            method.invoke(review,result,audit,packet,selection,"AUTHORED context seam","en",false,null,1,VettingReviewProbe.start(properties,null,"AUTHORED_CONTEXT").call(1,"AUTHORED context seam",null),null,f.chunks,FixedVettingReferences.empty(),null,(Runnable)this::guard);
+            VettingPacketCoverage.finish(audit,null);return result;
+        }
         ObjectNode proof(VettingInputBudget.Input input,VettingSemanticReview.Result result){ObjectNode proof=JsonUtils.mapper().createObjectNode();if(input!=null)proof.set("input",JsonUtils.mapper().valueToTree(input));proof.set("providerRequests",JsonUtils.mapper().valueToTree(requests));ArrayNode attempts=proof.putArray("attempts");for(com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt:packet(result).getAttempts()){ObjectNode row=attempts.addObject();row.set("input",attempt.getInput());row.put("status",attempt.getStatus()).put("validationReason",attempt.getValidationReason()).put("rawResponse",attempt.getRawResponse());}proof.put("actualGatewayCalls",result.getActualGatewayCallCount()).put("candidateCount",result.getCandidates().size()).put("verifiedAssessmentCount",packet(result).getVerifiedAssessments().size());return proof;}
     }
 
@@ -543,8 +766,12 @@ class OerSemanticBusinessEvidenceTest {
     private static OerCanonicalRetrievalClient.SemanticSources semanticSources(CanonicalSourceBinding binding,int count,boolean dictionary)throws Exception {return semanticSources(binding,count,dictionary,256);}
     private static OerCanonicalRetrievalClient.SemanticSources semanticSources(CanonicalSourceBinding binding,int count,boolean dictionary,int scanMaximumItems)throws Exception {return semanticSources(binding,count,dictionary,scanMaximumItems,false);}
     private static OerCanonicalRetrievalClient.SemanticSources semanticSources(CanonicalSourceBinding binding,int count,boolean dictionary,int scanMaximumItems,boolean textFirst)throws Exception {
+        return semanticSources(binding,count,dictionary,scanMaximumItems,textFirst,false);
+    }
+    private static OerCanonicalRetrievalClient.SemanticSources semanticSources(CanonicalSourceBinding binding,int count,boolean dictionary,int scanMaximumItems,boolean textFirst,boolean deferred)throws Exception {
         Class<?> capability=Class.forName(OerCanonicalRetrievalClient.class.getName()+"$Capability");Constructor<?> health=capability.getDeclaredConstructor(String.class,String.class,String.class,boolean.class,boolean.class,String.class);health.setAccessible(true);
         Object identity=health.newInstance(sha("health"),"AUTHORED source unit policy","unused",true,true,sha("software"));ObjectNode prepared=JsonUtils.mapper().createObjectNode();prepared.putArray("projectionSha256").add(binding.getProjectionSha256());prepared.putArray("readManifestSha256").add(sha("manifest"));prepared.put("readManifestToken",sha("token"));prepared.putArray("sources");if(dictionary)prepared.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);if(textFirst)prepared.put("semanticReadProfile",OerCanonicalRetrievalClient.TEXT_FIRST_PROFILE);
+        if(deferred){ReflectionTestUtils.setField(identity,"semanticDeferredTextFirst",true);prepared.put("semanticReadProfile",OerCanonicalRetrievalClient.DEFERRED_TEXT_FIRST_PROFILE);prepared.withArray("sources").addObject().put("documentId","42").put("producerKind","normal_observed").put("sourceHash",binding.getCanonicalSourceHash()).put("chunkCount",count);}
         Field maximum=capability.getDeclaredField("dictionaryScanMaximumItems");maximum.setAccessible(true);maximum.setInt(identity,scanMaximumItems);
         Constructor<?> sources=OerCanonicalRetrievalClient.SemanticSources.class.getDeclaredConstructor(String.class,String.class,capability,String.class,JsonNode.class,List.class,int.class);sources.setAccessible(true);
         return (OerCanonicalRetrievalClient.SemanticSources)sources.newInstance("vetting",binding.getScopePolicySha256(),identity,sha("runtime"),prepared,Collections.singletonList(binding),count);
@@ -572,16 +799,19 @@ class OerSemanticBusinessEvidenceTest {
         final CanonicalEvidenceService evidence=mock(CanonicalEvidenceService.class);
         final OerCanonicalRetrievalClient retrieval=mock(OerCanonicalRetrievalClient.class);
         final OerBusinessEvidence service=new OerBusinessEvidence(evidence,retrieval,new com.consense.config.CanonicalEvidenceProperties());
-        final OerBusinessEvidence.Session session;final OerCanonicalRetrievalClient.SemanticSources selected;int scans,catalogs;boolean blocked,invalidClosure,dictionary,blockedFirst,crossBatchTrace,sharedAll,repeatFirstAtEnd,changeRepeatedFirst;Consumer<JsonNode> onScan;
+        final OerBusinessEvidence.Session session;final OerCanonicalRetrievalClient.SemanticSources selected;int scans,catalogs;boolean blocked,invalidClosure,dictionary,blockedFirst,crossBatchTrace,sharedAll,repeatFirstAtEnd,changeRepeatedFirst;Consumer<JsonNode> onScan;Consumer<ObjectNode> transformOrigin;
         Fixture(int count)throws Exception {this(count,false);}
         Fixture(int count,boolean dictionary)throws Exception {this(count,dictionary,256);}
         Fixture(int count,boolean dictionary,int scanMaximumItems)throws Exception {this(count,dictionary,scanMaximumItems,false);}
         Fixture(int count,boolean dictionary,int scanMaximumItems,boolean textFirst)throws Exception {
+            this(count,dictionary,scanMaximumItems,textFirst,false);
+        }
+        Fixture(int count,boolean dictionary,int scanMaximumItems,boolean textFirst,boolean deferred)throws Exception {
             this.dictionary=dictionary;
             CanonicalSourceBinding binding=new CanonicalSourceBinding();binding.setId(3L);binding.setProjectId("authored");binding.setDocumentId(42L);binding.setProjectionSha256(sha("projection"));binding.setOriginalSourceSha256(sha("original"));binding.setJavaParsedSourceHash(sha("parsed"));binding.setCanonicalSourceHash(sha("canonical"));binding.setSourceRevisionSha256(sha("source revision"));binding.setProjectionRevisionSha256(sha("projection revision"));binding.setScopePolicySha256(sha("policy"));binding.setSnapshotBytesSha256(sha("snapshot"));binding.setSnapshotContentSha256(binding.getSnapshotBytesSha256());binding.setDeclaredModule("vetting");binding.setEligibleModulesJson("[\"vetting\"]");
             Constructor<?> compact=CanonicalEvidenceService.CompactBindingScope.class.getDeclaredConstructor(CanonicalEvidenceService.class,String.class,String.class,List.class,Map.class,Map.class,Map.class);compact.setAccessible(true);
             CanonicalEvidenceService.CompactBindingScope scope=(CanonicalEvidenceService.CompactBindingScope)compact.newInstance(evidence,"authored","vetting",Collections.singletonList(binding),Collections.emptyMap(),Collections.emptyMap(),Collections.emptyMap());
-            selected=semanticSources(binding,count,dictionary,scanMaximumItems,textFirst);
+            selected=semanticSources(binding,count,dictionary,scanMaximumItems,textFirst,deferred);
             SourceDocument document=new SourceDocument();document.setId(42L);document.setProjectId("authored");document.setFileKey("PRE");document.setFileName("AUTHORED PRE.docx");
             Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();for(int i=0;i<count;i++){contexts.put("unit-"+i,JsonUtils.parse("{\"observedSourceUnits\":{\"status\":\"unknown\",\"reason\":\"AUTHORED unverified table\"}}"));anchors.put("unit-"+i,Collections.singletonList("source anchor "+i));}
             com.consense.document.DocumentBlock nativeRule=new com.consense.document.DocumentBlock();nativeRule.setText("AUTHORED rule source");nativeRule.setOriginalText(nativeRule.getText());nativeRule.setSourcePosition(JsonUtils.parse("{\"kind\":\"docx_native\",\"nodePath\":\"/AUTHORED/native/footer\"}"));ObjectNode nativeContext=JsonUtils.mapper().createObjectNode();nativeContext.putObject(VettingPackageIdentity.CONTEXT).put("status","source_bound").put("storyKind","footer");nativeContext.putObject("nativeDocxSection").put("sectionId","AUTHORED native section");nativeRule.setReadingContext(nativeContext);
@@ -597,13 +827,14 @@ class OerSemanticBusinessEvidenceTest {
                     Set<String> known=new HashSet<>();for(JsonNode id:demand.path("knownSemanticGroups"))known.add(id.asText());
                     int offset=demand.path("cursor").asInt(0),end=Math.min(count,offset+demand.path("maxItems").asInt());
                     for(int i=offset;i<end;i++)if(blockedFirst&&i==0)response.withArray("blockedOrigins").addObject().put("id","unit-0").put("documentId","42").put("reason","semantic_member_or_group_too_large");else {
-                        boolean firstGroup=sharedAll||i<2||repeatFirstAtEnd&&i==1024;
-                        String group=firstGroup?sha("shared closure"):sha("closure"+i);
+                        boolean firstGroup=deferred||sharedAll||i<2||repeatFirstAtEnd&&i==1024;
+                        String group=deferred?sha(JsonUtils.write(OerCanonicalSourceUnits.sorted(deferredTemplate(selected.sourceCatalog().get(0))))):firstGroup?sha("shared closure"):sha("closure"+i);
                         if(declared.add(group)&&!known.contains(group)){ObjectNode unit=response.withArray("units").addObject();unit.put("groupId",group);ObjectNode template=unit.putObject("unit");
+                            if(deferred){unit.set("unit",deferredTemplate(selected.sourceCatalog().get(0)));}else{
                             template.put("unitId",firstGroup?sha("shared closure unit"):sha("closure unit"+i));template.put("status","complete_observed_unit");
                             ArrayNode required=template.putArray("requiredMemberIds");if(sharedAll)for(int member=0;member<count;member++)required.add("unit-"+member);else if(firstGroup){required.add("unit-0").add("unit-1");if(repeatFirstAtEnd)required.add("unit-1024");}else required.add("unit-"+i);
-                            if(changeRepeatedFirst&&i==1024)template.put("unitId",sha("tampered repeated group"));}
-                        ObjectNode origin=origin(binding,i);if(sharedAll)origin.put("producerKind","native_pdf");if(textFirst){origin.remove("unknowns");origin.remove("sourceQuality");}
+                            if(changeRepeatedFirst&&i==1024)template.put("unitId",sha("tampered repeated group"));}}
+                        ObjectNode origin=origin(binding,i);if(transformOrigin!=null)transformOrigin.accept(origin);if(sharedAll)origin.put("producerKind","native_pdf");if(textFirst){origin.remove("unknowns");origin.remove("sourceQuality");}
                         response.withArray("origins").add(origin);((ObjectNode)response.path("originUnits")).put("unit-"+i,group);}
                     coverage.put("processedOrigins",end);coverage.put("status",end<count?"partial":blockedFirst?"complete_with_blocked":"complete");if(end<count)response.put("nextCursor",end);return response;}
                 scans++;int offset=demand.path("cursor").asInt(0),end=Math.min(count,offset+demand.path("maxItems").asInt());coverage.put("status",blocked?"unit_too_large":end<count?"partial":"complete");coverage.put("processedOrigins",end);
@@ -619,6 +850,11 @@ class OerSemanticBusinessEvidenceTest {
         ObjectNode origin=JsonUtils.mapper().createObjectNode();origin.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);origin.put("id","unit-"+index);origin.put("unitId","source-unit-"+index);origin.put("documentId","42");origin.put("role","tender");origin.put("text","AUTHORED obligation "+index);origin.put("sourceHash",binding.getCanonicalSourceHash());origin.put("producerKind","normal_observed");origin.putArray("eligibleModules").add("vetting");origin.putArray("unknowns");origin.putObject("sourceQuality").put("semanticQuality","unknown");
         origin.putObject("evidenceRef").put("projectionSha256",binding.getProjectionSha256()).put("canonicalChunkId",origin.path("id").asText()).put("originalSourceSha256",binding.getOriginalSourceSha256());
         origin.putArray("parts").addObject().put("blockId","block-"+index).put("text",origin.path("text").asText()).put("startOffset",0).put("endOffset",origin.path("text").asText().length());origin.putObject("tableGroup").put("unit","days").put("qualifiersComplete","unknown");return origin;
+    }
+    private static ObjectNode deferredTemplate(JsonNode source){
+        ObjectNode address=JsonUtils.mapper().createObjectNode();address.set("source",source);address.put("reason","additional_source_context_deferred");
+        ObjectNode group=JsonUtils.mapper().createObjectNode();group.put("unitId",sha(JsonUtils.write(OerCanonicalSourceUnits.sorted(address))));group.set("documentId",source.path("documentId"));
+        group.put("kind","unknown");group.put("status","unknown");group.put("reason","additional_source_context_deferred");group.putArray("requiredMemberIds");group.putArray("blockIds");group.putNull("clauseId");group.put("derivedMembersCanBecomeOrigins",false);group.putNull("memberScores");group.put("qualifiersComplete","unknown");group.put("semanticScopeVerified",false);group.put("legalClosureVerified",false);return group;
     }
     private static String sha(String text){return VettingCorpus.hash(text);}
 }
