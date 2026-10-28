@@ -28,6 +28,11 @@ test('installed Mermaid really parses/renders a cited branching graph; invalid s
   const hyphenDocument = new JSDOM(hyphenIds, { contentType: 'image/svg+xml' }).window.document
   assert.equal(hyphenDocument.querySelectorAll('.flowchart-link').length, 2)
   assert.match(hyphenDocument.documentElement.textContent, /Authored example step/)
+  const escapedLabels = await renderAnswerFlowchart('flowchart TD\nn0["Employer #38; Contractor"] --> n1["#quot;quoted#quot; #35; reference"]')
+  const escapedDocument = new JSDOM(escapedLabels, { contentType: 'image/svg+xml' }).window.document
+  assert.match(escapedDocument.documentElement.textContent, /Employer & Contractor/)
+  assert.match(escapedDocument.documentElement.textContent, /"quoted" #\s*reference/)
+  assert.doesNotMatch(escapedDocument.documentElement.textContent, /&(?:#38|#35|quot);/)
   await assert.rejects(renderAnswerFlowchart('flowchart TD\nA["unclosed label'), /Parse|parse|syntax/i)
   dom.window.close()
 })

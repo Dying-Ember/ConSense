@@ -3,11 +3,12 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { answerParts, renderAnswerFlowchart } from '@/advice/answerFlowchart'
 import { renderAdviceMarkdown } from '@/advice/answerMarkdown'
+import AppModal from './AppModal.vue'
 
 const props = defineProps<{ content: string; citationIds?: string[] }>()
 const emit = defineEmits<{ citation: [id: string] }>()
 const { locale } = useI18n()
-const parts = ref<{ kind: 'text' | 'flowchart'; source: string; svg?: string; failed?: boolean }[]>([])
+const parts = ref<{ kind: 'text' | 'flowchart'; source: string; svg?: string; failed?: boolean; enlarged?: boolean }[]>([])
 let epoch = 0
 watch(() => props.content, async content => {
   const current = ++epoch
@@ -42,8 +43,20 @@ function openCitation(event: MouseEvent) {
     <template v-for="(part, index) in parts" :key="index">
       <div v-if="part.kind === 'text'" class="answer-markdown" v-html="renderAdviceMarkdown(part.source, citationIds)"></div>
       <figure v-else class="answer-flowchart">
-        <div v-if="part.svg" class="flowchart-graphic" role="img"
-          :aria-label="copy('Answer flowchart', '回答流程图', '回答流程圖')" v-html="part.svg"></div>
+        <button v-if="part.svg && !part.enlarged" class="btn flowchart-size" type="button" :aria-pressed="false" @click="part.enlarged = true">
+          {{ copy('Enlarge flowchart', '放大流程图', '放大流程圖') }}
+        </button>
+        <template v-if="part.svg">
+          <div v-if="!part.enlarged" class="flowchart-graphic" role="img"
+            :aria-label="copy('Answer flowchart', '回答流程图', '回答流程圖')" v-html="part.svg"></div>
+          <AppModal v-else class="flowchart-modal" :open="true" wide :title="copy('Answer flowchart', '回答流程图', '回答流程圖')" @close="part.enlarged = false">
+            <div class="flowchart-graphic enlarged" role="img"
+              :aria-label="copy('Answer flowchart', '回答流程图', '回答流程圖')" v-html="part.svg"></div>
+            <template #footer>
+              <button class="btn" type="button" :aria-pressed="true" @click="part.enlarged = false">{{ copy('Fit to panel', '适合面板', '適合面板') }}</button>
+            </template>
+          </AppModal>
+        </template>
         <p v-else-if="part.failed" class="warning-note" role="status">{{ copy('The flowchart could not be displayed. The original diagram text is retained below.', '流程图无法显示，原始图表文本保留如下。', '流程圖無法顯示，原始圖表文字保留如下。') }}</p>
         <p v-else role="status">{{ copy('Drawing flowchart…', '正在绘制流程图…', '正在繪製流程圖…') }}</p>
         <details :open="part.failed || undefined">
@@ -63,8 +76,12 @@ function openCitation(event: MouseEvent) {
 .answer-markdown :deep(th), .answer-markdown :deep(td) { border: 1px solid var(--line, #cbd5e1); padding: 7px 10px; text-align: start; vertical-align: top; }
 .answer-markdown :deep(.answer-citation) { color: var(--accent-dark, #1d4ed8); background: var(--accent-soft, #eff6ff); border: 0; border-radius: 4px; padding: 1px 4px; font: inherit; cursor: pointer; }
 .answer-flowchart { margin: 12px 0; }
+.flowchart-size { margin-bottom: 8px; }
 .flowchart-graphic { overflow: auto; max-width: 100%; background: #fff; color: #172b4d; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
 .flowchart-graphic :deep(svg) { display: block; min-width: 360px; max-width: 100%; height: auto; font: 14px sans-serif; }
+.flowchart-modal :deep(.modal.wide) { width: min(1600px, 100%); }
+.flowchart-graphic.enlarged { max-height: calc(88vh - 150px); }
+.flowchart-graphic.enlarged :deep(svg) { min-width: 1200px; max-width: none; }
 .flowchart-graphic :deep(text) { fill: #172b4d; }
 .flowchart-graphic :deep(.node text) { text-anchor: middle; }
 .flowchart-graphic :deep(.node rect), .flowchart-graphic :deep(.node polygon), .flowchart-graphic :deep(.node circle), .flowchart-graphic :deep(.node ellipse), .flowchart-graphic :deep(.cluster rect) { fill: #f1f5f9; stroke: #475569; stroke-width: 1.5px; }

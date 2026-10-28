@@ -23,6 +23,15 @@ test('untrusted SVG loses scripts, external resources, inline CSS and active HTM
   assert.doesNotMatch(svg, /script|style=|<style|href|foreignObject|iframe|<image|<a\b|https:/)
 })
 
+test('label entity repair changes text only once and cannot create markup or attributes', async () => {
+  const helper = load(async () => ({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text data-label="&amp;quot;">&amp;#38; &amp;#35; &amp;quot; &amp;#38;quot; &lt;script&gt;run()&lt;/script&gt;</text></svg>' }))
+  const svg = await helper.renderAnswerFlowchart('flowchart TD\nA[Start]-->B[Finish]')
+  const document = new JSDOM(svg, { contentType: 'image/svg+xml' }).window.document
+  assert.equal(document.querySelector('text').textContent, '& # " &quot; <script>run()</script>')
+  assert.equal(document.querySelector('text').getAttribute('data-label'), '&quot;')
+  assert.equal(document.querySelector('script'), null)
+})
+
 test('directives cannot override strict rendering and malformed input does not run the renderer', async () => {
   let count = 0
   const helper = load(async () => { count++; return { svg: '<svg></svg>' } })
@@ -83,6 +92,32 @@ test('failed diagram displays an explicit message and the entire literal source 
     assert.equal(find(h.root, node => node.tag === 'pre').text, 'flowchart TD\nA-->B\n')
     assert.equal(find(h.root, node => node.tag === 'details').props.open, true)
     assert.match(visibleText(h.root), /Before \[1\]/); assert.match(visibleText(h.root), /After \[1\]/)
+  } finally { h.dispose() }
+})
+
+test('the visible size toggle opens a wide diagram dialog without rerendering or losing source text', async () => {
+  let renders = 0
+  const h = await component(async () => { renders++; return { svg: '<svg viewBox="0 0 1132 3566"><text>Draft procedure [1]</text></svg>' } })
+  try {
+    const graphic = find(h.root, node => node.props?.role === 'img')
+    const source = find(h.root, node => node.tag === 'pre').text
+    const toggle = find(h.root, node => node.tag === 'button' && text(node) === 'Enlarge flowchart')
+    assert.ok(toggle, 'The size action must be visible outside Diagram source')
+    assert.equal(toggle.props.type, 'button')
+    assert.equal(toggle.props['aria-pressed'], false)
+    toggle.props.onClick(); await settle()
+    const dialog = find(h.root, node => node.props?.role === 'dialog')
+    assert.ok(dialog, 'An enlarged chart must not stay inside the narrow chat column')
+    assert.equal(dialog.props['aria-modal'], 'true')
+    assert.equal(find(dialog, node => node.props?.role === 'img').props.innerHTML, graphic.props.innerHTML)
+    const fit = find(h.root, node => node.tag === 'button' && text(node) === 'Fit to panel')
+    assert.equal(fit.props['aria-pressed'], true)
+    assert.equal(find(h.root, node => node.tag === 'pre').text, source)
+    assert.match(visibleText(h.root), /Before \[1\][\s\S]*Draft procedure \[1\][\s\S]*After \[1\]/)
+    fit.props.onClick(); await settle()
+    assert.equal(find(h.root, node => node.props?.role === 'dialog'), undefined)
+    assert.equal(find(h.root, node => node.props?.role === 'img').props.innerHTML, graphic.props.innerHTML)
+    assert.equal(renders, 1, 'Changing display size must not rerun the diagram renderer')
   } finally { h.dispose() }
 })
 
