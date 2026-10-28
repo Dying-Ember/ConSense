@@ -1,6 +1,12 @@
 # Drafting 分组、并发与前端反馈验证（2026-10-28）
 
-## 当前检查点：build31、通信候选与内置浏览器续跑（2026-10-29）
+## 用户决定与调用口径检查点（2026-10-29）
+
+负责会话在 `2026-10-28T23:04:02Z` 的本机回执记录了用户答复：**以当前 Word SCC 为准，逐项核对冲突**。回执为 `template-variation-probe/scc-word-authority-human-decision-20261029.json`，SHA-256 `d9ecc27e4ed9b3b9963d552b0100f309f1234153860174fe8b61d7423937dc23`；其指定 source 25 的 DOCX SHA-256 为 `9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208`。NSC 通信事实继续保留；条号、适用性和付款主体仍须逐项对照该 Word 版本，不能把选定依据写成冲突已解决、图谱已确认或业务已验收。
+
+build36 SCT 封存诊断中，30 个来源组的 receipt.modelCalls 合计 **43 次**；`LINKING_GRAPH` 另记录 **2 次**原始回复（含一次上下文轮），两个记录阶段合计 **45 次**。导出未包含 reservation ledger，不能据此宣称最终 provider 总调用或生命周期预算。30 个来源组的专用 `scope_rule_local_value_reference_requires_atomic_treatment` 修补原因出现 **0 次**；任务序号 113 的两次调用属于 `source_scope_disposition_missing`／`scope_semantic_reference_without_bound_target` 等普通具名语义范围修补，不能称本轮真实验证了新 namespace 专用修补。各阶段、来源身份和原有失败继续保留；完整业务验收仍未完成。具体导出身份、软件门及失败见[源码同步检查点](source-sync-checkpoint-20261028.md)。
+
+## 历史检查点：build31、通信候选与内置浏览器续跑（2026-10-29）
 
 build31已实际替换本任务build30：Java26224／18204、exec12679，04:51:26上海日志就绪；JAR SHA256 `AE1B061DB410682BED5423BC7F082204104404AD2FE7C8F889E4FE4A2FA83E5D`。以runtime30冻结src/pom为基底，仅覆盖AutomaticDiscovery、AutomationService、CurrentTemplateAlignment、KnownRoots、TemplateGraphService、DraftingService六个生产文件，其余376个生产／资源文件逐字保持。核验旧Java50084及JAR后通过原exec52195中断，确认退出；原DB、uploads、home/temp、8GiB及模型设置保持。frontend18 Node39904／5185继续使用，其他模块服务未操作。配置仅另存日志名；本机回执在`template-variation-probe/build31-replacement.json`。
 

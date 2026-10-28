@@ -1,3 +1,6 @@
+<!-- drafting-project-scc-authority-20261029 -->
+**Drafting 项目版次决定（2026-10-29）：** 用户已决定，本次项目以当前上传的 Word SCC 为准逐项对照冲突，NSC 通信事实继续保留；这不代表条号、适用性或付款主体冲突已解决。此决定仅适用于本项目，不推广为其他项目的选版规则。source 25 身份、决定回执及未决事项见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)。
+
 <!-- source-sync-20261029-795e473f -->
 **源码同步入口（2026-10-29）：** 截至上海时间约 04:17，已发布源码包含 Drafting 增量来源选择、混合分组／插入点取证、定义审核状态及 SCT 范围修复，以及 Vetting 分组取证和正文选择修复；当时四个 Git 引用均指向 `795e473f797d0c0478baadef6b750cd846dcd139`。具体提交、隔离软件门及其边界见[同步检查点](testing/source-sync-checkpoint-20261028.md)，Drafting 运行及实测见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)。并行会话的后续修改和运行仍在进行，以各自后续回执为准；源码发布或软件测试不等于真实模型、原件质量或业务验收通过。
 
