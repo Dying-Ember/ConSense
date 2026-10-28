@@ -633,7 +633,9 @@ public class DraftingService {
         for(String part:Arrays.asList("number","title"))if(!DraftBusinessRules.answered(DraftBusinessRules.asMap(effective).get(part)))unresolved(result).add(DraftBusinessRules.map("id","input-contractTitle-"+part,"kind","InputMissing","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Complete the adopted project "+part+"; temporary project metadata is not a source fact.")));
         if(review)unresolved(result).add(DraftBusinessRules.map("id","review-contractTitle","kind","input_review","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Project identity or its source changed. Review the adopted value.")));
         if(Boolean.TRUE.equals(result.remove("fixedRuleBaselinePresent")))DraftExecutionBridge.prepare(templateGraphService.compilationGraph(result),result);
-        result.put("snapshotId",snapshotId(projectId,patches));result.put("savedSnapshotId",snapshotId(projectId,null));result.put("preview",patches!=null);return result;
+        Object identityState=identitySnapshot(projectId);Object graphSnapshot=patches!=null&&patches.containsKey("contractTitle")?templateGraphService.snapshotId(projectId,patches):result.get("snapshotId");
+        String snapshot=DraftAdoption.hash(JsonUtils.write(Arrays.asList(graphSnapshot,identityState,patches,DraftNativeIdentity.INTEGRATION_VERSION)));
+        result.put("savedSnapshotId",patches==null?snapshot:DraftAdoption.hash(JsonUtils.write(Arrays.asList(result.get("savedSnapshotId"),identityState,null,DraftNativeIdentity.INTEGRATION_VERSION))));result.put("snapshotId",snapshot);result.put("preview",patches!=null);return result;
     }
     private void requireIdentitySources(String projectId,DraftVariable variable,List<Map<String,Object>> bindings) {
         List<CandidateVO> adopted=new ArrayList<>();

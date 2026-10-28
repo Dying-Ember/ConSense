@@ -128,6 +128,8 @@ final class DraftCurrentTemplateAlignment {
             // Match the complete registered wording, not the current paragraph number or a shared topic.
             // These notes ask the same domestic-block fact; their clauses and edit scopes remain separate.
             if(instruction.equals(standardInstruction(547))||instruction.equals(standardInstruction(859))||instruction.equals(standardInstruction(895)))return "domesticBlocks";
+            // Explicit BQ issue notes identify the definition even when their clause only lists submission requirements.
+            if(instruction.equals(standardInstruction(60,65,66))||instruction.equals(standardInstruction(231,236))||instruction.equals(standardInstruction(518,523)))return "electronicTendering";
             boolean electronic=false,paper=false;
             for(Object raw:list(payload.get("scopeCandidates"))) {
                 JsonNode scope=JsonUtils.mapper().valueToTree(raw);String full=scope.path("text").asText();
@@ -137,8 +139,6 @@ final class DraftCurrentTemplateAlignment {
             }
             // A generic a/b selection needs both BQ alternatives in this task's own current context.
             if((instruction.equals(standardInstruction(55))||instruction.equals(standardInstruction(476)))&&electronic&&paper)return "electronicTendering";
-            if(instruction.equals(standardInstruction(60,65,66))&&electronic)return "electronicTendering";
-            if((instruction.equals(standardInstruction(231,236))||instruction.equals(standardInstruction(518,523)))&&paper)return "electronicTendering";
             return "";
         }
 

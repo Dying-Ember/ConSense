@@ -99,6 +99,15 @@ final class DraftKnownRoots {
         }
         List<Map<String,Object>> roots(){List<Map<String,Object>> result=new ArrayList<>();for(Map<String,Object> node:roots.values())result.add(copy(node));return result;}
         boolean has(String id){return roots.containsKey(id);}
+        boolean currentOwnerProof(String rootId,String taskId){
+            return roots.containsKey(rootId)&&owners.getOrDefault(rootId,Collections.emptySet()).contains(taskId)
+                    &&!quotes.getOrDefault(rootId,Collections.emptyMap()).getOrDefault(taskId,"").trim().isEmpty()&&taskSources.containsKey(taskId);
+        }
+        boolean currentPrerequisiteProof(String rootId,String taskId,String originBaselineKey){
+            for(String origin:roots.keySet())if(!origin.equals(rootId)&&(originBaselineKey==null||originBaselineKey.equals(wireIds.get(origin)))
+                    &&dependencies.getOrDefault(origin,Collections.emptySet()).contains(rootId)&&currentOwnerProof(origin,taskId))return true;
+            return false;
+        }
         boolean accepts(Map<String,Object> node){Map<String,Object> expected=roots.get(text(node.get("id")));return expected!=null&&core(expected).equals(core(node));}
         Map<String,Map<String,Object>> forTasks(Collection<?> taskIds) {
             Set<String> requested=new HashSet<>();for(Object task:taskIds)requested.add(text(task));Set<String> available=new HashSet<>();for(String id:roots.keySet())if(!Collections.disjoint(owners.get(id),requested)||!Collections.disjoint(readers.getOrDefault(id,Collections.emptySet()),requested))available.addAll(dependencies.get(id));

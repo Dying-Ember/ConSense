@@ -28,6 +28,8 @@ public final class DraftAutomaticDiscovery {
         private final Map<String,Object> coverage=obj("scope","template_oer_requirements_with_native_member_audit","sources",new ArrayList<>(),"totalMembers",0,"blankMembers",0,"blockedMembers",0,"sourceIssues",0);
         public List<Map<String,Object>> tasks(){return Collections.unmodifiableList(tasks);}
         public Map<String,Object> coverage(){return Collections.unmodifiableMap(coverage);}
+        boolean currentOwnerProof(String rootId,String taskId){return knownRoots.currentOwnerProof(rootId,taskId);}
+        boolean currentPrerequisiteProof(String rootId,String taskId,String origin){return knownRoots.currentPrerequisiteProof(rootId,taskId,origin);}
         public Map<String,Object> descriptor(){return obj("revision","automatic-template-oer-v4-stable-business-ids","sourceIds",new ArrayList<>(new TreeSet<>(readings.keySet())),"tasks",tasks(),"restoredDefinitionIds",restoredDefinitions.stream().map(node->node.get("id")).collect(java.util.stream.Collectors.toList()),"knownRoots",knownRoots.descriptor(),"coverage",coverage());}
     }
 
@@ -88,12 +90,49 @@ public final class DraftAutomaticDiscovery {
     public static List<Map<String,Object>> planGroups(Plan plan) {
         synchronized(plan){if(plan.groups==null)plan.groups=DraftDiscoveryGroups.plan(plan.readings,plan.tasks,plan.restoredDefinitions,plan.currentTemplateIndexes);return Collections.unmodifiableList(plan.groups);}
     }
+    /** A compatible continuation keeps its original dispatch identities and exact source partition. */
+    static List<Map<String,Object>> frozenGroups(Plan plan,List<Map<String,Object>> groups){
+        Map<String,Map<String,Object>> tasks=new HashMap<>();for(Map<String,Object> task:plan.tasks)tasks.put(text(task.get("taskId")),task);
+        Set<String> covered=new HashSet<>(),groupIds=new HashSet<>();List<Map<String,Object>> frozen=new ArrayList<>();
+        for(Map<String,Object> group:groups){
+            String id=text(group.get("taskId"));List<?> ids=list(group.get("taskIds"));
+            if(ids.isEmpty()||!"GROUP_DISCOVERY".equals(group.get("phase"))||!id.equals("group-"+DraftAdoption.hash(JsonUtils.write(ids)).substring(0,24))||!groupIds.add(id))throw invalid("CONTINUATION_FROZEN_GROUP_ID_INVALID");
+            Set<String> sources=new HashSet<>(),members=new HashSet<>();
+            for(Object raw:ids){
+                String taskId=text(raw);Map<String,Object> task=tasks.get(taskId);
+                if(task==null||!covered.add(taskId))throw invalid("CONTINUATION_FROZEN_TASK_PARTITION_INVALID");
+                String source=text(task.get("sourceId"));sources.add(source);for(Object member:list(task.get("memberIds")))members.add(source+"|"+member);
+            }
+            Set<String> declared=new HashSet<>();for(Object source:list(group.get("sourceIds")))if(!(source instanceof String)||!declared.add(text(source)))throw invalid("CONTINUATION_FROZEN_SOURCE_INVALID");
+            if(!sources.equals(declared)||!Objects.equals(group.get("memberCount"),members.size()))throw invalid("CONTINUATION_FROZEN_SOURCE_INVALID");
+            Set<String> identities=new HashSet<>();
+            for(Object raw:list(group.get("sources"))){
+                Map<String,Object> identity=map(raw);String source=text(identity.get("sourceId"));JsonNode reading=plan.readings.get(source);
+                if(reading==null||!sources.contains(source)||!identities.add(source))throw invalid("CONTINUATION_FROZEN_SOURCE_INVALID");
+                Map<String,Object> expected=obj("sourceId",source);
+                for(String key:Arrays.asList("sourceSha256","analysisRevision","analysisInputSha256","analysisSha256","fileKey","editionId","format"))if(reading.hasNonNull(key))expected.put(key,JsonUtils.mapper().convertValue(reading.get(key),Object.class));
+                if(!expected.equals(identity))throw invalid("CONTINUATION_FROZEN_SOURCE_INVALID");
+            }
+            if(!sources.equals(identities))throw invalid("CONTINUATION_FROZEN_SOURCE_INVALID");frozen.add(JsonUtils.readMap(JsonUtils.write(group)));
+        }
+        if(!covered.equals(tasks.keySet()))throw invalid("CONTINUATION_FROZEN_TASK_PARTITION_INVALID");
+        synchronized(plan){plan.groups=Collections.unmodifiableList(frozen);}return planGroups(plan);
+    }
     public static Map<String,Object> processGroup(BiFunction<String,String,String> call,Plan plan,Map<String,Object> group) {
         return processGroup(call,plan,group,false);
     }
     public static Map<String,Object> processGroup(BiFunction<String,String,String> call,Plan plan,Map<String,Object> group,boolean failFast) {
         return processGroup(call,plan,group,failFast,null);
     }
+    static boolean initialGroupPacketFits(Plan plan,Map<String,Object> group){
+        List<Map<String,Object>> tasks=new ArrayList<>();for(Map<String,Object> task:plan.tasks)if(list(group.get("taskIds")).contains(task.get("taskId")))tasks.add(task);
+        Map<String,Object> payload=initialGroupPayload(plan,tasks,group);String user=JsonUtils.write(DraftDiscoveryReferences.group(payload).encode(payload));
+        return "ready".equals(group.get("status"))&&initialGroupPrompt(payload).length()+user.length()<=DraftDiscoveryGroups.MAX_PACKET_CHARS;
+    }
+    private static Map<String,Object> initialGroupPayload(Plan plan,List<Map<String,Object>> tasks,Map<String,Object> group){
+        Map<String,Object> payload=DraftDiscoveryGroups.payload(plan.readings,tasks,plan.restoredDefinitions,plan.currentTemplateIndexes);payload.put("knownRoots",knownRootPacket(plan,list(group.get("taskIds"))));return DraftScopeConditionReview.enrich(payload);
+    }
+    private static String initialGroupPrompt(Map<String,Object> payload){return (DraftDiscoveryGroups.knownDefinitionsComplete(payload)?scopeGroupPrompt():groupPrompt())+DraftDiscoveryReferences.promptInstruction();}
     /** Live coordinator supplies its existing dispatch counter; source-only callers retain attempt accounting. */
     static Map<String,Object> processGroup(BiFunction<String,String,String> call,Plan plan,Map<String,Object> group,boolean failFast,IntSupplier dispatched) {
         requireTask(planGroups(plan),group);List<Map<String,Object>> tasks=new ArrayList<>();for(Map<String,Object> task:plan.tasks)if(list(group.get("taskIds")).contains(task.get("taskId")))tasks.add(task);
@@ -103,8 +142,8 @@ public final class DraftAutomaticDiscovery {
         try {
             if(!"ready".equals(group.get("status")))throw invalid("group_source_context_exceeds_packet_budget");
             for(JsonNode reading:readings)if(!"bound".equals(reading.path("evidenceStatus").asText()))throw invalid("group_source_evidence_unavailable");
-            payload=DraftDiscoveryGroups.payload(plan.readings,tasks,plan.restoredDefinitions,plan.currentTemplateIndexes);payload.put("knownRoots",knownRootPacket(plan,list(group.get("taskIds"))));payload=DraftScopeConditionReview.enrich(payload);scopeDuties=scopeDuties(plan,payload);references=DraftDiscoveryReferences.group(payload);
-            String prompt=(DraftDiscoveryGroups.knownDefinitionsComplete(payload)?scopeGroupPrompt():groupPrompt())+DraftDiscoveryReferences.promptInstruction(),user=JsonUtils.write(references.encode(payload));receipt.put("systemPrompt",prompt);receipt.put("userPrompt",user);
+            payload=initialGroupPayload(plan,tasks,group);scopeDuties=scopeDuties(plan,payload);references=DraftDiscoveryReferences.group(payload);
+            String prompt=initialGroupPrompt(payload),user=JsonUtils.write(references.encode(payload));receipt.put("systemPrompt",prompt);receipt.put("userPrompt",user);
             if(user.length()+prompt.length()>DraftDiscoveryGroups.MAX_PACKET_CHARS)throw invalid("group_source_context_exceeds_packet_budget");
             probe=DraftDiscoveryProbe.begin(receipt,prompt,user,payload,"",0);
             receipt.put("modelCalls",1);String raw;

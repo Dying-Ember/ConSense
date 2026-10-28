@@ -7,6 +7,7 @@ import com.consense.repository.*;
 import com.consense.service.ProjectService;
 import com.consense.service.llm.QwenGenerationLedger;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -159,6 +160,7 @@ public class DraftAutomationService {
     }
     private void execute(String id,LlmOperation selected) {
         DraftAutomationRun run=runs.findById(id).orElse(null);if(run==null)return;
+        boolean savedContinuationPreflight=false;
         try(LlmProfiles.Scope ignored=profiles.bind(selected)) {
             guard(run,false);change(id,row->{row.setStatus("RUNNING");row.setPhase("PREPARING_SOURCES");row.setMessage("读取模板专用OER已存的指导说明、修改标记、控制范围和条件；此处不重复解析文件。");});
             List<JsonNode> readings=new ArrayList<>();Set<String> work=selectedSources(run.getManifestJson());Map<String,Object> base=graphs.automationInput(run.getProjectId(),run.getExpectedCurrentRevisionId(),run.getExpectedDraftRevisionId(),work,readings);
@@ -175,7 +177,13 @@ public class DraftAutomationService {
             guard(run,false);phase(id,"PLANNING",null,"按模板专用OER观察建立整套变量识别任务及来源覆盖清单。");
             DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(readings,base);
             boolean continuing=!continuationTasks(run.getManifestJson()).isEmpty();
+            savedContinuationPreflight=continuing&&run.getResultRevisionId()!=null;
             List<Map<String,Object>> groups=executionGroups(run.getManifestJson(),plan,continuing);
+            if(savedContinuationPreflight&&groups!=null){
+                Set<String> pending=new HashSet<>();for(DraftAutomationItem item:items.findByRunIdOrderByTaskOrderAsc(id))if("PENDING".equals(item.getStatus()))pending.add(item.getTaskId());
+                for(Map<String,Object> group:groups)if(pending.contains(text(group.get("taskId")))&&!DraftAutomaticDiscovery.initialGroupPacketFits(plan,group))throw conflict("续跑当前初始请求超过分组上下文预算：group_source_context_exceeds_packet_budget；分组 "+text(group.get("taskId"))+" 未派发。");
+            }
+            savedContinuationPreflight=false;
             String manifest=groups==null?JsonUtils.write(plan.descriptor()):groupManifest(plan,groups);
             change(id,row->{row.setManifestJson(preserveFirstProbeFailure(manifest,row.getManifestJson()));row.setTotalItems(plan.tasks().size());});
             ensureItems(id,plan.tasks());
@@ -196,6 +204,9 @@ public class DraftAutomationService {
             final boolean incomplete=partial;change(id,row->{String probeStop=continuing?cycleProbeStop:firstProbeReason(row.getManifestJson(),fallbackProbeStop);row.setStatus(!probeStop.isEmpty()?"PARTIAL":row.isCancelRequested()?"CANCELLED":incomplete?"PARTIAL":"COMPLETED");row.setPhase("READY_FOR_REVIEW");row.setCurrentFile(null);
                 row.setMessage(!probeStop.isEmpty()?"验收探针发现明确缺陷，已停止并保存已有结果；未派发事项保留待处理。原因："+probeStop:row.isCancelRequested()?"已停止，已识别的图谱结果已保存；未执行项和未决事项继续待核对。":incomplete?"可用图谱已保存；部分来源或关系仍需人工核对。确认变量定义后可单独提取项目候选。":"模板识别结果已保存。请先核对变量定义，再单独提取项目候选；不会自动采用。");});
         }catch(Throwable failure){
+            if(savedContinuationPreflight&&failure instanceof BizException&&(((BizException)failure).getCode()==4090||((BizException)failure).getCode()==4012&&String.valueOf(failure.getMessage()).startsWith("CONTINUATION_FROZEN_"))){
+                String reason=PublicErrorMessages.from(failure,"续跑计划不兼容。");change(id,row->{row.setStatus("PARTIAL");row.setPhase("READY_FOR_REVIEW");row.setCurrentFile(null);row.setMessage("续跑预检未通过，未新增模型调用；原结果、未派发组及累计预算保留。原因："+reason);});return;
+            }
             if(failure instanceof VirtualMachineError){try{fail(id,"INTERRUPTED","识别任务因资源错误中断；已保存的分项结果保留，未知调用不会重发。");}finally{throw (VirtualMachineError)failure;}}
             fail(id,cancelled(id)?"CANCELLED":failure instanceof InterruptedException?"INTERRUPTED":"FAILED",PublicErrorMessages.from(failure,"识别任务未完成；已保存的分项结果保留，请核对来源与服务状态。"));
         }
@@ -205,6 +216,12 @@ public class DraftAutomationService {
     private List<Map<String,Object>> executionGroups(String existing,DraftAutomaticDiscovery.Plan plan){return executionGroups(existing,plan,false);}
     private List<Map<String,Object>> executionGroups(String existing,DraftAutomaticDiscovery.Plan plan,boolean continuing){
         String previous=existing;existing=executionManifest(existing);if(!hasExecutionPlan(existing))existing=null;
+        if(continuing&&existing!=null&&GROUP_EXECUTION.equals(JsonUtils.parse(existing).path("execution").asText())){
+            JsonNode saved=JsonUtils.parse(existing);
+            String[] rejectedPath={"execution.plan"};if(!referenceSupplementCompatible(saved,plan,groupConcurrency,rejectedPath))throw conflict("续跑计划不兼容："+rejectedPath[0]+"；来源、任务、业务根核心或已核证明不符合只读context补充条件。");
+            List<Map<String,Object>> frozen=new ArrayList<>();for(JsonNode group:saved.path("groups"))frozen.add(JsonUtils.readMap(group.toString()));
+            return DraftAutomaticDiscovery.frozenGroups(plan,frozen);
+        }
         if(existing!=null&&sameExecutionPlan(existing,executionManifest(preserveFirstProbeFailure(JsonUtils.write(plan.descriptor()),previous))))return null;
         List<Map<String,Object>> groups=DraftAutomaticDiscovery.planGroups(plan);
         String current=executionManifest(preserveFirstProbeFailure(groupManifest(plan,groups),previous));
@@ -234,6 +251,59 @@ public class DraftAutomationService {
         JsonNode oldRoots=before.path("plan").path("knownRoots"),newRoots=after.path("plan").path("knownRoots");if(oldRoots.size()!=newRoots.size())return false;
         for(int i=0;i<oldRoots.size();i++){JsonNode old=oldRoots.path(i),next=newRoots.path(i);if(old.path("existing").isBoolean()&&!old.path("existing").asBoolean()&&next.path("existing").isBoolean()&&next.path("existing").asBoolean())((com.fasterxml.jackson.databind.node.ObjectNode)next).put("existing",false);}
         return before.equals(after);
+    }
+    /** Only a freshly native-verified Plan may add proof to an unchanged saved execution. */
+    static boolean referenceSupplementCompatible(JsonNode saved,DraftAutomaticDiscovery.Plan plan,int concurrency){
+        return referenceSupplementCompatible(saved,plan,concurrency,null);
+    }
+    private static boolean referenceSupplementCompatible(JsonNode saved,DraftAutomaticDiscovery.Plan plan,int concurrency,String[] rejectedPath){
+        if(rejectedPath!=null)rejectedPath[0]="execution/concurrency";
+        if(!GROUP_EXECUTION.equals(saved.path("execution").asText())||!saved.path("groups").isArray()||!saved.path("concurrency").isIntegralNumber()||saved.path("concurrency").asInt()!=concurrency)return false;
+        Iterator<String> fields=saved.fieldNames();while(fields.hasNext())if(!Arrays.asList("execution","plan","groups","concurrency","sourceSelection").contains(fields.next()))return false;
+        ObjectNode oldCopy=JsonUtils.mapper().createObjectNode(),currentCopy=JsonUtils.mapper().createObjectNode();oldCopy.set("plan",saved.path("plan").deepCopy());currentCopy.set("plan",JsonUtils.mapper().valueToTree(plan.descriptor()));
+        if(saved.has("sourceSelection"))oldCopy.set("sourceSelection",saved.path("sourceSelection").deepCopy());upgradeLegacyPlanSources(oldCopy,currentCopy);
+        JsonNode before=oldCopy.path("plan"),after=currentCopy.path("plan");
+        if(saved.has("sourceSelection")){if(rejectedPath!=null)rejectedPath[0]="sourceSelection.sourceIds";Set<JsonNode> selected=uniqueRows(saved.path("sourceSelection").path("sourceIds"),true);if(selected==null||!selected.equals(uniqueRows(after.path("sourceIds"),true)))return false;}
+        if(rejectedPath!=null)rejectedPath[0]="plan.sources/tasks/coverage/restoredDefinitionIds";
+        if(!sameFieldsExcept(before,after,Collections.singleton("knownRoots")))return false;
+        Map<String,JsonNode> tasks=new HashMap<>();for(JsonNode task:after.path("tasks"))tasks.put(task.path("taskId").asText(),task);
+        Set<String> sources=new HashSet<>();for(JsonNode source:after.path("sourceIds"))sources.add(source.asText());
+        Map<String,JsonNode> oldRoots=rootDescriptors(before.path("knownRoots")),newRoots=rootDescriptors(after.path("knownRoots"));
+        if(oldRoots==null||newRoots==null||!oldRoots.keySet().equals(newRoots.keySet()))return false;
+        for(String id:oldRoots.keySet()){
+            JsonNode old=oldRoots.get(id),next=newRoots.get(id);
+            if(rejectedPath!=null)rejectedPath[0]="plan.knownRoots["+old.path("wireId").asText(id)+"]";
+            for(String field:Arrays.asList("id","wireId","baselineKey","definitionSha256"))if(!old.path(field).isTextual()||old.path(field).asText().isEmpty()||!old.path(field).equals(next.path(field)))return false;
+            if(!sameFieldsExcept(old,next,new HashSet<>(Arrays.asList("sourceReferences","taskIds","prerequisiteForTaskIds","existing"))))return false;
+            JsonNode was=old.path("existing"),now=next.path("existing");
+            if(!was.equals(now)&&!(was.isBoolean()&&!was.asBoolean()&&now.isBoolean()&&now.asBoolean()))return false;
+            Set<JsonNode> oldRefs=uniqueRows(old.path("sourceReferences"),false),newRefs=uniqueRows(next.path("sourceReferences"),false),oldOwners=uniqueRows(old.path("taskIds"),true),newOwners=uniqueRows(next.path("taskIds"),true),oldPrerequisites=uniqueRows(old.path("prerequisiteForTaskIds"),true),newPrerequisites=uniqueRows(next.path("prerequisiteForTaskIds"),true);
+            if(rejectedPath!=null)rejectedPath[0]+=".sourceReferences/taskIds/prerequisiteForTaskIds";
+            if(oldRefs==null||newRefs==null||oldOwners==null||newOwners==null||oldPrerequisites==null||newPrerequisites==null||!newRefs.containsAll(oldRefs)||!newOwners.containsAll(oldOwners)||!newPrerequisites.containsAll(oldPrerequisites))return false;
+            // Saved external proofs remain unchanged; fresh context is limited to this frozen Plan's sources.
+            Set<String> externalTasks=new HashSet<>();for(JsonNode ref:oldRefs)if(!ref.path("sourceId").asText().isEmpty()&&!sources.contains(ref.path("sourceId").asText())&&!ref.path("taskId").asText().isEmpty())externalTasks.add(ref.path("taskId").asText());
+            for(JsonNode ref:newRefs){
+                String taskId=ref.path("taskId").asText();JsonNode task=tasks.get(taskId);
+                if(task==null){if(sources.contains(ref.path("sourceId").asText())||!oldRefs.contains(ref)||!externalTasks.contains(taskId))return false;continue;}
+                if(!sources.contains(task.path("sourceId").asText())||!referenceMatchesTask(ref,task))return false;
+                String origin=ref.has("prerequisiteOfBaselineKey")?ref.path("prerequisiteOfBaselineKey").asText():null;
+                if(origin==null?!plan.currentOwnerProof(id,taskId):origin.isEmpty()||!plan.currentPrerequisiteProof(id,taskId,origin))return false;
+            }
+            for(JsonNode owner:newOwners){
+                JsonNode task=tasks.get(owner.asText());if(task==null){if(!oldOwners.contains(owner)||!externalTasks.contains(owner.asText()))return false;}
+                else if(!sources.contains(task.path("sourceId").asText())||!plan.currentOwnerProof(id,owner.asText()))return false;
+            }
+            for(JsonNode prerequisite:newPrerequisites){
+                JsonNode task=tasks.get(prerequisite.asText());if(task==null){if(!oldPrerequisites.contains(prerequisite)||!externalTasks.contains(prerequisite.asText()))return false;}
+                else if(!sources.contains(task.path("sourceId").asText())||!plan.currentPrerequisiteProof(id,prerequisite.asText(),null))return false;
+            }
+        }return true;
+    }
+    private static boolean sameFieldsExcept(JsonNode before,JsonNode after,Set<String> ignored){if(!before.isObject()||!after.isObject()||before.size()!=after.size())return false;Iterator<String> fields=before.fieldNames();while(fields.hasNext()){String key=fields.next();if(!after.has(key)||!ignored.contains(key)&&!before.path(key).equals(after.path(key)))return false;}return true;}
+    private static Map<String,JsonNode> rootDescriptors(JsonNode rows){if(!rows.isArray())return null;Map<String,JsonNode> result=new LinkedHashMap<>();for(JsonNode row:rows){String id=row.path("id").asText();if(!row.isObject()||id.isEmpty()||result.putIfAbsent(id,row)!=null)return null;}return result;}
+    private static Set<JsonNode> uniqueRows(JsonNode rows,boolean strings){if(!rows.isArray())return null;Set<JsonNode> result=new LinkedHashSet<>();for(JsonNode row:rows)if((strings?!row.isTextual()||row.asText().isEmpty():!row.isObject())||!result.add(row))return null;return result;}
+    private static boolean referenceMatchesTask(JsonNode ref,JsonNode task){
+        Set<String> expected=new HashSet<>(Arrays.asList("taskId","sourceId","sourceSha256","sourceObservationId"));if(ref.has("prerequisiteOfBaselineKey"))expected.add("prerequisiteOfBaselineKey");if(ref.size()!=expected.size())return false;for(String key:expected)if(!ref.path(key).isTextual()||ref.path(key).asText().isEmpty()||!"prerequisiteOfBaselineKey".equals(key)&&!ref.path(key).equals(task.path(key)))return false;return true;
     }
     static boolean sameExecutionPlan(String previous,String current){JsonNode before=JsonUtils.parse(previous),after=JsonUtils.parse(current);upgradeLegacyPlanSources(before,after);return before.equals(after);}
     private static void upgradeLegacyPlanSources(JsonNode before,JsonNode after){

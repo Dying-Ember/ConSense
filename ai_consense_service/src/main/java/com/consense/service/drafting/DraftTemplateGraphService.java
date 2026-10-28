@@ -372,7 +372,7 @@ public class DraftTemplateGraphService {
         return variables(projectId);
     }
     public Map<String,Object> plan(String projectId,Map<String,String> patches) {
-        DraftTemplateGraphRevision revision=workingRevision(projectId);Map<String,Object> graph=JsonUtils.readMap(revision.getGraphJson());Map<String,Object> adopted=effective(projectId,revision,graph),visible=visibleValues(projectId,graph);
+        DraftTemplateGraphRevision revision=workingRevision(projectId);Map<String,Object> graph=JsonUtils.readMap(revision.getGraphJson());boolean sourceStale=stale(revision);String evidence=evidenceRevision(projectId);Map<String,Object> adopted=effective(projectId,revision,graph,sourceStale),visible=visibleValues(projectId,graph);
         if(patches!=null)for(Map.Entry<String,String> patch:patches.entrySet()){if("targetOverrides".equals(patch.getKey()))continue;Map<String,Object> field=field(graph,patch.getKey());String normalized=DraftReviewGraph.normalize(field,patch.getValue());Object value=decode(field,normalized);visible.put(patch.getKey(),value);if(JsonUtils.isBlankText(normalized))adopted.remove(patch.getKey());else adopted.put(patch.getKey(),value);}
         List<String> sourceReviewRequired=new ArrayList<>();
         if("DRAFT".equals(revision.getStatus()))for(Map<String,Object> node:DraftReviewGraph.nodes(graph))if("confirmed".equals(node.get("status"))) {
@@ -386,21 +386,21 @@ public class DraftTemplateGraphService {
         for(String id:sourceReviewRequired)addIssue(result,"source_review:"+id,"原文依据尚未核实，相关修改保留原文。 / Source evidence needs review; related passages remain unchanged.");
         DraftReviewGraph.deferConflictingActions(result);
         result.put("graphRevisionId",revision.getId());result.put("ruleVersion",revision.getGraphSha256());result.put("reviewStatus",revision.getStatus());
-        result.put("snapshotId",snapshotId(projectId,patches,historical));result.put("savedSnapshotId",snapshotId(projectId,null,historical));result.put("preview",patches!=null);
-        result.put("sourceIdentities",JsonUtils.readMap(revision.getGraphJson()).get("sources"));result.put("evidenceRevision",evidenceRevision(projectId));
-        if(stale(revision))addIssue(result,"graph_source_changed","Template source changed; review and confirm a new graph.");
+        String snapshot=snapshotId(projectId,patches,historical,sourceStale,evidence);result.put("snapshotId",snapshot);result.put("savedSnapshotId",patches==null?snapshot:snapshotId(projectId,null,historical,sourceStale,evidence));result.put("preview",patches!=null);
+        result.put("sourceIdentities",graph.get("sources"));result.put("evidenceRevision",evidence);
+        if(sourceStale)addIssue(result,"graph_source_changed","Template source changed; review and confirm a new graph.");
         if(state(graph).containsKey("fixedRuleBaseline"))result.put("fixedRuleBaselinePresent",true);return result;
     }
     public String snapshotId(String projectId,Map<String,String> patches) {
         DraftTemplateGraphRevision revision=workingRevision(projectId);Map<String,Object> graph=JsonUtils.readMap(revision.getGraphJson());
-        return snapshotId(projectId,patches,historicalProjectionValues(projectId,graph));
+        return snapshotId(projectId,patches,historicalProjectionValues(projectId,graph),stale(revision),evidenceRevision(projectId));
     }
-    private String snapshotId(String projectId,Map<String,String> patches,Map<String,Object> historical) {
+    private String snapshotId(String projectId,Map<String,String> patches,Map<String,Object> historical,boolean sourceStale,String evidence) {
         DraftTemplateGraphRevision revision=workingRevision(projectId);Map<String,Object> graph=JsonUtils.readMap(revision.getGraphJson());
         Map<String,DraftVariable> byKey=new HashMap<>();for(DraftVariable variable:variables.findByProjectIdOrderBySortOrderAsc(projectId))if(byKey.put(variable.getVarKey(),variable)!=null)throw new IllegalStateException("Duplicate drafting input key.");
         Map<String,DraftGraphInputBinding> byBindingId=new HashMap<>();for(DraftGraphInputBinding binding:bindings.findByProjectId(projectId))if(byBindingId.put(binding.getId(),binding)!=null)throw new IllegalStateException("Duplicate drafting binding identity.");
         List<Object> inputs=new ArrayList<>();for(Map<String,Object> field:allFields(graph)){DraftVariable variable=byKey.get(id(field));DraftGraphInputBinding binding=byBindingId.get(bindingId(projectId,id(field)));inputs.add(Arrays.asList(id(field),variable==null?null:variable.getValueText(),variable==null?null:variable.getConfirmed(),variable==null?null:variable.getReviewRequired(),binding==null?null:binding.getAdoptedDefinitionSha256(),variable==null?null:variable.getAdoptedSourcesJson()));}
-        Map<String,Object> identity=map("graphRevisionId",revision.getId(),"graphSha256",revision.getGraphSha256(),"sourceCurrent",!stale(revision),"evidenceRevision",evidenceRevision(projectId),"inputs",inputs,"preview",patches);
+        Map<String,Object> identity=map("graphRevisionId",revision.getId(),"graphSha256",revision.getGraphSha256(),"sourceCurrent",!sourceStale,"evidenceRevision",evidence,"inputs",inputs,"preview",patches);
         if(!historical.isEmpty())identity.put("historicalProjectionValues",historical);return hash(identity);
     }
     public DocxEditResult compile(byte[] original,String fileKey,Map<String,Object> prepared,Map<String,String> bookmarks,NativeLayoutPlan layout) {
@@ -1079,7 +1079,7 @@ public class DraftTemplateGraphService {
         return map("graphRevisionId",revisionId,"nodeId",nodeId,"value",entry.get("value"),"status",entry.get("status"),"evidenceFingerprint",entry.get("evidenceFingerprint"),"sourceStatus",sources.isEmpty()?"manual_unbound":sourceChanged?"sources_need_review":"bound_sources","unverifiedSourceRef",sources.isEmpty()?entry.get("sourceRef"):null,"sources",sources);
     }
     private Map<String,Object> visibleValues(String projectId,Map<String,Object> graph){Map<String,Object> result=new LinkedHashMap<>();for(Map<String,Object> field:allFields(graph))variables.findByProjectIdAndVarKey(projectId,id(field)).ifPresent(value->result.put(id(field),"targetOverrides".equals(id(field))?DraftBusinessRules.parse(value.getValueText()):decode(field,value.getValueText())));return result;}
-    private Map<String,Object> effective(String projectId,DraftTemplateGraphRevision revision,Map<String,Object> graph){Map<String,Object> result=new LinkedHashMap<>();if(stale(revision))return result;DefinitionCache definitions=new DefinitionCache();for(Map<String,Object> field:DraftReviewGraph.fields(graph)){String key=id(field);DraftVariable value=variables.findByProjectIdAndVarKey(projectId,key).orElse(null);DraftGraphInputBinding binding=bindings.findById(bindingId(projectId,key)).orElse(null);
+    private Map<String,Object> effective(String projectId,DraftTemplateGraphRevision revision,Map<String,Object> graph,boolean sourceStale){Map<String,Object> result=new LinkedHashMap<>();if(sourceStale)return result;DefinitionCache definitions=new DefinitionCache();for(Map<String,Object> field:DraftReviewGraph.fields(graph)){String key=id(field);DraftVariable value=variables.findByProjectIdAndVarKey(projectId,key).orElse(null);DraftGraphInputBinding binding=bindings.findById(bindingId(projectId,key)).orElse(null);
             if(value==null||binding==null||Boolean.TRUE.equals(value.getReviewRequired())||!Boolean.TRUE.equals(value.getConfirmed())||!Objects.equals(binding.getAdoptedDefinitionSha256(),DraftReviewGraph.fieldHash(field))||(JsonUtils.isBlankText(value.getValueText())&&!"text".equals(asMap(field.get("type")).get("kind"))))continue;
             if(binding.getAdoptedRevisionId()!=null&&!Objects.equals(binding.getAdoptedRevisionId(),revision.getId())){String old=storedDefinitionBasis(projectId,binding.getAdoptedRevisionId(),key,definitions);String current=definitions.bases.computeIfAbsent(revision.getId()+"\n"+key,ignored->definitionBasis(field));if(old==null||!old.equals(current))continue;}
             try{for(CandidateVO source:DraftAdoption.adoptedSources(value))verifyCandidateSource(projectId,source);result.put(key,decode(field,DraftReviewGraph.normalize(field,value.getValueText())));}catch(RuntimeException invalid){/* Retain historical values; invalid source or type never becomes effective. */}

@@ -57,7 +57,7 @@ class DraftSnapshotBulkReadTest {
         }
         void value(String key,String text,Boolean confirmed,Boolean review,String adoptedSources){DraftVariable value=new DraftVariable();value.setProjectId(PROJECT);value.setVarKey(key);value.setValueText(text);value.setConfirmed(confirmed);value.setReviewRequired(review);value.setAdoptedSourcesJson(adoptedSources);values.put(key,value);}
         void binding(String key,String adopted){DraftGraphInputBinding binding=new DraftGraphInputBinding();binding.setId(DraftAdoption.hash(PROJECT+"\n"+key));binding.setProjectId(PROJECT);binding.setVarKey(key);binding.setDefinitionSha256("current-"+key);binding.setAdoptedDefinitionSha256(adopted);definitions.put(binding.getId(),binding);}
-        Map<String,Object> graph(){List<Object> nodes=new ArrayList<>();for(String key:order)nodes.add(map("id",key,"nameZh",key,"nameEn",key,"definitionScope",scope,"status","confirmed","role",map("kind","input"),"type",map("kind","text"),"optional",true,"catalogAlignment",map("status","new","confirmed",true),"docIds",Collections.emptyList(),"sourceAnchors",Collections.emptyList(),"editTargets",Collections.emptyList()));return map("kind","consense-template-graph-v1","graph",map("variables",nodes),"sources",Collections.emptyList(),"selectedDocuments",Collections.emptyMap());}
+        Map<String,Object> graph(){List<Object> nodes=new ArrayList<>();for(String key:order)nodes.add(map("id",key,"nameZh",key,"nameEn",key,"definitionScope",scope,"status","confirmed","role",map("kind","input"),"type",map("kind","text"),"optional",true,"catalogAlignment",map("status","new","confirmed",true,"reason","Human-reviewed synthetic manual input"),"docIds",Collections.emptyList(),"sourceAnchors",Collections.emptyList(),"editTargets",Collections.emptyList()));return map("kind","consense-template-graph-v1","graph",map("variables",nodes),"sources",Collections.emptyList(),"selectedDocuments",Collections.emptyMap());}
         DraftTemplateGraphRevision revision(){String json=JsonUtils.write(graph());return new DraftTemplateGraphRevision(REVISION,PROJECT,null,"CONFIRMED",DraftAdoption.hash(json),json,JsonUtils.write(Collections.singletonList(map("sourceDocumentId",1L,"sourceSha256","original-v1"))),Instant.EPOCH);}
         String expected(Map<String,String> patches){
             Map<String,List<Object>> tuples=new HashMap<>();
@@ -93,5 +93,21 @@ class DraftSnapshotBulkReadTest {
     }
     @Test void originalAndCorrespondenceChangesAreRecheckedOnEverySnapshot(){
         Fixture f=new Fixture();String before=f.service.snapshotId(PROJECT,null);f.originalSha="original-v2";String stale=f.service.snapshotId(PROJECT,null);assertNotEquals(before,stale);assertEquals(f.expected(null),stale);f.correspondenceSha="correspondence-v2";String changedEvidence=f.service.snapshotId(PROJECT,null);assertNotEquals(stale,changedEvidence);assertEquals(f.expected(null),changedEvidence);verify(f.reader,times(3)).archive(f.original);verify(f.reader,times(3)).archive(f.correspondence);
+    }
+    @Test void savedPlanReusesOneCurrentSourceAndEvidenceReadForBothSnapshotIds(){
+        Fixture f=new Fixture();Map<String,Object> plan=f.service.plan(PROJECT,null);
+        assertEquals(f.expected(null),plan.get("snapshotId"));assertEquals(plan.get("snapshotId"),plan.get("savedSnapshotId"));
+        verify(f.reader,times(1)).archive(f.original);verify(f.reader,times(1)).archivedBytes(any());verify(f.reader,times(1)).archive(f.correspondence);
+    }
+    @Test void previewPlanRetainsDistinctSavedHashWithoutRescanningOriginals(){
+        Fixture f=new Fixture();Map<String,String> patch=Collections.singletonMap("z","12");Map<String,Object> plan=f.service.plan(PROJECT,patch);
+        assertEquals(f.expected(patch),plan.get("snapshotId"));assertEquals(f.expected(null),plan.get("savedSnapshotId"));assertNotEquals(plan.get("snapshotId"),plan.get("savedSnapshotId"));
+        verify(f.reader,times(1)).archive(f.original);verify(f.reader,times(1)).archive(f.correspondence);
+    }
+    @Test void planRequestReuseNeverCarriesOriginalOrCorrespondenceIdentityIntoTheNextRequest(){
+        Fixture f=new Fixture();Map<String,Object> first=f.service.plan(PROJECT,null);f.originalSha="original-v2";Map<String,Object> stale=f.service.plan(PROJECT,null);
+        assertNotEquals(first.get("snapshotId"),stale.get("snapshotId"));assertTrue(((List<?>)stale.get("unresolved")).stream().anyMatch(raw->"graph_source_changed".equals(((Map<?,?>)raw).get("id"))));
+        f.correspondenceSha="correspondence-v2";Map<String,Object> changed=f.service.plan(PROJECT,null);assertNotEquals(stale.get("evidenceRevision"),changed.get("evidenceRevision"));assertNotEquals(stale.get("snapshotId"),changed.get("snapshotId"));
+        verify(f.reader,times(3)).archive(f.original);verify(f.reader,times(3)).archive(f.correspondence);
     }
 }
