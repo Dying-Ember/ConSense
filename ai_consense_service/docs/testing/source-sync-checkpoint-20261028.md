@@ -2,7 +2,17 @@
 
 This is an intermediate source-integration record. The Drafting worktree and the two review tasks remain active; it is not a claim that all local changes have been published or that the product has passed business acceptance. The coordination task must update this checkpoint when the final tested tree and remote commit are known.
 
-## Active Drafting candidate compilation failure (29 October)
+## Candidate impact disclosure software gate (29 October)
+
+On baseline `795e473f`, the two frozen Drafting candidate-impact paths passed 20 frontend test files, type checking and a Vite build in an isolated snapshot. The initial test snapshot omitted the baseline backend catalog fixture and the initial build hit a system TEMP permission failure; both failures and the successful rerun after restoring the same-baseline fixture and using isolated TEMP are retained under `.local/source-sync-impact-validation-20261029/`. Browser and business validation remain separate.
+
+## Published source snapshot at 04:17 (29 October, Asia/Shanghai)
+
+At approximately 04:17, the actual working-directory HEAD, local `main`, `origin/main` and `git ls-remote origin refs/heads/main` all identified `795e473f797d0c0478baadef6b750cd846dcd139`. This observed snapshot includes `12d2b2f2` incremental source selection, `a6a17461` grouped Drafting and Vetting evidence repairs, `93d4de53` mixed-group and insertion-point evidence, and `795e473f` definition-review state and SCT scope evidence. The detailed, separately scoped software gates and retained failures are recorded below; overlapping runs are not additive. Concurrent working-tree changes and review sessions remained active at this observation, so it is not a final delivery assertion. Later commits, runtime state and business outcomes require their own verification.
+
+## Historical Drafting candidate compilation failure (29 October)
+
+The failure and uncommitted-candidate statements in this section describe the original snapshots. The generic-type and fixture repairs were subsequently tested as recorded below, and the grouped Drafting and Vetting repairs were published in `a6a17461`; do not read the original candidate status as current.
 
 An isolated source snapshot based on `12d2b2f2e31b703398f3da1945e99736ee34af80` included only seven temporarily frozen Drafting production files; its tree was `d7a239e9df9b38bd89567ab398864575e984ddde`. The existing targeted regression did **not** run: fresh Java compilation failed at `DraftDiscoveryGroups.java` lines 73–74 because `List<?>` was assigned to `List<Object>`. The failure was reported to the owning session and the log is retained at `.local/source-sync-drafting-20261029-012030/existing-regression-java-launcher.log`. The first Maven command also failed before compilation because its Windows batch invocation did not preserve the path containing `&`; that separate log is `existing-regression.log` in the same directory. The candidate remains uncommitted and must be re-frozen and recompiled after repair; no new tests, model validation or business acceptance are claimed by this record.
 

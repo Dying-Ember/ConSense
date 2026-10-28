@@ -1,5 +1,8 @@
+<!-- source-sync-20261029-795e473f -->
+**源码同步入口（2026-10-29）：** 截至上海时间约 04:17，已发布源码包含 Drafting 增量来源选择、混合分组／插入点取证、定义审核状态及 SCT 范围修复，以及 Vetting 分组取证和正文选择修复；当时四个 Git 引用均指向 `795e473f797d0c0478baadef6b750cd846dcd139`。具体提交、隔离软件门及其边界见[同步检查点](testing/source-sync-checkpoint-20261028.md)，Drafting 运行及实测见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)。并行会话的后续修改和运行仍在进行，以各自后续回执为准；源码发布或软件测试不等于真实模型、原件质量或业务验收通过。
+
 <!-- vetting-official-baseline-scope-repair-20261029 -->
-**Vetting 运行检查点（2026-10-29 01:44 上海时间）：** 新 Java 包已启动，完整前端审查正在进行，实质结果尚未验收。运行身份、实际输入观测和未决事项见[同步检查点](testing/source-sync-checkpoint-20261028.md)及其所列本地回执；后续状态以更新的运行证据为准。
+**Vetting 历史运行检查点（2026-10-29 01:44 上海时间）：** 新 Java 包已启动，完整前端审查正在进行，实质结果尚未验收。运行身份、实际输入观测和未决事项见[同步检查点](testing/source-sync-checkpoint-20261028.md)及其所列本地回执；后续状态以更新的运行证据为准。
 
 **Vetting 最新交接（2026-10-29）：** 赛方样例／清单、实际原文及既有报告的逐项对照已有有界基线，样例中有存疑、排除和无法核实的事项，不能直接作为模型答案或准确率。四条混合合同／定价清单的提示词范围说明和指定正文选择均已源码修复并通过组合软件测试；该检查点记录时的运行包尚未包含这些修复，后续运行状态以实际运行记录为准。Drafting 与 Vetting 联合源码的 52 套件、662 项隔离软件回归通过，见[同步检查点](testing/source-sync-checkpoint-20261028.md)；模型遵循、完整审查和业务验收仍未通过。对照口径见[范围检查点](testing/vetting-official-baseline-and-scope-repair-20261029.md)，正文选择及组合测试边界见[正文选择检查点](testing/vetting-clause-context-priority-repair-20261029.md)，原件与逐项证据保留本机；下方 Candidate22 是此前运行和导出检查点。
 
