@@ -517,8 +517,24 @@ public final class DraftReviewDiscovery {
         for(int offset:new int[]{start,end})if(offset>0&&offset<text.length()&&Character.isHighSurrogate(text.charAt(offset-1))&&Character.isLowSurrogate(text.charAt(offset)))return null;
         String selected=text.substring(start,end);return range.has("observedText")&&(!range.path("observedText").isTextual()||!selected.equals(range.path("observedText").asText()))?null:selected;
     }
+    /** Read navigation for one proven insertion point; the host paragraph is never its editable scope. */
+    static Map<String,Object> insertionPointContext(JsonNode reading,JsonNode scope){
+        if(reading==null||scope==null||!"bound".equals(reading.path("evidenceStatus").asText())||!"docx".equals(reading.path("format").asText())||reading.path("id").asText().isEmpty()||!reading.path("sourceSha256").asText().matches("[a-f0-9]{64}")||!"native_source_field_candidate".equals(scope.path("kind").asText())||!singleInsertionAnchor(scope))return Collections.emptyMap();
+        JsonNode anchor=scope.path("insertionAnchors").path(0);
+        for(String key:Arrays.asList("analysisRevision","analysisInputSha256","analysisSha256"))if(!reading.path(key).isTextual()||reading.path(key).asText().isEmpty())return Collections.emptyMap();
+        Item item=new Item(reading,scope,"field","");if(!uniqueObservation(item,scope.path("id").asText()))return Collections.emptyMap();
+        boolean current=false;for(JsonNode candidate:reading.path("groups"))if(candidate.equals(scope)){current=true;break;}if(!current||nativeScope(item,scope,"")==null)return Collections.emptyMap();
+        Map<String,Object> point=obj("insertionPoint",true,"memberId",anchor.path("memberId").asText(),"ranges",Collections.singletonList(obj("memberId",anchor.path("memberId").asText(),"channel",anchor.path("channel").asText(),"start",anchor.path("start").asInt(),"end",anchor.path("end").asInt(),"offsetUnit",anchor.path("offsetUnit").asText())));
+        if(scope.path("fieldLabel").isTextual())point.put("fieldLabel",scope.path("fieldLabel").asText());return point;
+    }
+    private static boolean singleInsertionAnchor(JsonNode scope){
+        if(!scope.path("sourceInsertionAnchorComplete").asBoolean(false)||scope.has("memberRanges")||!scope.path("insertionAnchors").isArray()||scope.path("insertionAnchors").size()!=1)return false;
+        JsonNode anchor=scope.path("insertionAnchors").path(0);
+        // Both read navigation and edit compilation must validate this exact, explicitly named coordinate channel.
+        return anchor.path("offsetUnit").isTextual()&&"utf16".equals(anchor.path("offsetUnit").asText())&&anchor.path("channel").isTextual()&&Arrays.asList("text","preNormalizedTextObservation.text").contains(anchor.path("channel").asText());
+    }
     private static NativeScope nativeScope(Item item,JsonNode scope,String quote){
-        boolean insertion=scope.path("sourceInsertionAnchorComplete").asBoolean(false)&&scope.path("insertionAnchors").size()==1;
+        boolean insertion=scope.path("sourceInsertionAnchorComplete").asBoolean(false);if(insertion&&!singleInsertionAnchor(scope))return null;
         if(!"docx".equals(item.reading.path("format").asText())||quote.isEmpty()&&!insertion||!quote.equals(scopeText(item,scope)))return null;
         String sha=item.reading.path("sourceSha256").asText();List<JsonNode> ranges=scopeRanges(item,scope);if(ranges==null||ranges.isEmpty())return null;List<Object> spans=new ArrayList<>();List<String> selectedText=new ArrayList<>(),editableText=new ArrayList<>(),emptyMembers=new ArrayList<>();
         for(JsonNode range:ranges){JsonNode member=member(item,range.path("memberId").asText());String selected=rangeText(item,range);if(selected==null||insertion&&!selected.isEmpty())return null;

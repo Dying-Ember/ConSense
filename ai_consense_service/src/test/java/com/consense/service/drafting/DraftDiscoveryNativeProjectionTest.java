@@ -97,7 +97,7 @@ class DraftDiscoveryNativeProjectionTest {
     @Test void explicitWrongQuoteAndNormalizedInsertionNeverGainAuthority() throws Exception {
         Fixture fixture=fixture("\tTarget  value. ");Map<String,Object> effect=effect();effect.put("quote","Target wrong.");JsonNode target=target(fixture,effect);
         assertEquals("check",target.path("action").asText());assertEquals("Target wrong.",target.path("text").asText());assertFalse(target.has("native"));assertEquals("EXPLICIT_SCOPE_QUOTE_MISMATCH",target.path("scopeQuoteIssue").asText());
-        ObjectNode scope=(ObjectNode)fixture.reading.path("groups").path(0);ObjectNode anchor=range(fixture,0).deepCopy();scope.remove("memberRanges");scope.put("sourceInsertionAnchorComplete",true).put("scopeComplete",false);anchor.put("start",0).put("end",0);scope.putArray("insertionAnchors").add(anchor);
+        ObjectNode scope=(ObjectNode)fixture.reading.path("groups").path(0);ObjectNode anchor=range(fixture,0).deepCopy();scope.remove("memberRanges");scope.put("sourceInsertionAnchorComplete",true).put("scopeComplete",false);anchor.put("start",0).put("end",0).put("offsetUnit","utf16");scope.putArray("insertionAnchors").add(anchor);
         effect=effect();effect.put("action","insert");target=target(fixture,effect);assertEquals("check",target.path("action").asText());assertFalse(target.has("native"));
     }
 

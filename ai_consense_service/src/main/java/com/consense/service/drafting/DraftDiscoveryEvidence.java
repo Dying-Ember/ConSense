@@ -130,6 +130,10 @@ final class DraftDiscoveryEvidence {
     private static Map<String,Object> project(JsonNode reading,String kind,JsonNode observation){
         String body="member".equals(kind)?memberText(observation):observation.path("text").isTextual()?observation.path("text").asText():null;
         Map<String,Object> item=obj("kind",kind,"id",observation.path("id").asText());item.putAll(envelope(reading));
+        if("scope".equals(kind)&&(observation.path("sourceInsertionAnchorComplete").asBoolean(false)||!observation.path("insertionAnchors").isEmpty())){
+            Map<String,Object> point=DraftReviewDiscovery.insertionPointContext(reading,observation);if(point.isEmpty())return null;
+            item.putAll(point);item.put("text","");item.put("scopeComplete",false);item.put("sourceInsertionAnchorComplete",true);return item;
+        }
         if("member".equals(kind)){
             if(body==null)return null;List<Object> adjacent=new ArrayList<>();JsonNode members=reading.path("sourceMembers");int at=-1;for(int i=0;i<members.size();i++)if(members.path(i)==observation){at=i;break;}
             String channel=observation.path("preNormalizedTextObservation").path("text").isTextual()?"preNormalizedTextObservation.text":"text";item.put("ranges",Collections.singletonList(obj("memberId",observation.path("id").asText(),"channel",channel,"start",0,"end",body.length(),"offsetUnit","utf16")));

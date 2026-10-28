@@ -72,7 +72,7 @@ class DraftDiscoveryScopeReferenceTest {
 
     @Test void aNamedInsertionPointRestoresAnEmptyQuoteWithoutTreatingExplicitNullAsOmission() {
         ObjectNode source=source();ObjectNode scope=(ObjectNode)source.path("groups").path(0);scope.remove("memberRanges");scope.put("scopeComplete",false).put("sourceInsertionAnchorComplete",true);
-        scope.putArray("insertionAnchors").addObject().put("memberId","target").put("channel","text").put("start",TARGET.length()).put("end",TARGET.length());
+        scope.putArray("insertionAnchors").addObject().put("memberId","target").put("channel","text").put("start",TARGET.length()).put("end",TARGET.length()).put("offsetUnit","utf16");
         Map<String,Object> effect=effect();effect.put("action","insert");JsonNode retained=target(source,effect,Collections.emptyList());
         assertEquals("",retained.path("text").asText());assertEquals("insert",retained.path("action").asText());assertTrue(retained.path("scopeComplete").asBoolean());assertEquals("insert",retained.path("native").path("spans").path(0).path("operation").asText());
         effect.put("quote",null);retained=target(source,effect,Collections.emptyList());assertEquals("check",retained.path("action").asText());assertEquals("EXPLICIT_SCOPE_QUOTE_MISMATCH",retained.path("scopeQuoteIssue").asText());

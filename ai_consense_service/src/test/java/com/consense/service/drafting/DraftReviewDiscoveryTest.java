@@ -132,7 +132,7 @@ class DraftReviewDiscoveryTest {
         ObjectNode paragraph=source.withArray("paragraphs").addObject().put("id","editable-bill").put("paragraphSha256",SHA).put("sourceSha256",SHA).put("text"," Bill No. 3 \u2013");paragraph.set("sourcePosition",position.deepCopy());
         ObjectNode group=source.withArray("groups").addObject().put("id","bill-scope").put("kind","native_source_field_candidate").put("guidanceNoteId","note-1")
                 .put("scopeComplete",false).put("sourceInsertionAnchorComplete",true).put("listCardinalityStatus","unknown_from_existing_numbered_source_rows");
-        group.putArray("insertionAnchors").addObject().put("memberId","bill").put("channel","preNormalizedTextObservation.text").put("start",13).put("end",13).put("observedText","");
+        group.putArray("insertionAnchors").addObject().put("memberId","bill").put("channel","preNormalizedTextObservation.text").put("start",13).put("end",13).put("offsetUnit","utf16").put("observedText","");
         Map<String,Object> node=modelNode("description","text","input",instruction);node.put("effects",Collections.singletonList(obj("scopeId","bill-scope","quote","","action","insert","valueSourceId","description")));
         AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(node));
         Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1),target=map(list(find(result,"-description").get("editTargets")).get(0));
