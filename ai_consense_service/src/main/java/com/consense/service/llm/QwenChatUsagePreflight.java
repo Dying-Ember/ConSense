@@ -54,7 +54,7 @@ public final class QwenChatUsagePreflight {
         QwenGenerationLedger.Limits l=limits(module,h);
         return hash(JsonUtils.write(Arrays.asList(VERSION,KIND,CONTEXT,OUTPUT,MARGIN,module,h,l.preflights,l.answers,l.total,l.lifetimeMs,
                 "cap1_is_real_generation_no_replay_no_refund","exact_response_model_required","complete_input_output_margin_policy",
-                "vetting".equals(module)?"qwen-27b-json-object-records-v1":"advice".equals(module)?"qwen-27b-json-object-answer-v1":"ordinary-structured-output")));
+                "vetting".equals(module)?"qwen-27b-json-object-records-v1":"advice".equals(module)?"qwen-27b-json-object-answer-v1":"file-export".equals(module)?"qwen-27b-file-export-json-object-records-v1":"ordinary-structured-output")));
     }
     public final class Operation {
         private final LlmOperation chat;
@@ -96,15 +96,15 @@ public final class QwenChatUsagePreflight {
         }
         public VettingInputBudget.Input input(String system,String user,JsonNode schema,String sourceSha) {
             VettingInputBudget.Input in;
-            if(vettingJsonRecords()) {
+            if(recordsObjectWire()) {
                 in=VettingInputBudget.chatInput("qwen-chat-completions",identity.getModel(),profileSha,
                         Arrays.asList(LlmClient.ChatTurn.system(AiGateway.structuredSystemPrompt(system,schema,true)),LlmClient.ChatTurn.user(user)),OUTPUT,sourceSha);
                 in.setSchema(schema.deepCopy());VettingInputBudget.rebind(in);
             } else in=VettingInputBudget.input("qwen-chat-completions",identity.getModel(),profileSha,system,user,schema,OUTPUT,sourceSha);
             return seal(in,false).input;
         }
-        private boolean vettingJsonRecords(){return "vetting".equals(module)&&"qwen".equals(chat.getIdentity().getProfileId());}
-        private boolean jsonObjectWire(){return vettingJsonRecords()||"advice".equals(module)&&"qwen".equals(chat.getIdentity().getProfileId());}
+        private boolean recordsObjectWire(){return ("vetting".equals(module)||"file-export".equals(module))&&"qwen".equals(chat.getIdentity().getProfileId());}
+        private boolean jsonObjectWire(){return recordsObjectWire()||"advice".equals(module)&&"qwen".equals(chat.getIdentity().getProfileId());}
         /** Advice supplies its actual final session/schema/retry envelope exactly once. */
         public PreparedRequest prepareChat(List<LlmClient.ChatTurn> turns,JsonNode schema,String sourceSha,boolean stream) {
             VettingInputBudget.Input in=VettingInputBudget.chatInput("qwen-chat-completions",identity.getModel(),profileSha,turns,OUTPUT,sourceSha);
@@ -202,7 +202,7 @@ public final class QwenChatUsagePreflight {
                 public boolean available(){return true;}public String chatModel(){return identity.getModel();}public String embedModel(){return "";}
             };
             AiGateway gateway=new AiGateway(preparedClient);
-            return vettingJsonRecords()?gateway.completeStructuredJsonRecords(system,user,type,schema,rawOut,timings)
+            return recordsObjectWire()?gateway.completeStructuredJsonRecords(system,user,type,schema,rawOut,timings)
                     :gateway.completeStructuredJsonList(system,user,type,schema,rawOut,timings);
         }
         private final class ActionContext {
