@@ -2,7 +2,7 @@
 
 票据 01 **未关闭**。已验证的是 Windows／WSL 本机的隔离 Docker 最小试验，不是业务栈、五容器完整生命周期或赛方平台验收。本说明仅整理已有回执、脚本和 inspect；编写时没有启动、停止或重跑服务／容器。
 
-执行范围以 [OER 规则](../oer-scope-and-rules.md) 和[实施交接](../HANDOFF-ocr-embedding-rerank-20261008.md)为准。实际业务部署仍按[容器实施说明](../specs/competition-container-external-runtime-20261029.md)推进。本机 Qwen 使用明确标识的假权重占位和协议替身；占位不能证明 Qwen／vLLM 推理。真实 OCR、embedding、rerank 容器加载与推理均未验收。
+执行范围以 [OER 规则](../oer-scope-and-rules.md) 和[实施交接](../HANDOFF-ocr-embedding-rerank-20261008.md)为准。实际业务部署仍按[容器实施说明](../specs/competition-container-external-runtime-20261029.md)推进，已选职责、H2 TCP、固定 GPU 容器与挂载约定见[运行方案](../specs/competition-runtime-plan-20261029.md)，实际资产、固定目标及排除范围见[保护登记](competition-protected-assets-20261029.md)。本机 Qwen 使用明确标识的假权重占位和协议替身；占位不能证明 Qwen／vLLM 推理。真实 OCR、embedding、rerank 容器加载与推理均未验收。
 
 ## 证据位置和使用边界
 
@@ -14,6 +14,8 @@
 | 挂载和实际账户 | `E/test-mounts.sh`、`E/receipts/*.inspect.json`、`E/inspect-summary.json` |
 | 权限收紧和 GPU 查询 | `E/test-unprivileged-gpu.sh`、对应 inspect 与执行日志 |
 | host 网络交换与停止 | `E/host-network-test/receipt.md`、`run-check.sh`、`server.py`、`client.py`、inspect、`stop-owned-daemon.sh` |
+| ownedBoot／LinuxTree 精确 cgroup 委派 | `E/cgroup-owned-boot/` 三轮证据、启动／核查脚本与 `SHA256SUMS`；最终为 `cgroup-probe-20261029-1859-c39e/` |
+| 最小镜像与外置用户空间 | `E/external-runtime-e41f/{receipt.md,result.json,inspect-summary.json,positive-tar-list.json,export-verification.json}`；命令和断言在 `probe.py` |
 | 文件完整性 | 两级 `receipt-hashes.json`；实际文件仍需逐项比对 |
 
 公开文档不复制私有 PID、业务原件、凭据、测试 nonce 或原始日志内容。回执中的时间点状态不自动代表当前状态。脚本含写入、创建和删除操作，阅读脚本不代表授权重新执行。
@@ -40,7 +42,7 @@
 | 网络功能 | 禁用 iptables、ip6tables、masquerade、bridge、userland proxy |
 | 生命周期 | 前台会话绑定；首次 detached 启动未持久化且无诊断输出；跨会话／WSL 终止恢复未验证 |
 
-host 网络回执最后记录：确认无任务容器并核实 daemon 身份后发送 SIGTERM，前台退出码 0，日志出现 `Daemon shutdown complete`。这不是 systemd 管理的 Docker 服务；后续使用必须显式启动。
+host 网络与后继外置用户空间探针均记录：确认无任务容器并核实 daemon 身份后发送 SIGTERM，前台退出码 0，工具会话出现 `Daemon shutdown complete`。已有多次显式启动／正常停止，不再将“再次启动”写作完全未测。这不是 systemd 管理的 Docker 服务；后续使用必须显式启动。
 
 ### 启动前检查与待验证项
 
@@ -52,7 +54,7 @@ Windows 维护终端可用只读 `wsl --list --verbose` 核对发行版名称。
 wsl -d ConSense-Rehearsal-20261029 -u root -- dockerd --host=unix:///run/consense-docker/docker.sock --pidfile=/run/consense-docker/docker.pid --data-root=/srv/consense-docker/data --exec-root=/run/consense-docker/exec --iptables=false --ip6tables=false --ip-masq=false --bridge=none --userland-proxy=false
 ```
 
-前台终端须持续保留，另开维护终端访问专用 socket；不要用关闭窗口作为停机流程。完整 daemon 启动／停机输出未完整落盘，前台终端替代原受控工具长会话的保活、再次启动及断会话恢复仍待验证；不能写成自启动或稳定无人值守方案。首次 `nohup` 后台尝试没有保持，未获得详细诊断；不要照此后台化。不得改用 `service docker start` 或省略禁用网络参数的通用命令。专用路径已不存在或身份冲突时停止处理，不自行删除 PID 文件或拼接初始化命令。
+前台终端须持续保留，另开维护终端访问专用 socket；不要用关闭窗口作为停机流程。完整 daemon 启动／停机输出未完整落盘，前台终端替代原受控工具长会话的保活及断会话恢复仍待验证；不能写成自启动或稳定无人值守方案。首次 `nohup` 后台尝试没有保持，未获得详细诊断；不要照此后台化。不得改用 `service docker start` 或省略禁用网络参数的通用命令。专用路径已不存在或身份冲突时停止处理，不自行删除 PID 文件或拼接初始化命令。
 
 daemon 已由授权流程启动后，在专用 WSL 内，所有 Docker 操作必须显式指定专用 socket；已有脚本采用：
 
@@ -92,8 +94,26 @@ GPU 查询使用 `--network none`、`--device /dev/dxg:/dev/dxg`，只读挂载 
 
 本轮后继使用同一具名非 root 账户，串行检查正常退出、忽略 TERM 后取消、主进程提前退出三种场景。正常与提前退出的容器退出码为 0，取消场景由 Docker 超时兜底后退出 137；每例预先记录的父、子、孙三个宿主进程身份均不再存在，精确默认 cgroup 已删除。各容器无 GPU、业务数据和 Docker socket 挂载，网络为 none，capabilities 为空并禁止提权；取证后按完整 ID 清理，专属 daemon 受控停止。
 
-首次 create 因 swap-limit warning 混入标准输出而污染 ID，实例未启动，失败与精确清理记录保留；后继仅修正标准输出／错误分离及完整 ID 校验后执行。通过结果只证明宿主 Docker 拥有整个容器的 CPU 进程树释放可行，不能证明现有 ownedBoot 在默认容器 cgroup 下兼容，也不证明 GPU 上下文释放、模型或最终显卡方案通过。证据位于 `E/cpu-lifecycle-probe/` 与 `E/cpu-lifecycle-probe-retry/`。
+首次 create 因 swap-limit warning 混入标准输出而污染 ID，实例未启动，失败与精确清理记录保留；后继仅修正标准输出／错误分离及完整 ID 校验后执行。该轮只证明宿主 Docker 拥有整个容器的 CPU 进程树释放可行，不能证明现有 ownedBoot 在默认容器 cgroup 下兼容。证据位于 `E/cpu-lifecycle-probe/` 与 `E/cpu-lifecycle-probe-retry/`；后续精确委派另见下节。
 
-## 票据 01 尚欠的证据
+## ownedBoot／LinuxTree 的精确委派探针
 
-前台终端保活、再次启动及断会话恢复；真实应用镜像和所有实际进程的非 root 身份；业务持久挂载／Windows ACL；真实数据库备份、恢复与持久化；稳定 OCR、embedding、rerank 的实际权重加载和推理；完整业务／停止／换版／恢复；完整离线及全平台五容器上限；赛方 H800、GPU 运行时和扫描条件。Qwen 本机假权重及协议替身须持续显式标记，真实 Qwen／vLLM 接口、推理和业务质量另行验收。以上未完成项不得由本最小环境结果代替。
+在任务专属 ownparent 内采用 host cgroup namespace、private PID，只将该 ownparent 挂载为 RW，其余 `/sys/fs/cgroup` 为 RO。上层 cpu／memory／pids 限制由宿主 root 控制，不把整个 cgroup 树或 Docker socket 暴露给容器。最终 c39e 中实际 UID/GID 为 10001，现有 ownedBoot／LinuxTree 路径把父、子、孙三个 CPU 进程收入该任务 cgroup，取消后回执为 `released`、`activeProcesses:0`、`cgroupPopulated:0`，ownparent 最后 `populated 0`。
+
+证据位于 `E/cgroup-owned-boot/`，三轮共 39 文件已由 `SHA256SUMS` 校验，源与导出副本逐轮 diff 一致；最终 `container.stdout`、`parent-after.txt`、`container-id.txt` 和 `remove.txt` 保留运行、释放和精确清理依据。前两轮因探针对 controller 空值／子集的错误假设而失败，仍保留原始结果，不将其改为成功。最终成功只证明本机精确委派下 CPU 入组与取消释放；没有证明默认 cgroup 自动可用，也没有 GPU 上下文释放、资源限额压力或模型验收。赛方是否允许同样委派须另核。
+
+## 最小镜像及外置用户空间的正反检查
+
+19:11–19:12（上海）在专用发行版执行一次实际用户空间探针。正例镜像 tar 为 20,480 字节，仅 12 目录、4 个 merged-usr 链接及 passwd 47／group 18 字节，共 18 条目，没有二进制、业务或模型。镜像使用具名 `USER consense:consense`；RO 外置 `/usr`、`/etc/nsswitch.conf`、`/etc/ld.so.cache`、`/etc/python3` 与 `/etc/python3.12`，独立 16 MiB noexec／nosuid／nodev tmpfs 提供 `/tmp`。实际 `id`／`getent`／shell 与 Python 3.12 的 `pwd/json/hashlib/tempfile` 断言通过，UID/GID 均为 10001。
+
+反例移除镜像内账户文件并挂载外部 passwd／group，在具名账户启动时按预期报 `unable to find user consense`。本次因此保留最小账户记录在镜像；它是已测 Docker 具名启动的挂载前解析约束，不能推出 numeric USER、其他平台或所有账户数据都不能外置。镜像 USER／PATH／HOME／WORKDIR 可由启动参数覆盖，不能列作“无法外置”的文件。最小镜像保留表见运行方案；Java、数据库及 GPU 精确依赖闭包仍按后票实际运行检查。
+
+两例均 network none、RO rootfs、cap-drop ALL、NNP，无设备、GPU、业务卷或 Docker socket，串行单容器；inspect 和独立退出／错误文件完整保留。正例通过、反例保持预期失败，外置源 9,633 条文件／链接 manifest 前后一致，71 份 Linux 证据源／副本 SHA 匹配；容器及两镜像均按完整身份取证后精确清理。首次 WSL 命令只在含 `&` 的 Windows 路径解析失败，未执行探针；随后经 Python stdin 完成一次实际运行。swap-limit unsupported warning、完整 daemon stdout 未全部落盘的限制保留。不能由此声称业务依赖、GPU 推理或完全离线业务通过。
+
+## 准备票与后续实际验收的分界
+
+票据 01 整理现有行为、环境调查、保护副本、资产与目标路径、方案和可复核的最小接缝证据，由票据所有者逐条核定；本说明不关闭 01，也不单独授予 02–04 开工。保护副本、H2／44原件切点、五份索引 phase-B 全 seal 冷读及 73/74 绑定（另 1 项历史 unknown）见运行方案与保护登记，不把这批准备证据写成后票完整恢复验收。
+
+02–14 仍须按依赖完成真实 App／网页／Python、H2 TCP 与 Qdrant server、业务挂载和各角色 10001 权限、稳定双路 OCR／embedding／rerank Docker 真实推理、流式／停止、浏览器业务、历史关联、换版、重建／恢复、日志和断开外部依赖后的重启与必要业务链。五容器上限须覆盖整个真实生命周期；旧 local Qdrant／SQLite 不能直接作为 server storage。前台会话中断恢复与完整 daemon 日志亦随实际启停／恢复留证。真实角色权限、数据库和模型业务验收是这些后票的执行门，不循环加回 01 的准备关闭条件。
+
+赛方 H800、GPU 运行时、委派权限、网络及扫描受理另列目标环境差异。本机 Qwen 假权重／协议替身持续标记，真实 Qwen／vLLM 的接口、推理、计数和业务质量未验；任何准备或软件检查均不升级为这些结果。
