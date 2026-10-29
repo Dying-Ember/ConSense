@@ -20,6 +20,8 @@
 
 **实施票据：**本次采用[本地票据索引](../../../.scratch/competition-external-runtime/README.md)，一票一文件，依赖与验收随票维护；当前跟踪约定见[本次跟踪器](../../../docs/agents/issue-tracker.md)。票据创建不代表已实施，最终票必须取得本机真实容器全栈试运行证据才可关闭。
 
+**OCR 运行依据：**已找回 PaddleOCR-VL-1.6 与 MinerU 4.0.10 Standard 的完整双路配置、历史正常 Java 接入和真实执行回执；模型 pins 与当前同 pin 资产核对见[双路 OCR 证据](../testing/competition-dual-ocr-evidence-20261029.md)。18190 的旧 CPU 支线不代表完整 OER 的全部能力；本次 Docker 推理仍须验证。
+
 **工程师准备图：**[目标架构与镜像准备图](competition-container-target-architecture-20261029.md)展示候选容器职责及外置文件，显卡方案和接口均待实测，不能视为已验证部署。
 
 ## 问题
