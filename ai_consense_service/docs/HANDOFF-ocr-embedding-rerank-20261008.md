@@ -1,3 +1,6 @@
+<!-- parallel-runtime-ticket01-20261029 -->
+**本次外置最新门控（2026-10-29）：**01准备门独立复核PASS，准备提交`7bfa3c60ac9ed4e474cb79c6b2e1c3a2df755d7b`已核验四引用一致。02／03／04由三个主会话并行实施，后票按依赖继续采用多主会话与子智能体。主控统一文件所有权、票据、看板和Git整合；02管理共享CPU环境，03资料槽，04唯一GPU槽，任何时候合计不超过五容器。方案为App、资料协调、同版H2 TCP持久库、Qdrant server与固定GPU，全部容器内具名consense10001:10001；详见[运行决定](specs/competition-runtime-plan-20261029.md)、[资产登记](testing/competition-protected-assets-20261029.md)及[票据](../../.scratch/competition-external-runtime/README.md)。用户要求主控接近上下文上限时等子智能体结束，保存精确handoff并创建新本机会话接力直到目标完成；真实模型、业务及恢复仍按各票实际验收。
+
 <!-- local-docker-nonroot-20261029 -->
 **容器执行最新决定（2026-10-29）：**使用 Docker；赛方限制容器内进程不得使用 root，镜像须准备具名非 root 运行账户并记录名称及 UID/GID，各职责、数据库、显卡及初始化等实际进程身份、硬盘和 GPU 权限须重新实测。安装／构建阶段与运行身份分开；不额外要求 Docker daemon rootless。此前 Podman 结果仅为探索，不证明 Docker 已通过；平台细则待核。
 

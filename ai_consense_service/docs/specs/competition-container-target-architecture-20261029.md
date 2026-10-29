@@ -1,6 +1,6 @@
 # 比赛部署：选定本机架构与镜像准备图
 
-**用途与状态：**供工程师按[运行方案决定](competition-runtime-plan-20261029.md)准备本机预演；已选定四个 CPU 常驻职责加一个固定 GPU 容器，不再把 MySQL 或临时 GPU 任务容器列为本轮待选方案。此图是准备约定，不是已部署系统或验收回执。票据 01 仍在整理证据并等待门审查，未关闭；02、03、04 按[票据依赖](../../../.scratch/competition-external-runtime/README.md)等待，不据本图进入实施。
+**用途与状态：**供工程师按[运行方案决定](competition-runtime-plan-20261029.md)准备本机预演；已选定四个 CPU 常驻职责加一个固定 GPU 容器，不再把 MySQL 或临时 GPU 任务容器列为本轮待选方案。此图是准备约定，不是已部署系统或验收回执。01准备材料已发布并独立复核通过，02／03／04由各自主会话按[票据依赖](../../../.scratch/competition-external-runtime/README.md)并行实施，后续实际验收分别留证。
 
 **运行身份：**使用 Docker，全部实际容器（包括数据库和初始化职责）采用具名账户 `consense`、UID/GID `10001:10001`；各角色实际进程、挂载和 GPU 权限仍须逐一验证。容器非 root 与构建／安装权限分开记录，不额外要求 Docker daemon rootless。本机 Qwen 仅使用明确标记的占位文件和兼容 API 协议替身；赛方真实 Qwen／vLLM、H800 兼容与推理未验。稳定 Paddle／MinerU 双路 OCR、embedding 与 rerank 后续必须以真实权重在 Docker 内推理。
 

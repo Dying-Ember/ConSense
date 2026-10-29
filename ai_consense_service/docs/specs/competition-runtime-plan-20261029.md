@@ -1,8 +1,8 @@
 # 比赛外置运行：票据 01 方案决定
 
-**状态：**2026-10-29 的本机运行方案决定及后续验证约定；不是业务部署回执，不关闭票据 01，也不授予 02–04 开工或通过状态。本文只新增运行决定，不修改实现、活动服务、数据库或 Git 引用。
+**状态：**2026-10-29 的本机运行方案决定及后续验证约定。准备材料已以 `7bfa3c60ac9ed4e474cb79c6b2e1c3a2df755d7b` 发布，独立复核 PASS 后由主控关闭 01、放行02／03／04并行实施；这不是业务部署或后票验收回执。方案准备没有修改活动服务或数据库。
 
-依据：[实施说明](competition-container-external-runtime-20261029.md)、[票据 01](../../../.scratch/competition-external-runtime/issues/01-baseline-and-runtime-plan.md)、[目标架构候选图](competition-container-target-architecture-20261029.md)、[文件布局](competition-file-layout-20261029.md)。冻结对照仍为 `8a40dfcca04730ba7b40cdefb36b596a37bbcb53`。此前取消的未完成工作不恢复；保留失败、未知和历史证据，不以旧质量 pins 为零作为本次运行改造的前置门。
+依据：[实施说明](competition-container-external-runtime-20261029.md)、[票据 01](../../../.scratch/competition-external-runtime/issues/01-baseline-and-runtime-plan.md)、[选定目标架构图](competition-container-target-architecture-20261029.md)、[文件布局](competition-file-layout-20261029.md)。冻结对照仍为 `8a40dfcca04730ba7b40cdefb36b596a37bbcb53`。此前取消的未完成工作不恢复；保留失败、未知和历史证据，不以旧质量 pins 为零作为本次运行改造的前置门。
 
 ## 选定职责与边界
 
