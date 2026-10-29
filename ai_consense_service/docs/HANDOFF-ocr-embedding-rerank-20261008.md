@@ -1,5 +1,5 @@
 <!-- external-app-deployment-20261029 -->
-**部署拆分入口（2026-10-29）：** App 外置模式的实际实现、验证边界与后续工作见[部署检查点](testing/external-app-deployment-20261029.md)。此模式外置 JAR 与前端 dist；Python 协调器／worker 外置、固定 GPU worker、镜像构建和赛方环境验收均未完成。
+**部署拆分入口（2026-10-29）：** 用户确认比赛业务模型为团队自行在 H800 部署的 Qwen3.8 27B；现场有 48 小时调试代码并产出最终结果，允许受控短暂停机。思考维持关闭、并发沿用现值，OCR 沿用当前已采用的稳定实现；业务、前端、配置和数据放持久盘，任何时刻容器不超过 5 个，并补充排查日志。已确认决定、App 外置模式的实际实现及验证边界见[部署检查点](testing/external-app-deployment-20261029.md)。此模式目前外置 JAR 与前端 dist；Python 协调器／worker 外置、固定 GPU worker、镜像构建和赛方环境验收均未完成，不代表模型或业务效果已验收。
 
 <!-- drafting-project-scc-authority-20261029 -->
 **Drafting 项目版次决定（2026-10-29）：** 用户已决定，本次项目以当前上传的 Word SCC 为准逐项对照冲突，NSC 通信事实继续保留；这不代表条号、适用性或付款主体冲突已解决。此决定仅适用于本项目，不推广为其他项目的选版规则。source 25 身份、决定回执及未决事项见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)。

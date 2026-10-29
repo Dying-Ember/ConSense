@@ -1,5 +1,13 @@
 # External application deployment checkpoint — 29 October 2026
 
+## User-confirmed competition deployment decisions
+
+On 29 October the user confirmed that the competition business LLM is **Qwen3.8 27B, deployed by our team on the H800**, not a pre-existing model API supplied by the organiser. The competition provides a 48-hour period for debugging code and producing the final result. A controlled short interruption for updates is acceptable; plan to let in-flight work finish and preserve saved data and history before switching. This does not establish the exact model revision, format, inference server, supported protocol, actual performance, or target-environment acceptance.
+
+Keep business and frontend source and release artifacts, editable configuration, the selected models and their required companion files, databases, source data and operational records on persistent storage; images provide the necessary fixed runtime. No more than five containers may exist concurrently, including during replacement or GPU work, and existing data flows, interfaces and functionality must be retained. Preserve existing business concurrency settings and the current disabled-thinking behavior. Retain the currently adopted OCR implementation and its existing evidence rules; do not introduce model replacement or training as part of this deployment. Provide useful persistent, access-controlled diagnostic logs without treating ordinary logs as a substitute for source or operation evidence.
+
+The fixed GPU execution role and its streaming, cancellation, process cleanup and resource-release behavior are a design direction, not an implemented or validated result. Platform permissions, container counting, offline builds, file scanning and storage semantics still require confirmation. Existing H800 or software-test records do not constitute target or business acceptance.
+
 The requested direction is to keep frequently changed business code and released application files on persistent storage, put stable runtimes in container images, and keep model files, databases, source documents, indexes and operational evidence on persistent storage. The intended topology is an application, an OER/RAG coordinator, a GPU execution role, MySQL and Qdrant. Container, image and Job limits, platform permissions, storage behavior and security scanning rules must be verified against the actual competition environment.
 
 ## Implemented local first step
