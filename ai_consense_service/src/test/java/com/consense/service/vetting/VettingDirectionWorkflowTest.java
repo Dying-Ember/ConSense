@@ -16,6 +16,23 @@ import static org.mockito.Mockito.*;
 
 /** Ordinary authored software checks; no provider, original, index or business endpoint is used. */
 class VettingDirectionWorkflowTest {
+    @Test void pendingInitialDirectionsTakePriorityOverOneSupplement(){
+        assertFalse(VettingSemanticReview.supplementFits(java.util.concurrent.TimeUnit.MINUTES.toNanos(10),java.util.concurrent.TimeUnit.MINUTES.toNanos(3),3,27),"Ten minutes cannot cover twenty-four pending one-minute initials and a supplement");
+    }
+    @Test void ampleTimeCanCoverPendingInitialDirectionsAndSupplement(){
+        assertTrue(VettingSemanticReview.supplementFits(java.util.concurrent.TimeUnit.MINUTES.toNanos(30),java.util.concurrent.TimeUnit.MINUTES.toNanos(3),3,27));
+    }
+    @Test void noPendingInitialDirectionsNeedsOnlySupplementReserve(){
+        assertTrue(VettingSemanticReview.supplementFits(java.util.concurrent.TimeUnit.MINUTES.toNanos(3),java.util.concurrent.TimeUnit.MINUTES.toNanos(27),27,27));
+    }
+    @Test void combinedInitialAndSupplementReserveKeepsStrictDeadlineBoundary(){
+        long reserve=java.util.concurrent.TimeUnit.MINUTES.toNanos(26);
+        assertFalse(VettingSemanticReview.supplementFits(reserve,java.util.concurrent.TimeUnit.MINUTES.toNanos(3),3,27));
+        assertTrue(VettingSemanticReview.supplementFits(reserve+1,java.util.concurrent.TimeUnit.MINUTES.toNanos(3),3,27));
+    }
+    @Test void overflowingWorkEstimateCannotAdmitASupplement(){
+        assertFalse(VettingSemanticReview.supplementFits(Long.MAX_VALUE,Long.MAX_VALUE,1,27));
+    }
     @Test void actualDirectionLoopbackBindsFormattedLiteralToTheSealedGeneration()throws Exception{exerciseDispatchAdmission(false);}
     @Test void changedRepairUserDoesNotReuseTheOriginalLiteralReceipt()throws Exception{exerciseDispatchAdmission(true);}
     @Test void admissionReceiptsHaveAFiniteUnitCapWithoutTrimmingTheModelText()throws Exception{exerciseDispatchAdmission(false,130);}
@@ -349,6 +366,7 @@ class VettingDirectionWorkflowTest {
         OerBusinessEvidence.Session session=ctor.newInstance("authored","vetting",Collections.singletonList(1L),Collections.emptyList(),new LinkedHashMap<>(),Collections.emptyMap());
         List<Chunk> corpusChunks=new ArrayList<>(Arrays.asList(tender,secondTender,unrelated,projectGcc,counterpartContext));if(fullRequiredManifest)corpusChunks.addAll(manifestText);
         List<Chunk> corpus=corpus(session,corpusChunks);
+        when(oer.retrieveRequiredProjectText(eq(session),anyString(),anyList(),any(),anyInt())).thenCallRealMethod();
         when(oer.retrieveRequiredProjectText(eq(session),eq("APU.A010"),any(),anyInt())).thenReturn(fullRequiredManifest?new OerBusinessEvidence.ReviewTextChunks(manifestText,Collections.singleton(manifestHeading.getId())):Collections.emptyList());
         when(oer.retrieveReviewText(eq(session),anyString(),nullable(String.class),any(),anyInt())).thenAnswer(call->{String query=call.getArgument(1),role=call.getArgument(2);
             if(role==null){counterpartProjectQueries.add(query);return projectCopy?(fullProjectContext?new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(counterpartContext,projectGcc),Collections.singleton(projectGcc.getId())):Collections.singletonList(projectGcc)):Collections.emptyList();}
@@ -359,7 +377,7 @@ class VettingDirectionWorkflowTest {
             result=(VettingSemanticReview.Result)run.invoke(review,"authored",new VettingSemanticReview.Result(),corpus,corpus,"en",null,(Runnable)()->{},VettingReviewProbe.start(props,null,"authored"));
         }
         if(selectionChanged){assertTrue(users.isEmpty());assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("Fixed reference editions changed")));return;}
-        assertEquals(1,users.size());String prompt=users.get(0);assertTrue(prompt.contains(tender.getContent()));
+        assertEquals(general?1:2,users.size(),"An empty checklist packet receives one bounded coverage attempt after initial directions");String prompt=users.get(0);assertTrue(prompt.contains(tender.getContent()));
         if(general){assertTrue(standardQueries.isEmpty());assertTrue(counterpartProjectQueries.isEmpty());assertTrue(prompt.contains("Assigned review direction: GENERAL-"));return;}
         assertTrue(standardQueries.contains(fullRequiredManifest?"GCC 1.1":"GCC 5.7"));assertTrue(counterpartProjectQueries.contains(fullRequiredManifest?"GCC 1.1":"GCC 5.7"));
         assertFalse(prompt.contains("Standard references have not yet been searched"));
@@ -378,7 +396,7 @@ class VettingDirectionWorkflowTest {
     @Test void actualDirectionCallerUsesOneNamedNeedForTargetedFollowupAndKeepsTheRestPending()throws Exception{ exerciseTargetedFollowup(false,0); }
     @Test void namedStandardNeedRetrievesSelectedStandardAfterTheFirstReview()throws Exception{ exerciseTargetedFollowup(true,0); }
     @Test void actualPendingFactNamesPssAndSlAndRetainsItsChecklistLineage()throws Exception{exerciseTargetedFollowup(true,0,false,55,true);}
-    @Test void slowInitialDirectionsAllowOneEarlyNeedAndRetainEveryInitialAssignment()throws Exception{exerciseTargetedFollowup(false,50);}
+    @Test void slowInitialDirectionsReserveEveryInitialAssignmentBeforeTheNeed()throws Exception{exerciseTargetedFollowup(false,50);}
     @Test void deadlineLeavesUnsubmittedDirectionsWhileBothNamedNeedsShareTheEarlierGroup()throws Exception{exerciseTargetedFollowup(false,60,true,24);}
     @Test void actualCallerGroupsBothDistinctNamedNeedsWithoutDiscardingEitherQuery()throws Exception{exerciseTargetedFollowup(false,0,true);}
     @Test void defaultFiftyFiveMinuteScheduleAllowsDirectionsBeyondTheFormerDeadline()throws Exception{exerciseTargetedFollowup(false,60,false,55);}
@@ -435,6 +453,7 @@ class VettingDirectionWorkflowTest {
                 Map<String,Object> record=new LinkedHashMap<>();VettingCompetitionFixture.details(record);record.put("assessment",turn==0?"issue":"consistent");record.put("type",turn==0?"conflict":"requirement");record.put("severity","low");
                 record.put("title","Authored source assessment");record.put("comment",turn==0?(multipleNeeds?otherNeed:"More evidence is required for this assessment."):"The supplied affected text and named counterpart state the submission method.");record.put("impact","Review only");record.put("suggestion","Retain the source-supported result");
                 if(turn==0){record.put("pendingFacts",pendingOnly?Arrays.asList("Whether the project has multiple Work Sections where GS CEW applies only to some",need):Collections.singletonList(need));record.put("suggestedAction","review");Map<String,Object> check=new LinkedHashMap<>();check.put("itemId","APP-I-001");check.put("status","insufficient_evidence");check.put("reason",pendingOnly?"SP/1 adopts GS CEW but does not state which parts of the Works are subject to it.":need);check.put("support",null);record.put("checklistAssessments",Collections.singletonList(check));}
+                else{List<Map<String,Object>> checks=new ArrayList<>();java.util.regex.Matcher rows=java.util.regex.Pattern.compile("(?m)^(APP-I-\\d+) \\| ").matcher(users.get(users.size()-1));while(rows.find()){Map<String,Object> check=new LinkedHashMap<>();check.put("itemId",rows.group(1));check.put("status","fulfilled");check.put("reason",record.get("comment"));check.put("support",null);checks.add(check);}record.put("checklistAssessments",checks);}
                 record.put("evidence",Collections.singletonList(new LinkedHashMap<String,Object>(){{put("chunkId","R1");put("side","source");put("quote",a.getContent());}}));
                 output="{\"records\":"+JsonUtils.write(Collections.singletonList(record))+"}";
             }
@@ -457,6 +476,7 @@ class VettingDirectionWorkflowTest {
         Chunk manifest=chunk("required-list","Reference drawings are for reference only and do not form part of the Contract. ".repeat(12));manifest.setRole("package_manifest");manifest.setFileKey("APU");
         Chunk manifestHeading=chunk("required-list-heading","APU.A010.P");manifestHeading.setRole("package_manifest");manifestHeading.setFileKey("APU");
         Chunk bulk=chunk("bulk-context","Unrelated context. ".repeat(500));
+        when(oer.retrieveRequiredProjectText(eq(session),anyString(),anyList(),any(),anyInt())).thenCallRealMethod();
         when(oer.retrieveRequiredProjectText(eq(session),eq("APU.A010"),any(),anyInt())).thenReturn(new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(manifestHeading,manifest),Collections.singleton(manifestHeading.getId())));
         List<Chunk> corpus=corpus(session,requiredList?Arrays.asList(a,b,manifestHeading,manifest,bulk):Arrays.asList(a,b));AtomicInteger initial=new AtomicInteger();List<String> queries=new ArrayList<>();
         when(oer.retrieveReviewText(eq(session),anyString(),nullable(String.class),any(),anyInt())).thenAnswer(call->{String query=call.getArgument(1);queries.add(query);if(allNonempty)queryStarts.add(nanos.get());
@@ -480,17 +500,16 @@ class VettingDirectionWorkflowTest {
             assertEquals(27,result.getTopicAudits().size(),"Every checklist/general direction retains its independent audit");
             int started=(int)result.getTopicAudits().stream().filter(t->!t.getPacketAudits().isEmpty()).count();
             System.out.println("AUTHORED_DIRECTION_SCHEDULE modelSeconds="+modelSeconds+" initialRagSeconds="+initialSeconds+" fixedLookupSeconds="+fixedSeconds+" elapsedSeconds="+java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(nanos.get())+" initialCalls="+started+" firstNeedAfterInitials="+needAfterInitials.get()+" generations="+generations.get());
-            assertEquals(3,needAfterInitials.get(),"One concrete requested round is allowed after the first three initial directions");
             for(Long startedAt:queryStarts)assertTrue(startedAt<java.util.concurrent.TimeUnit.MINUTES.toNanos(55),"No new retrieval starts after the scheduling deadline");
             for(Long startedAt:providerStarts)assertTrue(startedAt<java.util.concurrent.TimeUnit.MINUTES.toNanos(55),"No new provider reservation starts after the scheduling deadline in this scenario");
-            if(modelSeconds==45){assertEquals(27,initial.get());assertEquals(27,started);assertEquals(28,generations.get());assertTrue(nanos.get()<java.util.concurrent.TimeUnit.MINUTES.toNanos(55));}
-            else{assertEquals(22,started);assertEquals(23,generations.get(),"One supplement consumes time formerly available for one additional initial direction");
-                assertEquals(5,result.getTopicAudits().stream().filter(t->t.getPacketAudits().isEmpty()).count());
+            if(modelSeconds==45){assertEquals(18,needAfterInitials.get(),"The observed retrieval/model mean admits a round only after enough initial work is reserved");assertEquals(27,initial.get());assertEquals(27,started);assertEquals(28,generations.get());assertTrue(nanos.get()<java.util.concurrent.TimeUnit.MINUTES.toNanos(55));}
+            else{assertEquals(-1,needAfterInitials.get(),"A requested round must not consume the time needed by pending initial directions");assertEquals(23,started);assertEquals(23,generations.get());
+                assertEquals(4,result.getTopicAudits().stream().filter(t->t.getPacketAudits().isEmpty()).count());
                 assertTrue(result.getTopicAudits().stream().filter(t->t.getPacketAudits().isEmpty()).allMatch(t->"not_submitted".equals(t.getStatus())&&"not_completed".equals(t.getCheckState())&&t.getError().contains("budget")));}
             progressScope.remove();return;
         }
         if(initialSeconds>=60&&runMinutes==24){
-            assertEquals(24,initial.get());assertEquals(3,generations.get());assertTrue(queries.contains(need));assertTrue(queries.contains(otherNeed),"Both targets share the admitted assessment round");
+            assertEquals(24,initial.get());assertEquals(2,generations.get());assertFalse(queries.contains(need));assertFalse(queries.contains(otherNeed),"Both targets remain queued when pending initials need the remaining time");
             assertEquals(3,result.getTopicAudits().stream().filter(t->t.getError()!=null&&t.getError().contains("Run evidence/time budget")).count());
             assertEquals(1,result.getTopicAudits().get(0).getPacketAudits().get(0).getEvidenceNeeds().size());
             assertEquals(Arrays.asList(need,otherNeed),result.getTopicAudits().get(0).getPacketAudits().get(0).getEvidenceNeeds().get(0).getOriginalQueries());
@@ -505,7 +524,7 @@ class VettingDirectionWorkflowTest {
         List<String> longQueries=VettingReviewDirections.searchQueries(longDirection.query);
         assertTrue(longQueries.size()>1);assertFalse(queries.containsAll(longQueries),"Initial retrieval must use a concise direction query, retaining the complete checklist only in model instructions");
         assertEquals(result.getTopicAudits().size(),initial.get(),"Each direction receives one initial retrieval, before any model-requested evidence search");
-        if(!standardNeed)assertEquals(3+knownReferences.size(),queries.indexOf(need),"The first concrete supplement must not wait behind every initial direction");
+        if(!standardNeed){int beforeNeed=initialSeconds==50&&runMinutes==24?27:3;assertEquals(beforeNeed,needAfterInitials.get());assertEquals(beforeNeed+knownReferences.size(),queries.indexOf(need),"Requested evidence runs early only when the initial-work reserve fits");}
         assertTrue(result.getCandidates().isEmpty(),"An unconfirmed conflict need cannot become a published conflict");
         assertTrue(users.get(0).contains("APP-I-001"));assertFalse(users.get(0).contains("APP-I-002"));assertTrue(users.get(0).contains(VettingChecklistCatalog.items().get(0).getDescription()));
         assertTrue(users.get(0).contains("Standard references have not yet been searched"));
@@ -669,5 +688,5 @@ class VettingDirectionWorkflowTest {
         p.setCanonicalSourceHash(VettingCorpus.hash("canonical-"+revision));p.setProjectionSha256(VettingCorpus.hash("projection-"+revision));
         p.setProjectionRevisionSha256(VettingCorpus.hash("projection-revision-"+revision));p.setSourceOrder(JsonUtils.mapper().getNodeFactory().numberNode(order));c.setCanonicalEvidence(p);return c;
     }
-    private static Chunk chunk(String id,String text){Chunk c=VettingContextBudgetTest.chunk(id,"SCT1",text,text.length());c.setDocumentId("1");c.setFileName("Authored tender.docx");return c;}
+    private static Chunk chunk(String id,String text){Chunk c=VettingContextBudgetTest.chunk(id,"SCT1",text,text.length());c.setDocumentId("1");c.setFileName("Authored tender.docx");c.setSourceHash(VettingCorpus.hash("AUTHORED direction source"));c.setOriginalSourceSha256(VettingCorpus.hash("AUTHORED direction original"));return c;}
 }

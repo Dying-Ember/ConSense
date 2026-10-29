@@ -68,6 +68,15 @@ class VettingChecklistSourceBindingTest {
         assertUnknownFact(fixture.bind(),0,"fact_text_missing_or_ambiguous_in_quote");
     }
 
+    @Test void finalEvidenceReferenceStillRequiresItsMatchingCurrentNativeSource() {
+        NativeFixture f=new NativeFixture();
+        for(int i=3;i<16;i++){f.quotes.add(f.quotes.get(0));f.saved.getEvidence().add(f.saved.getEvidence().get(0));f.saved.getEvidenceChunkIds().add(f.saved.getEvidenceChunkIds().get(0));}
+        f.claim.getSupport().getFacts().get(0).setEvidenceIndex(15);
+        assertEquals("bound_current_native_interval",f.bind().path("sourceBindings").get(0).path("bindingStatus").asText());
+        f.saved.getEvidenceChunkIds().set(15,"different-source");
+        assertEquals("unknown",f.bind().path("sourceBindings").get(0).path("bindingStatus").asText());
+    }
+
     @Test void compactSemanticQuotesBindThroughTheirExactVerifiedOriginalPointer() {
         NativeFixture fixture=new NativeFixture();fixture.semantic(false);JsonNode relation=fixture.bind();
         assertEquals("current_native_intervals_bound_roles_and_scope_unverified",relation.path("supportStatus").asText());

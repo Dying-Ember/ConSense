@@ -317,6 +317,8 @@ test('real Vetting evidence mapping retains the optional canonical pointer and o
   const bound = canonicalPointer('vetting'), h = await harness({ canonicalEvidence: bound, browserCrypto: null })
   try {
     await openFinding(h); await flushCanonical()
+    assert.equal(h.canonicalRequests.length, 0, 'Opening a finding must not automatically read canonical evidence')
+    await button(h, 'View source context').props.onClick(); await flushCanonical()
     assert.equal(h.canonicalRequests.length, 4)
     assert.ok(h.canonicalRequests.every(request => request.options.method === 'GET' && request.url.includes('?module=vetting')))
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 3)
@@ -344,7 +346,7 @@ test('long cited passages start with an honest short preview and offer the compl
   const h = await harness({ initialView: 'advice', adviceMessages: [message] })
   try {
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await settle()
-    const preview = () => find(h.root, node => node.props?.class === 'sv-para').props.innerHTML
+    const preview = () => text(find(h.root, node => node.props?.class === 'sv-para'))
     assert.match(preview(), /Opening paragraph/)
     assert.doesNotMatch(preview(), /Later supporting paragraph/)
     assert.match(text(h.root), /exact supporting sentences have not been identified/i)
@@ -353,6 +355,25 @@ test('long cited passages start with an honest short preview and offer the compl
     await button(h, 'Show shorter preview').props.onClick(); await settle()
     assert.doesNotMatch(preview(), /Later supporting paragraph/)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('a citation does not mark arbitrary question words as supporting sentences', async () => {
+  const passage = 'The information for Tender shall include the complete supporting record <draft> & works.'
+  const citation = { evidenceId: '[1]', fileLabel: 'AUTHORED GCC', pageNo: 'P1', anchor: '14.1', content: passage, score: 0.9 }
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url, body }) => url.endsWith('/ask/stream')
+    ? { sessionId: body.sessionId, grounded: true, title: localized('Reply'), content: localized('Analysis [1]'), citations: ['[1]'], sources: [citation] }
+    : undefined })
+  try {
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('For this tender, what information is required?'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle()
+    const pane = find(h.root, node => node.props?.class === 'sv-para')
+    assert.ok(pane, 'The cited passage is visible')
+    const rendered = pane.props.innerHTML ?? text(pane)
+    assert.doesNotMatch(rendered, /<mark(?:\s|>)/i, 'Question-word matches are not presented as exact supporting sentences')
+    assert.match(rendered, /information for Tender/)
+    assert.equal(text(pane), passage, 'Original text including literal markup is displayed as text')
+    assert.match(text(h.root), /Select a citation to read the source passage/i)
   } finally { h.dispose() }
 })
 
@@ -921,11 +942,66 @@ test('real Advice view displays a fenced flowchart, retains prose and citations,
     assert.match(text(h.root), /Recorded model: qwen3\.8-27b/)
     assert.doesNotMatch(text(h.root), /internal-profile|qwen-chat-completions|Configured profile|independently attested/)
     assert.match(text(h.root), /Draft flowchart - not independently verified/)
-    assert.match(text(h.root), /Evidence is insufficient for the complete requested conclusion/)
+    assert.match(text(h.root), /Draft flowchart ready for review; the substantive answer has not been validated/)
+    assert.doesNotMatch(text(h.root), /Evidence is insufficient for the complete requested conclusion/)
     assert.equal(renders, 1)
     assert.ok(find(h.root, node => node.tag === 'button' && node.props.class === 'citation' && text(node) === '[1]'))
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
   } finally { h.dispose() }
+})
+
+const draftGraph = 'flowchart TD\n A["Start [1]"] --> B["Finish [1]"]'
+function draftRendererBoundaries() {
+  const sanitize = require('dompurify')(new (require('jsdom').JSDOM)('').window)
+  return {
+    mermaid: { __esModule: true, default: { initialize() {}, async render() { return { svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Authored draft [1]</text></svg>' } } } },
+    dompurify: { __esModule: true, default: sanitize }
+  }
+}
+function authoredDraftReply(sessionId, overrides = {}) {
+  return { sessionId, messageId: 9, grounded: false, basisScope: 'insufficient', clarifications: [], sourceScope: 'fullset',
+    title: localized('Draft flowchart - not independently verified'), content: localized('Draft based on selected text.\n\n```mermaid\n' + draftGraph + '\n```\n\nSources consulted [1]'),
+    citations: ['[1]'], sources: [], unknownScope: 'fullset', evidenceId: null, model: 'qwen3.8-27b', ...overrides }
+}
+test('Advice draft flowchart completion reports review status without claiming evidence insufficiency or grounding', async () => {
+  let returned
+  const h = await harness({ initialView: 'advice', answerRendererBoundaries: draftRendererBoundaries(), respondOverride: ({ url, body }) => {
+    if (url.endsWith('/ask/stream')) return returned = authoredDraftReply(body.sessionId)
+  } })
+  try {
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Draw the selected procedure'); await settle()
+    await button(h, 'Ask').props.onClick(); await flushCanonical()
+    assert.equal(h.requests.filter(request => request.url.endsWith('/ask/stream')).length, 1)
+    assert.match(h.store.toast.message, /Draft flowchart ready for review; the substantive answer has not been validated/)
+    assert.doesNotMatch(h.store.toast.message, /I don.t know/)
+    assert.match(text(h.root), /Draft flowchart ready for review; the substantive answer has not been validated/)
+    assert.doesNotMatch(text(h.root), /Evidence is insufficient for the complete requested conclusion/)
+    assert.ok(find(h.root, node => typeof node.props?.innerHTML === 'string' && node.props.innerHTML.includes('<svg')))
+    assert.ok(find(h.root, node => node.tag === 'button' && node.props.class === 'citation' && text(node) === '[1]'))
+    assert.equal(returned.grounded, false); assert.equal(returned.basisScope, 'insufficient')
+    assert.deepEqual(returned.citations, ['[1]']); assert.deepEqual(returned.clarifications, [])
+  } finally { h.dispose() }
+})
+test('Advice unresolved evidence and non-draft replies retain warning toast, details and citations', async () => {
+  for (const variation of [
+    { clarifications: ['The referenced procedure clause is still missing.'] },
+    { title: localized('Limited answer'), content: localized('The requested conclusion needs more evidence [1].'), clarifications: ['The operative clause is missing.'] },
+    { content: localized('No diagram was returned [1].') },
+    { title: localized('Limited answer') }
+  ]) {
+    const h = await harness({ initialView: 'advice', answerRendererBoundaries: draftRendererBoundaries(), respondOverride: ({ url, body }) => {
+      if (url.endsWith('/ask/stream')) return authoredDraftReply(body.sessionId, variation)
+    } })
+    try {
+      find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Draw the selected procedure'); await settle()
+      await button(h, 'Ask').props.onClick(); await flushCanonical()
+      assert.match(h.store.toast.message, /I don.t know/)
+      assert.match(text(h.root), /Evidence is insufficient for the complete requested conclusion/)
+      assert.doesNotMatch(text(h.root), /Draft flowchart ready for review; the substantive answer has not been validated/)
+      for (const clarification of variation.clarifications ?? []) assert.ok(text(h.root).includes(clarification))
+      assert.ok(find(h.root, node => node.tag === 'button' && node.props.class === 'citation' && text(node) === '[1]'))
+    } finally { h.dispose() }
+  }
 })
 
 const sessions = [
@@ -933,6 +1009,111 @@ const sessions = [
   { id: 'session-B', projectId: 'project-A', scope: 'contract', basisScope: 'reference_only', createdAt: '2026-10-13T00:02:00Z' }
 ]
 function sessionSelect(h) { return find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'session-A')) }
+
+function draftScopeReply({ url }, edition = '2022') {
+  if (url.endsWith('/sessions')) return sessions
+  if (url === '/oer/fixed-baseline/status') return { configured: true }
+  if (url.endsWith('/selection')) {
+    const slSources = [{ editionId: edition, sha256: edition === '2022' ? 'a'.repeat(64) : 'b'.repeat(64) }]
+    return { manifestSha256: 'f'.repeat(64), availableSlSources: slSources, selection: { manifestSha256: 'f'.repeat(64), slSources } }
+  }
+  if (url === '/oer/sl-library/status') return { versions: [], job: { status: 'idle' }, retrievalAvailable: true }
+}
+
+test('unsent Advice draft survives reload while source checking is pending without submitting', async () => {
+  const sessionStore = new Map(), question = '  Explain interim payment submissions.\nKeep the project amendments.  '
+  const first = await harness({ initialView: 'advice', respondOverride: draftScopeReply, sessionStore })
+  try {
+    sessionSelect(first).props['onUpdate:modelValue']('session-A'); await settle()
+    find(first.root, node => node.tag === 'textarea').props['onUpdate:modelValue'](question); await settle()
+  } finally { first.dispose() }
+  const status = deferred()
+  const reopened = await harness({ initialView: 'advice', sessionStore, respondOverride: request =>
+    request.url.includes('/index/status?') ? status.promise : draftScopeReply(request) })
+  try {
+    await settle()
+    assert.equal(find(reopened.root, node => node.tag === 'textarea').value, question)
+    assert.equal(reopened.requests.some(request => request.method !== 'get'), false)
+    status.resolve({ chunks: 24831, message: localized('Checked full package') }); await settle()
+    assert.equal(find(reopened.root, node => node.tag === 'textarea').value, question)
+  } finally { status.resolve({ chunks: 24831 }); reopened.dispose() }
+})
+
+test('unsent Advice drafts are isolated by project session scope basis and saved SL selection', async () => {
+  const sessionStore = new Map(), first = await harness({ initialView: 'advice', respondOverride: draftScopeReply, sessionStore })
+  try {
+    sessionSelect(first).props['onUpdate:modelValue']('session-A'); await settle()
+    find(first.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Project contract draft'); await settle()
+    sessionSelect(first).props['onUpdate:modelValue']('session-B'); await settle()
+    assert.equal(find(first.root, node => node.tag === 'textarea').value, '')
+    find(first.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Reference-only draft'); await settle()
+    sessionSelect(first).props['onUpdate:modelValue']('session-A'); await settle()
+    assert.equal(find(first.root, node => node.tag === 'textarea').value, 'Project contract draft')
+    await first.store.switchProject('project-B'); await settle()
+    assert.equal(find(first.root, node => node.tag === 'textarea').value, '')
+  } finally { first.dispose() }
+  for (const change of ['scope', 'basis', 'SL']) {
+    sessionStore.set('consense.advice.session.project-A', 'session-A')
+    const changed = await harness({ initialView: 'advice', sessionStore, respondOverride: request => {
+      if (request.url.endsWith('/sessions')) return sessions.map(session => session.id !== 'session-A' ? session
+        : { ...session, ...(change === 'scope' ? { scope: 'tender' } : change === 'basis' ? { basisScope: 'reference_only' } : {}) })
+      return draftScopeReply(request, change === 'SL' ? '2025' : '2022')
+    } })
+    try { await settle(); assert.equal(find(changed.root, node => node.tag === 'textarea').value, '', change) }
+    finally { changed.dispose() }
+  }
+  const original = await harness({ initialView: 'advice', respondOverride: draftScopeReply, sessionStore })
+  try { await settle(); assert.equal(find(original.root, node => node.tag === 'textarea').value, 'Project contract draft') }
+  finally { original.dispose() }
+})
+
+test('submitted Advice draft stays cleared after reload and does not submit again', async () => {
+  const sessionStore = new Map(), first = await harness({ initialView: 'advice', respondOverride: draftScopeReply, sessionStore })
+  try {
+    sessionSelect(first).props['onUpdate:modelValue']('session-A'); await settle()
+    find(first.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Explain the payment conditions'); await settle()
+    await button(first, 'Ask').props.onClick(); await settle()
+    assert.equal(first.requests.filter(request => request.url.endsWith('/ask/stream')).length, 1)
+    assert.equal(find(first.root, node => node.tag === 'textarea').value, '')
+  } finally { first.dispose() }
+  const reopened = await harness({ initialView: 'advice', respondOverride: draftScopeReply, sessionStore })
+  try {
+    await settle(); assert.equal(find(reopened.root, node => node.tag === 'textarea').value, '')
+    assert.equal(reopened.requests.some(request => request.method !== 'get'), false)
+  } finally { reopened.dispose() }
+})
+
+test('new-session Advice draft moves with its session and a failed submit remains available after reload', async () => {
+  const sessionStore = new Map()
+  let created = false
+  const createdSession = { ...sessions[0], id: 'session-1' }
+  const reply = request => {
+    if (request.url.endsWith('/sessions')) {
+      if (request.method === 'get') return created ? [createdSession] : []
+      created = true
+      return createdSession
+    }
+    if (request.url.endsWith('/ask/stream')) return { code: 4205, message: 'Authored submission failure', data: null }
+    return draftScopeReply(request)
+  }
+  const first = await harness({ initialView: 'advice', respondOverride: reply, sessionStore })
+  try {
+    find(first.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Retain this new-session question'); await settle()
+    await button(first, 'Create new session').props.onClick(); await settle()
+    assert.equal(find(first.root, node => node.tag === 'textarea').value, 'Retain this new-session question')
+    await button(first, 'Ask').props.onClick(); await settle()
+    assert.equal(find(first.root, node => node.tag === 'textarea').value, 'Retain this new-session question')
+    const drafts = [...sessionStore.entries()].filter(([key]) => key.startsWith('consense.advice.question.v1.'))
+    assert.equal(drafts.length, 1, 'The pre-session copy must not survive as a second unsent draft')
+    assert.match(drafts[0][0], /session-1/)
+  } finally { first.dispose() }
+  const reopened = await harness({ initialView: 'advice', respondOverride: reply, sessionStore })
+  try {
+    await settle()
+    assert.equal(find(reopened.root, node => node.tag === 'textarea').value, 'Retain this new-session question')
+    assert.equal(reopened.requests.some(request => request.method !== 'get'), false)
+  } finally { reopened.dispose() }
+})
 
 function authoredOriginalReaderBoundaries(reads) {
   return {

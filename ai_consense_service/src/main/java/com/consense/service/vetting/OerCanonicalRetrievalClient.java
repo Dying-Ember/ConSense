@@ -276,6 +276,7 @@ public class OerCanonicalRetrievalClient {
     public SemanticSources prepareCompactNormalSources(String module,List<CanonicalSourceBinding> current){return prepareSemanticSources(module,current,true);}
     private SemanticSources prepareSemanticSources(String module,List<CanonicalSourceBinding> current,boolean compactNormal){
         require(current!=null&&!current.isEmpty(),"semantic sources missing");String policy=current.get(0).getScopePolicySha256();
+        CanonicalEvidenceService.checkVerifiedBindings(current,module);
         ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("module",module);request.put("operation","prepare");request.put("view","semantic_units");request.put("maxBytes",16777216);
         ArrayNode addresses=request.putArray("projectionSha256");Set<Long> ids=new HashSet<>();for(CanonicalSourceBinding binding:current){
             require(binding!=null&&ids.add(binding.getDocumentId())&&policy.equals(binding.getScopePolicySha256())&&sha(binding.getProjectionSha256()),"semantic source pins differ");addresses.add(binding.getProjectionSha256());}
@@ -294,7 +295,8 @@ public class OerCanonicalRetrievalClient {
                 &&"prepared".equals(result.path("coverage").path("status").asText())&&result.path("origins").isArray()&&result.path("origins").isEmpty()&&result.path("units").isArray()&&result.path("units").isEmpty(),"semantic preparation receipt differs");
         require(result.path("readManifestSha256").isArray()&&result.path("readManifestSha256").size()==current.size()&&sha(result.path("readManifestToken").asText()),"semantic preparation addresses missing");
         for(JsonNode manifest:result.path("readManifestSha256"))require(manifest.isTextual()&&sha(manifest.asText()),"semantic manifest identity invalid");
-        int total=validateSemanticCatalog(result.path("sources"),current);require(integer(result.path("coverage").path("totalOrigins"))&&total==result.path("coverage").path("totalOrigins").asInt(),"semantic preparation count differs");
+        int total=validateSemanticCatalog(result.path("sources"),current,module);require(integer(result.path("coverage").path("totalOrigins"))&&total==result.path("coverage").path("totalOrigins").asInt(),"semantic preparation count differs");
+        CanonicalEvidenceService.checkVerifiedBindings(current,module);
         if(compactNormal)require(COMPACT_NORMAL_PROOF.equals(result.path("normalProofVersion").asText())&&result.path("normalProofs").isArray()&&result.path("normalProofs").size()==current.size(),"compact normal preparation proof missing");
         return new SemanticSources(module,policy,before,runtime,result,current,total);
     }
@@ -404,11 +406,18 @@ public class OerCanonicalRetrievalClient {
         require(processed==selected.total?result.path("nextCursor").isNull():result.path("nextCursor").isTextual()&&sourceCursorOffset(result.path("nextCursor"),scopeSha,selected.total)==processed,"semantic dictionary cursor differs");
         require((processed<selected.total?"partial":denied.isEmpty()?"complete":"complete_with_blocked").equals(coverage.path("status").asText()),"semantic dictionary scan status differs");
     }
-    private static int validateSemanticCatalog(JsonNode sources,List<CanonicalSourceBinding> bindings){
+    private static int validateSemanticCatalog(JsonNode sources,List<CanonicalSourceBinding> bindings,String module){
         require(sources.isArray()&&sources.size()==bindings.size(),"semantic source catalog differs");int total=0;for(int i=0;i<bindings.size();i++){CanonicalSourceBinding binding=bindings.get(i);JsonNode source=sources.get(i);
             require(binding.getProjectionSha256().equals(source.path("projectionSha256").asText())&&String.valueOf(binding.getDocumentId()).equals(source.path("documentId").asText())
                     &&binding.getOriginalSourceSha256().equals(source.path("originalSourceSha256").asText())&&binding.getCanonicalSourceHash().equals(source.path("sourceHash").asText())
-                    &&binding.getJavaParsedSourceHash().equals(source.path("javaParsedSourceHash").asText())&&integer(source.path("chunkCount")),"semantic source identity differs");
+                    &&integer(source.path("chunkCount")),"semantic source identity differs");
+            JsonNode parsed=source.path("javaParsedSourceHash");
+            if(!parsed.isTextual()||!binding.getJavaParsedSourceHash().equals(parsed.asText())){
+                String producer=CanonicalEvidenceService.reviewedNativeProducer(bindings,binding,module);
+                require(parsed.isNull()&&producer!=null&&producer.equals(source.path("producerKind").asText())
+                        &&binding.getSourceRevisionSha256().equals(source.path("sourceRevisionSha256").asText())
+                        &&binding.getProjectionRevisionSha256().equals(source.path("projectionRevisionSha256").asText()),"semantic source identity differs");
+            }
             if(source.hasNonNull("sourceRevisionSha256"))require(binding.getSourceRevisionSha256().equals(source.path("sourceRevisionSha256").asText()),"semantic source revision differs");total=Math.addExact(total,source.path("chunkCount").asInt());}
         return total;
     }
@@ -600,6 +609,7 @@ public class OerCanonicalRetrievalClient {
             ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("projectId",key);request.put("module",module);
             request.set("projectionSha256",JsonUtils.mapper().valueToTree(selected.projections));if(build&&rebuild)request.put("rebuild",true);
             if(!selected.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(selected.sourcePageEvidence));
+            if(build)sourceExit.run();
             sourceGuard.run();String wire=http.postJson(url(module,build?"/index-canonical":"/index-canonical/status"),JsonUtils.write(request),properties.getVetting().getRetrievalIndexTimeoutMs());sourceGuard.run();
             JsonNode result=build?JsonUtils.parse(wire):statusReceipt(wire);
             require(key.equals(result.path("projectId").asText())&&integer(result.path("indexed"))&&result.path("indexed").asInt()==expectedChunks

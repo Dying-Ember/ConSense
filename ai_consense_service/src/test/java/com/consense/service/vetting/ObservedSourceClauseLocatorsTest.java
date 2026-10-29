@@ -150,9 +150,19 @@ class ObservedSourceClauseLocatorsTest {
         }
     }
 
-    @Test void aLocatedNormalizedShortOrRepeatedQuoteDoesNotGrantSourceClauseOwnership()throws Exception{
+    @Test void aShortExactUniqueNativeQuoteRetainsItsBoundSourceClause()throws Exception{
+        Fixture f=fixture("NTT1 Not used.");String quote="Not used.";assertEquals(9,quote.length());
+        ObservedSourceClauseLocators.Bound bound=ObservedSourceClauseLocators.capture(f.pointer,f.canonical,"tender",f.word);assertNotNull(bound);
+        assertTrue(VettingCorpus.evidence(f.chunk,"source",quote).isLocated());
+        assertEquals(Collections.singleton("NTT1"),bound.references(f.chunk,quote));
+        assertTrue(reasons(f.chunk,record(f.chunk,quote,"NTT Clause 1 states that the provision is not used."),bound).isEmpty());
+        assertTrue(bound.references(f.chunk,"Not Used.").isEmpty());
+        assertEquals(1,reasons(f.chunk,record(f.chunk,quote,"SCC Clause 1 states that the provision is not used."),bound).size());
+    }
+
+    @Test void aLocatedNormalizedBlankOrRepeatedQuoteDoesNotGrantSourceClauseOwnership()throws Exception{
         Fixture f=fixture();ObservedSourceClauseLocators.Bound bound=ObservedSourceClauseLocators.capture(f.pointer,f.canonical,"tender",f.word);assertNotNull(bound);
-        for(String quote:Arrays.asList("Employer","",QUOTE.toUpperCase(Locale.ROOT),QUOTE.replace(" ","  "))){
+        for(String quote:Arrays.asList(""," ","\u00a0\u2003",QUOTE.toUpperCase(Locale.ROOT),QUOTE.replace(" ","  "))){
             assertTrue(bound.references(f.chunk,quote).isEmpty(),quote);
             assertEquals(1,reasons(f.chunk,record(f.chunk,quote,"Clause 1 requires payment within 14 days."),bound).size(),quote);
         }

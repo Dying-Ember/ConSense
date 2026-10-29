@@ -26,8 +26,9 @@ final class VettingReviewDirections {
         }
         String instructions(){
             StringBuilder out=new StringBuilder("Assigned review direction: ").append(id).append(". ").append(title)
-                    .append("\nAssess only these assigned checklist requirements. Preserve a separate disposition for each assessed row. ")
-                    .append("Omit an unassessed row; never infer fulfilment from an empty findings list.\n");
+                    .append("\nAttempt every assigned in-scope checklist requirement against the supplied text. Preserve a separate evidence-bound disposition for each row. ")
+                    .append("When an affected tender passage supports a real source gap, return insufficient_context and name the missing evidence so a later round can request it. ")
+                    .append("If no affected tender passage supports a row, omit that row without inventing evidence; the application will retain it as pending. An empty findings list does not fulfil any row.\n");
             for(VettingChecklistCatalog.Item item:items){
                 out.append(item.getId()).append(" | ").append(item.getSection()).append(" | ")
                         .append(item.getClause()).append(" | ").append(item.getDescription()).append('\n');

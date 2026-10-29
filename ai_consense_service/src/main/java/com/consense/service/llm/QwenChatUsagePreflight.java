@@ -235,6 +235,9 @@ public final class QwenChatUsagePreflight {
             userSha256=users==1&&user!=null?hash(user):null;userChars=users==1&&user!=null?user.length():-1;
         }
         public VettingInputBudget.Input getInput(){return VettingInputBudget.copy(input);}
+        public String getPreparedInputSha256(){return input.getSerializedInputSha256();}
+        public String getGenerationWireSha256(){return input.getQwenWire().getGenerationEntitySha256();}
+        public String getSourceSnapshotSha256(){return input.getSourceSnapshotSha256();}
         public String getGenerationJson(){return bytes.getGenerationJson();}public String getPreflightJson(){return bytes.getProbeJson();}
     }
     public static final class DispatchReady {

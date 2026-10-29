@@ -281,7 +281,8 @@ class VettingCorpusTest {
         Chunk first = chunks.get(0);
         assertTrue(VettingCorpus.evidence(first,"A","Original\nsource table\trow.").isLocated());
         assertFalse(VettingCorpus.evidence(first,"A","Original invented table row.").isLocated());
-        assertFalse(VettingCorpus.evidence(first,"A","table").isLocated());
+        assertTrue(VettingCorpus.evidence(first,"A","table").isLocated());
+        assertFalse(VettingCorpus.evidence(first,"A"," ").isLocated());
         assertFalse(VettingCorpus.evidence(first,"A","ORIGINAL source table row.").isLocated());
     }
     @Test void sourceRevisionsProduceNewChunkIdsAndKeepDeleteMetadataOutOfRetrieval() {

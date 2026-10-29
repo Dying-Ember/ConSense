@@ -1,0 +1,8 @@
+ARG JAVA_RUNTIME_IMAGE
+FROM ${JAVA_RUNTIME_IMAGE}
+WORKDIR /app
+COPY app-entrypoint.sh /app/app-entrypoint.sh
+COPY fonts/ /usr/local/share/fonts/consense/
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["/bin/sh", "/app/app-entrypoint.sh"]

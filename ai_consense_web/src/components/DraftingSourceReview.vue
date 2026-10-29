@@ -20,6 +20,7 @@ import { createReviewReducer } from '@/drafting/source-review/reducer.js'
 import { isSourceCheck, pendingEditorial, isTreatmentRule, isValueVariable, valueDependencies } from '@/drafting/source-review/value-dependencies.js'
 import graphView from '@/drafting/source-review/graph-business-view.js'
 import { appendNativeSelection, nativeAnchor, emptyReviewState, reviewProblem, sourceReviewDrafts, targetSpans } from '@/drafting/source-review-state'
+import { reviewSaveDelta, restoreReviewSave } from '@/drafting/review-save'
 import type { ReviewAnchor, ReviewGraph, ReviewHead, ReviewObject, ReviewReading, ReviewRevision, ReviewRevisionSummary, ReviewSource, ReviewSpan, ReviewState, ReviewVariable } from '@/drafting/source-review-types'
 import type { RelationReviewRequest } from '@/drafting/automation-types'
 const DraftingWordSource = defineAsyncComponent(() => import('./DraftingWordSource.vue'))
@@ -813,7 +814,14 @@ async function save(): Promise<ReviewRevision | undefined> {
   if (props.locked) throw Error(t('请先完成候选调整或当前操作。', 'Complete the candidate edit or current operation first.'))
   if (!protect() || !props.projectId) return
   const project = props.projectId, token = generation; busy.value = true; saving.value = true; error.value = ''
-  try { const result = await draftingApi.reviewSave(project, graph.value, head.value.currentRevisionId, head.value.draftRevisionId); if (!alive || project !== props.projectId || token !== generation) return; head.value = { ...head.value, draftRevisionId: result.id, workingRevisionId: result.id, draft: result }; graph.value = result.graph; bindScopeRevision(result); dirty.value = false; reviewDraftCache.delete(project); emit('dirty', false); resetForm(); emit('saved', result); return result } catch (caught) { if (alive && project === props.projectId && token === generation) error.value = caught instanceof Error ? caught.message : String(caught) } finally { if (token === generation) { busy.value = false; saving.value = false } }
+  try {
+    const baseline = workingReview(head.value), delta = reviewSaveDelta(baseline, graph.value, head.value.currentRevisionId, head.value.draftRevisionId)
+    const response = delta ? await draftingApi.reviewSaveDelta(project, delta, head.value.currentRevisionId, head.value.draftRevisionId) : await draftingApi.reviewSave(project, graph.value, head.value.currentRevisionId, head.value.draftRevisionId)
+    if (!alive || project !== props.projectId || token !== generation) return
+    const result = restoreReviewSave(baseline, response) ?? await draftingApi.reviewRevision(project, response.id)
+    if (!alive || project !== props.projectId || token !== generation) return
+    head.value = { ...head.value, draftRevisionId: result.id, workingRevisionId: result.id, draft: result }; graph.value = result.graph; bindScopeRevision(result); dirty.value = false; reviewDraftCache.delete(project); emit('dirty', false); resetForm(); emit('saved', result); return result
+  } catch (caught) { if (alive && project === props.projectId && token === generation) error.value = caught instanceof Error ? caught.message : String(caught) } finally { if (token === generation) { busy.value = false; saving.value = false } }
 }
 async function reviewRelations(request: RelationReviewRequest): Promise<ReviewRevision | undefined> {
   const revision=workingReview(head.value)

@@ -541,7 +541,17 @@ public class CanonicalEvidenceService {
     public SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds){
         return selectedNormalTextSources(project,module,selected,candidates,selectedIds,false,null);
     }
+    /** Keep short ordered neighbors in the existing verified stream; never load a source graph. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds,Set<String> contextSeeds,int contextCharacters){
+        require(contextSeeds!=null&&selectedIds!=null&&selectedIds.containsAll(contextSeeds)&&contextSeeds.size()<=10
+                &&contextCharacters>0&&contextCharacters<=24000,HttpStatus.BAD_REQUEST,"CANONICAL_TEXT_WINDOW_INVALID");
+        return selectedNormalTextSources(project,module,selected,candidates,selectedIds,false,null,new TextNeighbors(contextSeeds,contextCharacters));
+    }
     private SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds,boolean units,Map<Long,String> graphProofs){
+        return selectedNormalTextSources(project,module,selected,candidates,selectedIds,units,graphProofs,null);
+    }
+    private SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds,boolean units,Map<Long,String> graphProofs,TextNeighbors neighbors){
         validModule(module);require(Arrays.asList("advisory","vetting").contains(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()
                 &&selectedIds!=null&&!selectedIds.isEmpty()&&entityManager!=null,HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         for(String id:selectedIds)require(id!=null&&!id.trim().isEmpty(),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
@@ -564,7 +574,8 @@ public class CanonicalEvidenceService {
             require(capturedHistory!=null&&capturedHistory.equals(compactHistory(project,captured.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
             String[] authority=new String[2];com.fasterxml.jackson.databind.node.ObjectNode header=JsonUtils.mapper().createObjectNode();Map<String,JsonNode> localChunks=new LinkedHashMap<>();
             String[] graphProof=graphProofs==null?null:new String[1];
-            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority,header,units?null:selectedIds,localChunks,units?selectedIds:null,graphProof)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+            if(neighbors!=null)neighbors.newSource();
+            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority,header,units?null:selectedIds,localChunks,units?selectedIds:null,graphProof,neighbors)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
             if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1]))return null;
             if(graphProofs!=null)graphProofs.put(binding.getDocumentId(),graphProof[0]);
             SourceDocument stamp=new SourceDocument();org.springframework.beans.BeanUtils.copyProperties(source,stamp);
@@ -584,10 +595,27 @@ public class CanonicalEvidenceService {
             histories.put(source.getId(),history);headers.put(source.getId(),header);registryPins.put(source.getId(),new CompactRegistryPin(null,true,sources.observeOriginal(stamp)));
         }
         Set<String> found=units?chunks.values().stream().map(chunk->chunk.path("unitId").asText()).collect(java.util.stream.Collectors.toSet()):chunks.keySet();
-        require(found.equals(selectedIds),HttpStatus.CONFLICT,"CANONICAL_CHUNK_UNAVAILABLE");
+        require(neighbors==null?found.equals(selectedIds):found.containsAll(selectedIds),HttpStatus.CONFLICT,"CANONICAL_CHUNK_UNAVAILABLE");
         if(units)require(chunks.size()==selectedIds.size(),HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");
         CompactBindingScope scope=new CompactBindingScope(this,project,module,retained,histories,stamps,registryPins);assertCompactCurrent(scope);
         return new SelectedNormalTextSources(scope,headers,chunks);
+    }
+    private static final class TextNeighbors {
+        final Set<String> seeds;final Deque<JsonNode> before=new ArrayDeque<>();int remaining,items=256,following,beforeCharacters;
+        java.math.BigInteger previous;
+        TextNeighbors(Set<String> seeds,int characters){this.seeds=new HashSet<>(seeds);remaining=characters;}
+        void newSource(){before.clear();beforeCharacters=0;following=0;previous=null;}
+        void observe(JsonNode chunk,Map<String,JsonNode> selected){
+            JsonNode position=chunk.path("sourceOrder");
+            require(position.isIntegralNumber()&&position.bigIntegerValue().signum()>=0&&(previous==null||previous.compareTo(position.bigIntegerValue())<0),HttpStatus.CONFLICT,"CANONICAL_TEXT_WINDOW_ORDER_INVALID");previous=position.bigIntegerValue();
+            if(seeds.contains(chunk.path("id").asText())){for(JsonNode row:before)add(row,selected);following=128;}
+            if(following>0){following--;add(chunk,selected);}
+            int length=chunk.path("content").asText().length();
+            if(length<=24000){before.addLast(chunk);beforeCharacters+=length;}
+            while(before.size()>8||beforeCharacters>24000){beforeCharacters-=before.removeFirst().path("content").asText().length();}
+        }
+        void add(JsonNode chunk,Map<String,JsonNode> selected){String id=chunk.path("id").asText();int length=chunk.path("content").asText().length();
+            if(selected.containsKey(id)||items<=0||length>remaining)return;selected.put(id,chunk);items--;remaining-=length;}
     }
 
     private static void validateSelectedNormalTextChunk(CanonicalSourceBinding binding,JsonNode header,JsonNode chunk){
@@ -679,13 +707,47 @@ public class CanonicalEvidenceService {
         private CompactBindingScope(CanonicalEvidenceService owner,String project,String module,List<CanonicalSourceBinding> selected,Map<Long,List<List<Object>>> histories,Map<Long,SourceDocument> sources,Map<Long,CompactRegistryPin> registryPins){
             this.owner=owner;this.project=project;this.module=module;this.selected=selected;this.histories=histories;this.sources=sources;this.registryPins=registryPins;
         }
-        public List<CanonicalSourceBinding> bindings(){List<CanonicalSourceBinding> result=new ArrayList<>();for(CanonicalSourceBinding binding:selected)result.add(copyBinding(binding));return Collections.unmodifiableList(result);}
+        public List<CanonicalSourceBinding> bindings(){return new VerifiedBindings(this);}
         public String identitySha256(){List<Object> pins=new ArrayList<>();for(CanonicalSourceBinding binding:selected)pins.add(bindingState(binding));return VettingCorpus.hash(JsonUtils.write(pins));}
+    }
+    private static final class VerifiedBindings extends AbstractList<CanonicalSourceBinding> {
+        final CompactBindingScope scope;final List<CanonicalSourceBinding> copies=new ArrayList<>();
+        VerifiedBindings(CompactBindingScope scope){this.scope=scope;for(CanonicalSourceBinding binding:scope.selected)copies.add(copyBinding(binding));}
+        @Override public CanonicalSourceBinding get(int index){return copies.get(index);}
+        @Override public int size(){return copies.size();}
+    }
+    /** A plain list carries no verified frame and receives no native-catalog exception. */
+    public static void checkVerifiedBindings(List<CanonicalSourceBinding> bindings,String module){
+        if(!(bindings instanceof VerifiedBindings))return;
+        VerifiedBindings verified=(VerifiedBindings)bindings;CompactBindingScope scope=verified.scope;
+        require(Objects.equals(scope.module,module)&&verified.size()==scope.selected.size(),HttpStatus.CONFLICT,"CANONICAL_COMPACT_SCOPE_OWNER_MISMATCH");
+        for(int i=0;i<verified.size();i++)require(bindingState(verified.get(i)).equals(bindingState(scope.selected.get(i))),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+        scope.owner.boundary().assertCompactCurrent(scope);
+    }
+    public static String reviewedNativeProducer(List<CanonicalSourceBinding> bindings,CanonicalSourceBinding binding,String module){
+        if(!(bindings instanceof VerifiedBindings))return null;
+        VerifiedBindings verified=(VerifiedBindings)bindings;CompactBindingScope scope=verified.scope;
+        if(!Objects.equals(scope.module,module))return null;
+        for(int i=0;i<verified.size();i++)if(binding==verified.get(i)&&bindingState(binding).equals(bindingState(scope.selected.get(i)))){
+            CompactRegistryPin pin=scope.registryPins.get(binding.getDocumentId());return pin==null?null:pin.reviewedNativeProducer;
+        }
+        return null;
     }
     private static final class CompactRegistryPin {
         final String wireSha256;final boolean normal;
         final CanonicalCurrentSourceReader.OriginalFileState original;
-        CompactRegistryPin(String wireSha256,boolean normal,CanonicalCurrentSourceReader.OriginalFileState original){this.wireSha256=wireSha256;this.normal=normal;this.original=original;}
+        final String reviewedNativeProducer;
+        CompactRegistryPin(String wireSha256,boolean normal,CanonicalCurrentSourceReader.OriginalFileState original){this(wireSha256,normal,original,null);}
+        CompactRegistryPin(String wireSha256,boolean normal,CanonicalCurrentSourceReader.OriginalFileState original,String reviewedNativeProducer){this.wireSha256=wireSha256;this.normal=normal;this.original=original;this.reviewedNativeProducer=reviewedNativeProducer;}
+    }
+    private static String reviewedNativeProducer(CanonicalSourceBinding binding,JsonNode snapshot){
+        String schema=snapshot.path("schema").asText(),producer=snapshot.path("producerKind").asText();
+        if(validDigest(binding.getAdoptionManifestSha256())&&validDigest(binding.getReviewReferenceSha256())
+                &&(NativeCanonicalContract.SCHEMA.equals(schema)&&NativeCanonicalContract.PRODUCER.equals(producer)
+                ||NativePdfCanonicalContract.SCHEMA.equals(schema)&&NativePdfCanonicalContract.PRODUCER.equals(producer)))return producer;
+        if(validDigest(binding.getFamilyCompositionSha256())&&validDigest(binding.getFamilyComponentSetSha256())
+                &&NativePdfSourceFamilyContract.SCHEMA.equals(schema)&&NativePdfSourceFamilyContract.PRODUCER.equals(producer))return producer;
+        return null;
     }
     /** Joined scopes retain scalar pins only; each cold frame has already been closed. */
     public CompactBindingScope joinCompactScopes(List<CompactBindingScope> scopes){
@@ -744,7 +806,7 @@ public class CanonicalEvidenceService {
             CanonicalSourceBinding compact=copyBinding(original);compact.setSnapshotJson(null);
             List<List<Object>> history=compactHistory(frame.project,original.getDocumentId(),original.getId());
             require(!history.isEmpty()&&history.get(history.size()-1).equals(bindingState(compact)),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
-            BindingView view=frame.views.get(original.getDocumentId());registryPins.put(original.getDocumentId(),new CompactRegistryPin(view.registryWireSha256,NormalObservedContract.isNormal(view.snapshot),sources.observeOriginal(stamp)));
+            BindingView view=frame.views.get(original.getDocumentId());registryPins.put(original.getDocumentId(),new CompactRegistryPin(view.registryWireSha256,NormalObservedContract.isNormal(view.snapshot),sources.observeOriginal(stamp),reviewedNativeProducer(original,view.snapshot)));
             histories.put(original.getDocumentId(),history);selected.add(compact);
         }
         return new CompactBindingScope(this,frame.project,frame.module,selected,histories,stamps,registryPins);
@@ -1266,6 +1328,9 @@ public class CanonicalEvidenceService {
         return streamedSnapshotSha256(id,authority,header,selectedIds,selectedChunks,null,null);
     }
     private String streamedSnapshotSha256(Long id,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks,Set<String> selectedUnits,String[] graphProof){
+        return streamedSnapshotSha256(id,authority,header,selectedIds,selectedChunks,selectedUnits,graphProof,null);
+    }
+    private String streamedSnapshotSha256(Long id,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks,Set<String> selectedUnits,String[] graphProof,TextNeighbors neighbors){
         return entityManager.unwrap(org.hibernate.Session.class).doReturningWork(connection->{
             try(java.sql.PreparedStatement statement=connection.prepareStatement("select snapshot_json from canonical_source_binding where id=?")){
                 statement.setLong(1,id);
@@ -1275,7 +1340,7 @@ public class CanonicalEvidenceService {
                     try(Reader source=rows.getCharacterStream(1);
                         Writer sink=new OutputStreamWriter(new java.security.DigestOutputStream(OutputStream.nullOutputStream(),digest),StandardCharsets.UTF_8)){
                         if(source==null)return null;
-                        if(authority==null)source.transferTo(sink);else readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks,selectedUnits,graphProof);
+                        if(authority==null)source.transferTo(sink);else readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks,selectedUnits,graphProof,neighbors);
                     }
                     return java.util.HexFormat.of().formatHex(digest.digest());
                 }
@@ -1291,6 +1356,9 @@ public class CanonicalEvidenceService {
         readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks,null,null);
     }
     private static void readSnapshotAuthority(Reader source,Writer sink,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks,Set<String> selectedUnits,String[] graphProof)throws IOException{
+        readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks,selectedUnits,graphProof,null);
+    }
+    private static void readSnapshotAuthority(Reader source,Writer sink,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks,Set<String> selectedUnits,String[] graphProof,TextNeighbors neighbors)throws IOException{
         Reader observed=new FilterReader(source){
             @Override public int read(char[] value,int offset,int length)throws IOException{int count=super.read(value,offset,length);if(count>0)sink.write(value,offset,count);return count;}
             @Override public int read()throws IOException{int value=super.read();if(value>=0)sink.write(value);return value;}
@@ -1312,6 +1380,7 @@ public class CanonicalEvidenceService {
                         JsonNode chunk=JsonUtils.mapper().readTree(parser);
                         require(chunk!=null&&chunk.isObject()&&chunk.path("id").isTextual()&&!chunk.path("id").asText().isEmpty(),HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
                         String id=chunk.path("id").asText();if(selectedIds!=null&&selectedIds.contains(id)||selectedUnits!=null&&selectedUnits.contains(chunk.path("unitId").asText()))require(selectedChunks.putIfAbsent(id,chunk)==null,HttpStatus.CONFLICT,"CANONICAL_CHUNK_AMBIGUOUS");
+                        if(neighbors!=null)neighbors.observe(chunk,selectedChunks);
                     }
                 }else parser.skipChildren();
             }
@@ -1397,7 +1466,10 @@ public class CanonicalEvidenceService {
         else sources.assertSourceStampCurrent(binding,module,sourceStamp);
         CanonicalSourceBinding latest=latestCompactForModule(binding.getProjectId(),binding.getDocumentId(),module);
         require(latest!=null&&Objects.equals(latest.getProjectionSha256(),binding.getProjectionSha256())
-                &&Objects.equals(latest.getSnapshotBytesSha256(),binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_ADOPTION_SUPERSEDED");
+                &&Objects.equals(latest.getSnapshotBytesSha256(),binding.getSnapshotBytesSha256())
+                &&Objects.equals(latest.getSourceRevisionSha256(),binding.getSourceRevisionSha256())
+                &&Objects.equals(latest.getProjectionRevisionSha256(),binding.getProjectionRevisionSha256())
+                &&Objects.equals(latest.getCanonicalSourceHash(),binding.getCanonicalSourceHash()),HttpStatus.CONFLICT,"CANONICAL_ADOPTION_SUPERSEDED");
     }
     private SourceDocument currentDocument(String projectId,Long id,String module){return sources.currentDocument(projectId,id,module);}
     public static String routingHash(SourceDocument d){return CanonicalJson.sha(JsonUtils.write(Arrays.asList(d.getCategory(),d.getFileKey(),d.getReviewRole(),d.getDocumentScope(),d.getParseStatus(),d.getOerIdentityJson())).getBytes(StandardCharsets.UTF_8));}
@@ -1411,6 +1483,10 @@ public class CanonicalEvidenceService {
                 &&Objects.equals(binding.getProjectionRevisionSha256(),snapshot.path("projectionRevisionSha256").asText())&&Objects.equals(binding.getDeclaredModule(),identity.path("module").asText())
                 &&JsonUtils.parse(binding.getEligibleModulesJson()).equals(identity.path("eligibleModules")),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");return;
         }
+        require(Objects.equals(binding.getOriginalSourceSha256(),snapshot.path("source").path("sourceSha256").asText())
+                &&Objects.equals(binding.getSourceRevisionSha256(),snapshot.path("source").path("sourceRevisionSha256").asText())
+                &&Objects.equals(binding.getProjectionRevisionSha256(),snapshot.path("projectionRevisionSha256").asText())
+                &&Objects.equals(binding.getCanonicalSourceHash(),snapshot.path("sourceHash").asText()),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");
         boolean family=NativePdfSourceFamilyContract.isFamily(snapshot);
         require(family?binding.getAdoptionManifestSha256()==null&&binding.getReviewReferenceSha256()==null
                 &&Objects.equals(binding.getFamilyCompositionSha256(),identity.path("compositionSha256").asText())

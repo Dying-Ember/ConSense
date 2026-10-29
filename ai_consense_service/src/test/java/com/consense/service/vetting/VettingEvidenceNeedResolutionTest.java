@@ -12,6 +12,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored saved assessments test lineage and aggregation, not model or source accuracy. */
 class VettingEvidenceNeedResolutionTest {
+    @Test void progressiveContinuationMayDeferUncitedBackgroundWhileRetainingEveryQuotedSource(){
+        SemanticPacketVO original=parent(),partial=child("need-1","insufficient_context","a","b"),terminal=child("next","consistent","a","b","c");
+        partial.getSubmittedChunkIds().add("uncited-background");partial.setCheckState("insufficient_evidence");
+        partial.setVerifiedInsufficientContextAssessments(1);partial.setVerifiedConsistentAssessments(0);
+        String gap="AUTHORED remaining PRE2.1 provision";partial.getVerifiedAssessments().get(0).setComment(gap);
+        partial.getVerifiedAssessments().get(0).setPendingFacts(Collections.singletonList(gap));
+        SemanticEvidenceNeedVO next=need("next",Collections.emptyList(),Collections.singletonList("a"),0);next.setQuery(gap);partial.getEvidenceNeeds().add(next);
+        terminal.setPacketId("terminal");terminal.setParentPacketId(partial.getPacketId());rebind(terminal);
+        assertTrue(VettingEvidenceNeedResolution.resolve(Arrays.asList(original,partial,terminal)).supersedesVerified(original.getPacketId(),0));
+        assertFalse(terminal.getSubmittedChunkIds().contains("uncited-background"));
+        assertEquals(2,partial.getVerifiedAssessments().get(0).getEvidence().size());
+    }
     @Test void splitContinuationsRequireCompatibleFinalDispositionsBeforeSupersedingOneOriginalAssessment(){
         for(boolean conflict:new boolean[]{false,true}){
             SemanticPacketVO original=parent(),partial=child("need-1","insufficient_context","a","b");

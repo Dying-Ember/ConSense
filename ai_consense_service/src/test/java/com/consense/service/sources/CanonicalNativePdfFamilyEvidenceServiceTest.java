@@ -73,8 +73,18 @@ class CanonicalNativePdfFamilyEvidenceServiceTest {
         verify(w.backend).snapshotIfChanged(row.getProjectionSha256(),"advisory",com.consense.common.Utf8.sha256(w.raw),false);
     }
     @Test void frameRejectsNewPinChangesAfterRemoteWaitWithoutChangingProjectionSha()throws Exception{
-        for(boolean composition:new boolean[]{true,false}){Wire w=new Wire();CanonicalSourceBinding row=w.register();CanonicalEvidenceService.VerifiedBindingFrame frame=w.service.verifiedBindings("family-project","advisory",Collections.singletonList(9001L));
-            if(composition)row.setFamilyCompositionSha256("b".repeat(64));else row.setFamilyComponentSetSha256("b".repeat(64));assertThrows(RuntimeException.class,frame::close);}
+        for(String field:Arrays.asList("composition","components","original","sourceRevision","projectionRevision","sourceHash")){
+            Wire w=new Wire();CanonicalSourceBinding row=w.register();CanonicalEvidenceService.VerifiedBindingFrame frame=w.service.verifiedBindings("family-project","advisory",Collections.singletonList(9001L));
+            switch(field){
+                case "composition":row.setFamilyCompositionSha256("b".repeat(64));break;
+                case "components":row.setFamilyComponentSetSha256("b".repeat(64));break;
+                case "original":row.setOriginalSourceSha256("b".repeat(64));break;
+                case "sourceRevision":row.setSourceRevisionSha256("b".repeat(64));break;
+                case "projectionRevision":row.setProjectionRevisionSha256("b".repeat(64));break;
+                default:row.setCanonicalSourceHash("b".repeat(64));
+            }
+            assertThrows(RuntimeException.class,frame::close,field);
+        }
     }
     @Test void familyCapabilityCannotClaimProjectEndpointOrWholeLegalAcceptance()throws Exception{
         Wire w=new Wire();((ObjectNode)w.health.path("oer").path("nativePdfSourceFamily")).put("projectEndpoint","/project/family");assertThrows(RuntimeException.class,w::register);verify(w.repository,never()).saveAndFlush(any());

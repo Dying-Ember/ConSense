@@ -1,7 +1,7 @@
 import { api, type PreparedDownload } from './client'
 import type { FixedBaselineEvidence } from './fixedBaselineEvidence'
 import { reviewSourceBindings } from './source-locations'
-import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary, ReviewSource } from '@/drafting/source-review-types'
+import type { ReviewBootstrap, ReviewGraph, ReviewGraphDelta, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary, ReviewSaveReceipt, ReviewSource } from '@/drafting/source-review-types'
 import type { DraftAutomationBinding, DraftAutomationRun, DraftAutomationStart } from '@/drafting/automation-types'
 import type {
   AskResponse,
@@ -113,6 +113,7 @@ export const draftingApi = {
   projectionHistorySources: (projectId: string, revisionId: string, nodeId: string) => api.get<{ graphRevisionId: string; nodeId: string; evidenceFingerprint: string; sourceStatus: string; unverifiedSourceRef?: string; sources: { sourceDocumentId: number; fileName: string; sourceQuote: string; status: string }[] }>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/historical-projections/${encodeURIComponent(nodeId)}/sources`, { reportError: false }),
   reviewCorrectCandidate: (projectId: string, revisionId: string, key: string, body: { expectedRunId: string; candidateIndex: number; value: string; sourceQuote: string; targetKey?: string }) => api.post<DraftReviewCandidates>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/candidates/${encodeURIComponent(key)}`, body),
   reviewSave: (projectId: string, graph: ReviewGraph, expectedCurrentRevisionId: string | null, expectedDraftRevisionId: string | null) => api.post<ReviewRevision>(`/drafting/${projectId}/graph`, { graph, expectedCurrentRevisionId, expectedDraftRevisionId }),
+  reviewSaveDelta: (projectId: string, graphDelta: ReviewGraphDelta, expectedCurrentRevisionId: string | null, expectedDraftRevisionId: string | null) => api.post<ReviewSaveReceipt>(`/drafting/${projectId}/graph`, { graphDelta, expectedCurrentRevisionId, expectedDraftRevisionId }),
   reviewConfirm: (projectId: string, revisionId: string, expectedCurrentRevisionId: string | null) => api.post<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/confirm`, { expectedCurrentRevisionId }),
   reviewRevisions: (projectId: string) => api.get<ReviewRevisionSummary[]>(`/drafting/${projectId}/graph/revisions`),
   reviewRevision: (projectId: string, revisionId: string) => api.get<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}`),

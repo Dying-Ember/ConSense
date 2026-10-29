@@ -32,7 +32,9 @@ public class DraftTemplateGraphController {
     @PostMapping("/automation/{id}/cancel") public ApiResponse<Map<String,Object>> cancelAutomation(@PathVariable String projectId,@PathVariable String id){return ApiResponse.ok(automation.cancel(projectId,id));}
     @GetMapping public ApiResponse<Map<String,Object>> current(@PathVariable String projectId){return ApiResponse.ok(service.current(projectId));}
     @PostMapping public ApiResponse<Map<String,Object>> save(@PathVariable String projectId,@RequestBody Map<String,Object> body){
-        requireExpected(body);if(!body.containsKey("expectedDraftRevisionId"))throw new BizException(4090,"Expected draft graph revision is required, including null for a new draft.");Object graph=body.get("graph");if(!(graph instanceof Map))throw new BizException(4007,"A graph object is required.");
+        requireExpected(body);if(!body.containsKey("expectedDraftRevisionId"))throw new BizException(4090,"Expected draft graph revision is required, including null for a new draft.");
+        if(body.containsKey("graphDelta")){if(body.containsKey("graph")||!(body.get("graphDelta") instanceof Map))throw new BizException(4007,"Supply either a graph or an existing-node delta.");return ApiResponse.ok(service.saveDelta(projectId,(Map<String,Object>)body.get("graphDelta"),text(body.get("expectedCurrentRevisionId")),text(body.get("expectedDraftRevisionId"))));}
+        Object graph=body.get("graph");if(!(graph instanceof Map))throw new BizException(4007,"A graph object is required.");
         return ApiResponse.ok(service.save(projectId,(Map<String,Object>)graph,text(body.get("expectedCurrentRevisionId")),text(body.get("expectedDraftRevisionId")),true));
     }
     @PostMapping("/bootstrap") public ApiResponse<Map<String,Object>> bootstrap(@PathVariable String projectId){return ApiResponse.ok(service.bootstrap(projectId));}

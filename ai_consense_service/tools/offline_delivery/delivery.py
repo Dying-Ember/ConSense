@@ -38,7 +38,10 @@ def validate(manifest, root):
     require(re.fullmatch('[a-f0-9]{40}', manifest.get('sourceCommit', '')), 'exact source commit required')
     for key in ('namespace', 'release'):
         require(re.fullmatch('[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?', manifest.get(key, '')), 'bounded Kubernetes identity required')
-    for key in ('mysql', 'qdrant', 'backend', 'web', *STAGES):
+    external_app = manifest.get('externalApp')
+    require(external_app is None or isinstance(external_app, dict), 'externalApp must be an object')
+    image_names = ('mysql', 'qdrant', 'backend', *STAGES) if external_app is not None else ('mysql', 'qdrant', 'backend', 'web', *STAGES)
+    for key in image_names:
         require(re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}', manifest.get('images', {}).get(key, '')), 'exact image digest required: ' + key)
     require(set(manifest.get('storageClass', {})) == {'fast', 'general'} and all(
         re.fullmatch('[a-z0-9][a-z0-9.-]*', value) for value in manifest['storageClass'].values()), 'explicit storage classes required')
@@ -48,6 +51,27 @@ def validate(manifest, root):
     require(rows and len({row['path'] for row in rows}) == len(rows), 'nonempty distinct asset inventory required')
     for row in rows:
         asset(root, row)
+    if external_app is not None:
+        require(set(external_app) == {'jar', 'webDirectory'}, 'externalApp requires jar and webDirectory')
+        for path in external_app.values():
+            require(isinstance(path, str) and re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._/-]*', path)
+                    and all(part not in ('', '.', '..') for part in path.split('/')), 'invalid external app path')
+            cursor = Path(root)
+            for part in path.split('/'):
+                cursor = cursor / part
+                require(not cursor.is_symlink(), 'external app paths must not contain symlinks')
+        jar, web = external_app['jar'], external_app['webDirectory']
+        files = {row['path'] for row in rows}
+        web_root = Path(root) / web
+        require(not jar.startswith(web + '/') and jar in files and (web + '/index.html') in files and web_root.is_dir(), 'pinned JAR and web index required')
+        entries = list(web_root.rglob('*'))
+        require(all(not item.is_symlink() and (item.is_dir() or item.is_file()) for item in entries), 'web tree must contain only regular files and directories')
+        actual = {item.relative_to(Path(root)).as_posix() for item in entries if item.is_file()}
+        declared = {path for path in files if path.startswith(web + '/')}
+        require(actual == declared and all(re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._/-]*', path)
+                and all(part not in ('', '.', '..') for part in path.split('/')) for path in declared),
+                'complete safe web file inventory required')
+        require(len(jar) + 66 + sum(2 * len(path) + 67 for path in declared) < 800000, 'web file inventory too large')
     stages = manifest.get('stages', [])
     require([stage.get('name') for stage in stages] == list(STAGES), 'complete ordered GPU stages required')
     paths = {row['path'] for row in rows}
@@ -131,6 +155,14 @@ def documents(manifest, manifest_sha):
           {'name': 'CONSENSE_VECTOR_PROVIDER', 'value': 'qdrant'}, {'name': 'CONSENSE_VECTOR_BASE_URL', 'value': 'http://consense-qdrant:6333'}]),
         ('web', 80, '1', '2G', None, None, []),
     )
+    external_app = manifest.get('externalApp')
+    if external_app is not None:
+        jar, web = external_app['jar'], external_app['webDirectory']
+        app_assets = sorted((row for row in manifest['assets'] if row['path'] == jar or row['path'].startswith(web + '/')), key=lambda row: row['path'])
+        docs.append({'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata('consense-app-files-' + release), 'immutable': True,
+                     'data': {'sha256sums': ''.join(row['sha256'] + '  ' + row['path'] + '\n' for row in app_assets),
+                              'web-files': ''.join(row['path'] + '\n' for row in app_assets if row['path'].startswith(web + '/'))}})
+        cpu = tuple(row for row in cpu if row[0] != 'web')
     for name, port, cores, memory, mount, claim, env in cpu:
         if name == 'backend' and manifest.get('coordinator'):
             env.append({'name': 'SPRING_APPLICATION_JSON', 'value': json.dumps(manifest['coordinator']['backendConfig'], separators=(',', ':'))})
@@ -144,6 +176,13 @@ def documents(manifest, manifest_sha):
         if mount:
             container['volumeMounts'] = [{'name': 'data', 'mountPath': mount}]
             pod['volumes'] = [{'name': 'data', 'persistentVolumeClaim': {'claimName': 'consense-' + claim}}]
+        if name == 'backend' and external_app is not None:
+            container['command'] = ['/bin/sh', '/app/app-entrypoint.sh']
+            env.extend([{'name': 'APP_JAR', 'value': jar}, {'name': 'APP_WEB_DIRECTORY', 'value': web}])
+            container['volumeMounts'].extend([{'name': 'artifacts', 'mountPath': '/artifacts', 'readOnly': True},
+                                               {'name': 'app-files', 'mountPath': '/app-files', 'readOnly': True}])
+            pod['volumes'].extend([{'name': 'artifacts', 'persistentVolumeClaim': {'claimName': 'consense-artifacts', 'readOnly': True}},
+                                   {'name': 'app-files', 'configMap': {'name': 'consense-app-files-' + release}}])
         docs.append({'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata('consense-' + name),
                      'spec': {'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': labels},
                               'template': {'metadata': {'labels': labels}, 'spec': pod}}})

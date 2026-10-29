@@ -485,7 +485,8 @@ public class VettingSemanticReview {
                 List<List<Chunk>> requiredProjectHits=new ArrayList<>();
                 for(String clause:direction.explicitProjectClauses()){
                     requireDirectionTime(clock,deadline);guard.run();
-                    requiredProjectHits.add(oer.retrieveRequiredProjectText(OerBusinessEvidence.session(corpus),clause,queryGuard,props.getVetting().getSemanticContextChars()));
+                    boolean tenderSource=ranked.stream().anyMatch(c->"tender".equals(c.getRole())&&c.getFileKey()!=null&&clause.toUpperCase(Locale.ROOT).startsWith(c.getFileKey().toUpperCase(Locale.ROOT)+"."));
+                    requiredProjectHits.add(oer.retrieveRequiredProjectText(OerBusinessEvidence.session(corpus),clause,ranked,queryGuard,tenderSource?directionContextCeiling():props.getVetting().getSemanticContextChars()));
                 }
                 List<Chunk> requiredProject=interleaveDirectionHits(requiredProjectHits);
                 ranked=requiredProjectTextFirst(ranked,requiredProject);
@@ -516,20 +517,24 @@ public class VettingSemanticReview {
                 }
                 int contextLimit=props.getVetting().getSemanticContextChars();
                 List<Chunk> offered=directionEvidenceOrder(ranked,counterparts,counterparts,requiredProject,contextLimit);
-                VettingContextBuilder.Selection selection=directionSelection(offered,Collections.emptyList(),contextLimit);
+                List<Chunk> requestedTender=requiredProject.stream().filter(c->"tender".equals(c.getRole())).collect(Collectors.toList());
+                VettingContextBuilder.Selection selection=focusedDirectionSelection(offered,Collections.emptyList(),requestedTender,fixed,String.join("\n",namedQueries),contextLimit,directionContextCeiling());
+                contextLimit=Math.max(contextLimit,selection.getContentChars());
                 directionTextSummary(directionProbe,"direction_selection",index,ranked,offered,counterparts,selection.getChunks(),namedQueries.size(),contextLimit,observedStarted);
                 boolean standardsAvailable=fixedBaseline!=null&&fixedBaseline.enabled();
                 String standardNote=!namedQueries.isEmpty()?initialReferenceNote(namedQueries,standardsAvailable,counterparts,selection.getChunks()):standardsAvailable
                         ?"Standard references have not yet been searched for this direction. When a standard is needed, return insufficient_context for the affected tender passage and name the required SL, GCC, GCT or clause in the comment or checklist reason. Do not make standard-dependent conclusions without the reference."
                         :standardEvidenceNote(false,Collections.emptyList(),selection.getChunks());
                 if(!standardsAvailable)result.getWarnings().add(direction.id+": "+standardNote);
+                standardNote+=pendingRequestedText(requestedTender,fixed.requestedGroups(String.join("\n",namedQueries)),selection.getChunks());
                 if(ranked.stream().anyMatch(chunk->"package_manifest".equals(chunk.getRole())))standardNote+=" Supplied package_manifest text identifies the named project list and its registration/reference scope; it is not a tender obligation or proof of contract adoption.";
                 if(selection.getChunks().stream().noneMatch(c->"tender".equals(c.getRole()))){audit.setError("No affected tender passage fit this source-bound direction; review remains pending.");continue;}
                 audit.setSubmittedChunkIds(selection.getChunks().stream().map(Chunk::getId).collect(Collectors.toList()));audit.setSubmittedChars(selection.getContentChars());
                 SemanticPacketVO first=VettingPacketCoverage.packet(index,0,"assigned_direction",selection.getChunks(),Collections.emptyList());audit.getPacketAudits().add(first);
                 requireDirectionTime(clock,deadline);
                 executeDirectionPacket(direction,null,standardNote,result,audit,first,selection,lang,index,directions.size(),index-1,probe.call(ordinal.incrementAndGet(),audit.getTopic(),null),corpus,fixed,documents,guard);
-                followups.enqueue(direction,index,audit,first,selection.getChunks(),1,Collections.emptySet());
+                followups.enqueue(direction,index,audit,first,selection.getChunks(),1,Collections.emptySet(),fixed);
+                followups.enqueueCoverage(direction,index,audit,first,selection,fixed,standardNote);
             }catch(RuntimeException failure){
                 if(failure instanceof ReviewGuardFailure)throw failure;
                 guard.run();
@@ -547,13 +552,12 @@ public class VettingSemanticReview {
             }
         }
         while(!followups.pending.isEmpty()){
-            if(clock.getAsLong()>=deadline){result.getWarnings().add(followups.pending.size()+" requested evidence follow-ups remain pending after the run time budget.");break;}
+            if(clock.getAsLong()>=deadline){result.getWarnings().add(followups.pending.size()+" queued review follow-ups remain pending after the run time budget.");break;}
             followups.runNext(directions.size());
         }
         followups.finish();
         for(SemanticTopicVO audit:result.getTopicAudits()){
-            Set<String> assessed=audit.getPacketAudits().stream().flatMap(p->p.getChecklistAssessments().stream()).map(ChecklistAssessmentVO::getItemId).collect(Collectors.toSet());
-            List<String> pending=audit.getReferenceIds().stream().filter(id->!assessed.contains(id)).collect(Collectors.toList());
+            List<String> pending=VettingPacketCoverage.unassessedIds(audit);
             if(!pending.isEmpty())result.getWarnings().add(audit.getTopic()+": assigned checklist rows without a verified assessment remain pending: "+String.join(", ",pending));
         }
         result.getWarnings().add("The complete source scan and direction assignments are retained separately from completed assessments. Unassessed rows, unavailable sources and unresolved evidence needs remain pending; no whole-package semantic pass is claimed.");
@@ -565,7 +569,7 @@ public class VettingSemanticReview {
         final String project,lang;final Result result;final List<Chunk> corpus;final List<com.consense.domain.SourceDocument> documents;
         final Runnable guard;final VettingReviewProbe probe;final java.util.function.LongSupplier clock;final long deadline;final int total;
         final java.util.concurrent.atomic.AtomicInteger ordinal;final Deque<EvidenceRound> pending=new ArrayDeque<>();
-        int observed,queued,attempted,lastDirection;
+        int observed,queued,attempted,lastDirection,coverageQueued,coverageAttempted;
         EvidenceRounds(String project,Result result,List<Chunk> corpus,String lang,List<com.consense.domain.SourceDocument> documents,Runnable guard,VettingReviewProbe probe,java.util.function.LongSupplier clock,long deadline,int total,java.util.concurrent.atomic.AtomicInteger ordinal){
             this.project=project;this.result=result;this.corpus=corpus;this.lang=lang;this.documents=documents;this.guard=guard;this.probe=probe;this.clock=clock;this.deadline=deadline;this.total=total;this.ordinal=ordinal;
         }
@@ -576,23 +580,38 @@ public class VettingSemanticReview {
             for(EvidenceNeed need:directionEvidenceNeeds(direction.itemIds(),parent,selected,true)){
                 SemanticEvidenceNeedVO line=evidenceNeedLineage(parent,need);line.setSupplementRound(round);parent.getEvidenceNeeds().add(line);observed++;
                 if(round>2){terminate(line,"round_limit");continue;}
-                List<Chunk> prior=round==1?need.affected:selected;
+                List<Chunk> prior=priorForEvidenceNeed(need,parent,selected);
                 pending.add(new EvidenceRound(direction,index,audit,parent,need,line,new ArrayList<>(prior),round,new LinkedHashSet<>(searched),fixed));
                 queued++;
                 queueSummary("queued",index);
             }
         }
+        void enqueueCoverage(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,VettingContextBuilder.Selection selected,FixedVettingReferences fixed,String note){
+            if(VettingPacketCoverage.unassessedIds(audit).isEmpty()||!Arrays.asList("completed","completed_empty","completed_with_rejections").contains(parent.getStatus()))return;
+            pending.add(new EvidenceRound(direction,index,audit,parent,selected,fixed,note));coverageQueued++;
+            queueSummary("coverage_queued",index);
+        }
         void runNext(int completed){
-            int round=pending.stream().mapToInt(work->work.round).min().orElseThrow();
-            int next=pending.stream().filter(work->work.round==round&&work.index>lastDirection).mapToInt(work->work.index).min()
-                .orElseGet(()->pending.stream().filter(work->work.round==round).mapToInt(work->work.index).min().orElseThrow());
-            EvidenceRound chosen=null;for(java.util.Iterator<EvidenceRound> iterator=pending.iterator();iterator.hasNext();){EvidenceRound work=iterator.next();if(work.round==round&&work.index==next){chosen=work;iterator.remove();break;}}
+            List<EvidenceRound> ready=pending.stream().filter(work->!work.coverage||completed>=total).collect(Collectors.toList());
+            if(ready.isEmpty()){scheduleSummary("coverage_deferred_initial_directions",completed,deadline-clock.getAsLong());return;}
+            int round=ready.stream().mapToInt(work->work.round).min().orElseThrow();
+            int next=ready.stream().filter(work->work.round==round&&work.index>lastDirection).mapToInt(work->work.index).min()
+                .orElseGet(()->ready.stream().filter(work->work.round==round).mapToInt(work->work.index).min().orElseThrow());
+            EvidenceRound chosen=null;for(java.util.Iterator<EvidenceRound> iterator=pending.iterator();iterator.hasNext();){EvidenceRound work=iterator.next();if((!work.coverage||completed>=total)&&work.round==round&&work.index==next){chosen=work;iterator.remove();break;}}
             lastDirection=next;run(chosen,completed);
         }
         void run(EvidenceRound work,int completed){
+            if(work.coverage){runCoverage(work,completed);return;}
             VettingReviewProbe.Call trace=probe.call(work.index,null,null);long started=System.nanoTime();
             try{
                 requireDirectionTime(clock,deadline);guard.run();work.line.setProcessingStatus("attempted");
+                VettingReviewDirections.Direction requestedDirection=work.direction;
+                if(!work.need.itemIds.isEmpty()){
+                    Set<String> requestedIds=new LinkedHashSet<>(work.need.itemIds);
+                    List<VettingChecklistCatalog.Item> items=work.direction.items.stream().filter(item->requestedIds.contains(item.getId())).collect(Collectors.toList());
+                    if(items.size()!=requestedIds.size())throw new IllegalStateException("Requested evidence contains an unassigned checklist row");
+                    requestedDirection=new VettingReviewDirections.Direction(work.direction.id,work.direction.title,work.direction.query,items);
+                }
                 List<String> queries=new ArrayList<>();Set<String> targets=new LinkedHashSet<>();
                 for(String original:work.need.originalQueries){String target=evidenceTarget(original);if(!work.searched.contains(target)&&targets.add(target))queries.addAll(VettingReviewDirections.searchQueries(original));}
                 if(queries.isEmpty()){terminate(work.line,"same_target_without_new_evidence");return;}
@@ -607,7 +626,8 @@ public class VettingSemanticReview {
                 }
                 FixedVettingReferences catalog=FixedVettingReferences.combine(work.fixed,fetched);
                 int limit=props.getVetting().getSemanticContextExpansionChars();List<Chunk> offered=directionEvidenceOrder(extra,fetched.chunks(),fetched.chunks(),work.prior,limit);
-                VettingContextBuilder.Selection selected=directionSelection(offered,work.prior,limit);
+                VettingContextBuilder.Selection selected=focusedDirectionSelection(offered,work.prior,Collections.emptyList(),catalog,requested,limit,directionContextCeiling());
+                limit=Math.max(limit,selected.getContentChars());
                 directionTextSummary(trace,"supplement_selection",work.index,extra,offered,fetched.chunks(),selected.getChunks(),queries.size(),limit,started);
                 Set<String> previous=new HashSet<>(work.parent.getSubmittedChunkIds());
                 if(work.prior.isEmpty()||!selected.getChunks().containsAll(work.prior)||selected.getChunks().stream().noneMatch(chunk->!previous.contains(chunk.getId()))){terminate(work.line,"no_new_evidence_within_text_budget");return;}
@@ -615,11 +635,12 @@ public class VettingSemanticReview {
                 SemanticPacketVO packet=VettingPacketCoverage.packet(work.index,work.audit.getPacketAudits().size(),"requested_direction_context",selected.getChunks(),Collections.emptyList());
                 packet.setParentPacketId(work.parent.getPacketId());packet.setRequestedEvidenceNeedId(work.line.getNeedId());work.audit.getPacketAudits().add(packet);
                 String note=standard?requestedStandardNote(requested,fixedBaseline!=null&&fixedBaseline.enabled(),catalog,selected.getChunks()):"Standard references were not requested in this round; standard-dependent checks remain pending.";
+                note+=pendingRequestedText(Collections.emptyList(),catalog.requestedGroups(requested),selected.getChunks());
                 SemanticTopicVO call=new SemanticTopicVO();call.setStatus("not_submitted");
-                executeDirectionPacket(work.direction,questions(work),note,result,call,packet,selected,lang,work.index,total,completed,probe.call(ordinal.incrementAndGet(),work.audit.getTopic()+" / requested evidence",null),corpus,catalog,documents,guard);
+                executeDirectionPacket(requestedDirection,questions(work),note,result,call,packet,selected,lang,work.index,total,completed,probe.call(ordinal.incrementAndGet(),work.audit.getTopic()+" / requested evidence",null),corpus,catalog,documents,guard);
                 if(!Arrays.asList("completed","completed_empty","completed_with_rejections").contains(packet.getStatus())){terminate(work.line,"model_or_evidence_failure");return;}
-                if(!directionEvidenceNeeds(work.direction.itemIds(),packet,selected.getChunks(),true).isEmpty()){
-                    work.line.setProcessingStatus("pending_child_round");enqueue(work.direction,work.index,work.audit,packet,selected.getChunks(),work.round+1,work.searched,catalog);
+                if(!directionEvidenceNeeds(requestedDirection.itemIds(),packet,selected.getChunks(),true).isEmpty()){
+                    work.line.setProcessingStatus("pending_child_round");enqueue(requestedDirection,work.index,work.audit,packet,selected.getChunks(),work.round+1,work.searched,catalog);
                 }else terminate(work.line,"no_verified_resolution");
             }catch(RuntimeException failure){
                 terminate(work.line,clock.getAsLong()>=deadline?"run_time_budget":"evidence_processing_failure");
@@ -627,6 +648,28 @@ public class VettingSemanticReview {
                 result.getWarnings().add(work.direction.id+": requested evidence processing remains incomplete: "+brief(failure));
             }finally{
                 attempted++;refresh(work.audit);VettingPacketCoverage.finish(work.audit,null);queueSummary("processed",work.index);
+            }
+        }
+        void runCoverage(EvidenceRound work,int completed){
+            List<String> missing=VettingPacketCoverage.unassessedIds(work.audit);
+            List<VettingChecklistCatalog.Item> items=work.direction.items.stream().filter(item->missing.contains(item.getId())).collect(Collectors.toList());
+            if(items.isEmpty()){queueSummary("coverage_already_assessed",work.index);return;}
+            try{
+                requireDirectionTime(clock,deadline);guard.run();
+                VettingReviewDirections.Direction remaining=new VettingReviewDirections.Direction(work.direction.id,work.direction.title,work.direction.query,items);
+                directionProgress(completed,total,"Assessing remaining checklist rows for "+work.direction.title+" using the selected passages.");
+                SemanticPacketVO packet=VettingPacketCoverage.packet(work.index,work.audit.getPacketAudits().size(),"checklist_coverage_followup",work.coverageSelection.getChunks(),Collections.emptyList());
+                packet.setParentPacketId(work.parent.getPacketId());work.audit.getPacketAudits().add(packet);result.setPlannedCallCount(result.getPlannedCallCount()+1);
+                String note=work.coverageNote+"\nApplication checklist coverage follow-up: the assigned rows below have no verified assessment yet. Attempt only these remaining rows using the same selected passages. No new source evidence was retrieved for this call. Return an evidence-bound disposition or a real source gap; never invent a finding, quotation or evidence request merely to fill a row.";
+                SemanticTopicVO call=new SemanticTopicVO();call.setStatus("not_submitted");
+                executeDirectionPacket(remaining,null,note,result,call,packet,work.coverageSelection,lang,work.index,total,completed,probe.call(ordinal.incrementAndGet(),work.audit.getTopic()+" / remaining checklist rows",null),corpus,work.fixed,documents,guard);
+                enqueue(remaining,work.index,work.audit,packet,work.coverageSelection.getChunks(),1,Collections.emptySet(),work.fixed);
+            }catch(RuntimeException failure){
+                if(failure instanceof ReviewGuardFailure)throw failure;guard.run();
+                work.audit.setError("Remaining checklist assessment is pending: "+brief(failure));
+                result.getWarnings().add(work.direction.id+": the single checklist coverage follow-up remains incomplete: "+brief(failure));
+            }finally{
+                coverageAttempted++;refresh(work.audit);VettingPacketCoverage.finish(work.audit,null);queueSummary("coverage_processed",work.index);
             }
         }
         String questions(EvidenceRound work){
@@ -642,19 +685,29 @@ public class VettingSemanticReview {
             for(SemanticPacketVO packet:audit.getPacketAudits())for(SemanticEvidenceNeedVO line:packet.getEvidenceNeeds())if(resolution.resolvedNeed(packet.getPacketId(),line.getNeedId())){line.setProcessingStatus("resolved");line.setTerminalReason(null);}
         }
         void finish(){
-            for(EvidenceRound work:pending)terminate(work.line,"run_time_budget");
-            for(SemanticTopicVO audit:result.getTopicAudits()){refresh(audit);for(SemanticPacketVO packet:audit.getPacketAudits())for(SemanticEvidenceNeedVO line:packet.getEvidenceNeeds())if(!"resolved".equals(line.getProcessingStatus())&&line.getTerminalReason()==null)terminate(line,"unresolved_child_round");VettingPacketCoverage.finish(audit,null);}
+            for(EvidenceRound work:pending)if(!work.coverage)terminate(work.line,"run_time_budget");
+            for(SemanticTopicVO audit:result.getTopicAudits()){
+                refresh(audit);for(SemanticPacketVO packet:audit.getPacketAudits())for(SemanticEvidenceNeedVO line:packet.getEvidenceNeeds())if(!"resolved".equals(line.getProcessingStatus())&&line.getTerminalReason()==null)terminate(line,"unresolved_child_round");
+                List<String> missing=VettingPacketCoverage.unassessedIds(audit);
+                if(!missing.isEmpty()){
+                    String reason=clock.getAsLong()>=deadline?"run time budget reached":audit.getPacketAudits().stream().anyMatch(p->"checklist_coverage_followup".equals(p.getKind()))?"single coverage follow-up did not yield a verified assessment":"no completed initial packet available for a coverage follow-up";
+                    audit.setError((JsonUtils.isBlankText(audit.getError())?"":audit.getError()+"\n")+"Assigned checklist rows remain unassessed ("+reason+"): "+String.join(", ",missing));
+                }
+                VettingPacketCoverage.finish(audit,null);
+            }
             int unresolved=result.getTopicAudits().stream().mapToInt(audit->VettingEvidenceNeedResolution.resolve(audit.getPacketAudits()).unresolvedNeeds()).sum();
-            probe.call(0,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status","terminal","queued",queued,"processed",attempted,"pending",pending.size(),"observedGroups",observed,"notAdmitted",observed-queued,"resolved",observed-unresolved,"unresolved",unresolved,"deadlineReached",clock.getAsLong()>=deadline));
+            probe.call(0,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status","terminal","queued",queued,"processed",attempted,"pending",pending.stream().filter(w->!w.coverage).count(),"coverageQueued",coverageQueued,"coverageProcessed",coverageAttempted,"coveragePending",pending.stream().filter(w->w.coverage).count(),"observedGroups",observed,"notAdmitted",observed-queued,"resolved",observed-unresolved,"unresolved",unresolved,"deadlineReached",clock.getAsLong()>=deadline));
         }
-        void queueSummary(String status,int index){probe.call(index,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status",status,"directionIndex",index,"queued",queued,"processed",attempted,"pending",pending.size()));}
+        void queueSummary(String status,int index){probe.call(index,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status",status,"directionIndex",index,"queued",queued,"processed",attempted,"pending",pending.stream().filter(w->!w.coverage).count(),"coverageQueued",coverageQueued,"coverageProcessed",coverageAttempted,"coveragePending",pending.stream().filter(w->w.coverage).count()));}
         void scheduleSummary(String status,int index,long remaining){probe.call(index,null,null).summary("evidence_schedule",VettingReviewProbe.map("status",status,"directionIndex",index,"pending",pending.size(),"remainingMs",Math.max(0,remaining/1_000_000)));}
         void terminate(SemanticEvidenceNeedVO line,String reason){line.setProcessingStatus("unresolved");line.setTerminalReason(reason);}
     }
     private static final class EvidenceRound {
         final VettingReviewDirections.Direction direction;final int index,round;final SemanticTopicVO audit;final SemanticPacketVO parent;
         final EvidenceNeed need;final SemanticEvidenceNeedVO line;final List<Chunk> prior;final Set<String> searched;final FixedVettingReferences fixed;
-        EvidenceRound(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,EvidenceNeed need,SemanticEvidenceNeedVO line,List<Chunk> prior,int round,Set<String> searched,FixedVettingReferences fixed){this.direction=direction;this.index=index;this.audit=audit;this.parent=parent;this.need=need;this.line=line;this.prior=prior;this.round=round;this.searched=searched;this.fixed=fixed;}
+        final boolean coverage;final VettingContextBuilder.Selection coverageSelection;final String coverageNote;
+        EvidenceRound(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,EvidenceNeed need,SemanticEvidenceNeedVO line,List<Chunk> prior,int round,Set<String> searched,FixedVettingReferences fixed){this.direction=direction;this.index=index;this.audit=audit;this.parent=parent;this.need=need;this.line=line;this.prior=prior;this.round=round;this.searched=searched;this.fixed=fixed;this.coverage=false;this.coverageSelection=null;this.coverageNote=null;}
+        EvidenceRound(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,VettingContextBuilder.Selection selected,FixedVettingReferences fixed,String note){this.direction=direction;this.index=index;this.audit=audit;this.parent=parent;this.need=null;this.line=null;this.prior=Collections.emptyList();this.round=3;this.searched=Collections.emptySet();this.fixed=fixed;this.coverage=true;this.coverageSelection=selected;this.coverageNote=note;}
     }
     private static String evidenceTarget(String query){
         Set<String> keys=new TreeSet<>();Set<Integer> editionLocators=new HashSet<>();
@@ -679,6 +732,16 @@ public class VettingSemanticReview {
         line.setAffectedChunkIds(need.affected.stream().map(Chunk::getId).collect(Collectors.toList()));line.setVerifiedAssessmentIndexes(new ArrayList<>(need.assessmentIndexes));
         line.setNeedId(VettingCorpus.hash(JsonUtils.write(Arrays.asList("direction-evidence-need-v1",parent.getPacketId(),need.originalQueries,line.getChecklistItemIds(),line.getAffectedChunkIds(),line.getVerifiedAssessmentIndexes()))));return line;
     }
+    private static List<Chunk> priorForEvidenceNeed(EvidenceNeed need,SemanticPacketVO parent,List<Chunk> selected){
+        LinkedHashMap<String,Chunk> prior=new LinkedHashMap<>();for(Chunk chunk:need.affected)prior.put(chunk.getId(),chunk);
+        for(Integer index:need.assessmentIndexes)if(index!=null&&index>=0&&index<parent.getVerifiedAssessments().size())
+            for(FindingEvidence quote:parent.getVerifiedAssessments().get(index).getEvidence())if(quote.isLocated()){
+                String id=quote.getCanonicalEvidence()!=null?quote.getCanonicalEvidence().getCanonicalChunkId()
+                        :quote.getFixedBaselineEvidence()!=null?quote.getFixedBaselineEvidence().path("parentId").asText():null;
+                if(id!=null)for(Chunk chunk:selected)if(id.equals(chunk.getId()))prior.putIfAbsent(id,chunk);
+            }
+        return new ArrayList<>(prior.values());
+    }
     private static void requireDirectionTime(java.util.function.LongSupplier clock,long deadline){
         if(clock.getAsLong()>=deadline)throw new IllegalStateException("Run time budget reached; requested evidence remains pending.");
     }
@@ -686,8 +749,12 @@ public class VettingSemanticReview {
     static boolean supplementFits(long remainingNanos,long initialNanos,int completed,int total){
         if(completed<=0||remainingNanos<=0)return false;
         long mean=initialNanos/completed;
-        long supplementReserve=Math.max(java.util.concurrent.TimeUnit.MINUTES.toNanos(1),mean*2);
-        return remainingNanos>supplementReserve;
+        long pendingInitials=Math.max(0L,(long)total-completed);
+        try{
+            long initialReserve=Math.multiplyExact(mean,pendingInitials);
+            long supplementReserve=Math.max(java.util.concurrent.TimeUnit.MINUTES.toNanos(1),Math.multiplyExact(mean,2));
+            return remainingNanos>Math.addExact(initialReserve,supplementReserve);
+        }catch(ArithmeticException overflow){return false;}
     }
     static List<EvidenceNeed> directionEvidenceNeeds(List<String> assigned,SemanticPacketVO packet,List<Chunk> submitted){
         return directionEvidenceNeeds(assigned,packet,submitted,false);
@@ -828,10 +895,10 @@ public class VettingSemanticReview {
     static List<Chunk> directionEvidenceOrder(List<Chunk> project,List<Chunk> counterparts,List<Chunk> standards,List<Chunk> required,int limit){
         LinkedHashMap<String,Chunk> offered=new LinkedHashMap<>();
         for(Chunk chunk:project)if("tender".equals(chunk.getRole())&&OerBusinessEvidence.rankedReviewOrigin(project,chunk)){offered.put(chunk.getId(),chunk);break;}
+        for(Chunk chunk:required)if("tender".equals(chunk.getRole()))offered.putIfAbsent(chunk.getId(),chunk);
         for(List<Chunk> group:Arrays.asList(required,project))for(Chunk chunk:group)
             if(OerBusinessEvidence.rankedReviewOrigin(group,chunk))offered.putIfAbsent(chunk.getId(),chunk);
         for(Chunk chunk:counterparts)if(OerBusinessEvidence.rankedReviewOrigin(counterparts,chunk))offered.putIfAbsent(chunk.getId(),chunk);
-        // Required list context follows actual ranked seeds but precedes both sources' bulk context.
         for(Chunk chunk:required)offered.putIfAbsent(chunk.getId(),chunk);
         for(List<Chunk> group:Arrays.asList(project,standards))for(Chunk chunk:group)offered.putIfAbsent(chunk.getId(),chunk);
         return new ArrayList<>(offered.values());
@@ -844,6 +911,37 @@ public class VettingSemanticReview {
             selected.put(source.getId(),source);chars+=source.getContent().length();
         }
         selection.setChunks(sourceOrderedText(new ArrayList<>(selected.values())));selection.setContentChars((int)chars);return selection;
+    }
+    private int directionContextCeiling(){
+        return (int)Math.min(Integer.MAX_VALUE,(long)Math.max(0,props.getVetting().getSemanticContextChars())+Math.max(0,props.getVetting().getSemanticContextExpansionChars()));
+    }
+    static VettingContextBuilder.Selection focusedDirectionSelection(List<Chunk> offered,List<Chunk> prior,List<Chunk> requestedProject,FixedVettingReferences fixed,String request,int limit,int ceiling){
+        LinkedHashMap<String,Chunk> required=new LinkedHashMap<>();
+        for(List<Chunk> group:Arrays.asList(prior,fixed.completeGroups(prior),requestedProject))for(Chunk chunk:group)required.putIfAbsent(chunk.getId(),chunk);
+        if(required.values().stream().noneMatch(c->"tender".equals(c.getRole())))
+            for(Chunk chunk:offered)if("tender".equals(chunk.getRole())){required.putIfAbsent(chunk.getId(),chunk);break;}
+        for(Chunk chunk:fixed.requestedGroups(request))required.putIfAbsent(chunk.getId(),chunk);
+        long chars=required.values().stream().mapToLong(c->c.getContent().length()).sum();
+        if(chars>Math.max(0,ceiling)){
+            required.clear();for(Chunk chunk:prior)required.putIfAbsent(chunk.getId(),chunk);
+            for(Chunk chunk:fixed.completeGroups(prior))required.putIfAbsent(chunk.getId(),chunk);
+            if(required.values().stream().noneMatch(c->"tender".equals(c.getRole())))
+                for(Chunk chunk:offered)if("tender".equals(chunk.getRole())){required.putIfAbsent(chunk.getId(),chunk);break;}
+            chars=required.values().stream().mapToLong(c->c.getContent().length()).sum();
+        }
+        long fixedChars=required.values().stream().filter(FixedVettingReferences::isFixed).mapToLong(c->c.getContent().length()).sum();
+        // Reserve the existing project-text allowance alongside whole required fixed references.
+        int bounded=(int)Math.min(Math.max(0,ceiling),Math.max((long)Math.max(0,limit)+fixedChars,chars));
+        List<Chunk> project=offered.stream().filter(c->!FixedVettingReferences.isFixed(c)).collect(Collectors.toList());
+        VettingContextBuilder.Selection selected=directionSelection(project,new ArrayList<>(required.values()),bounded);
+        Set<String> active=new LinkedHashSet<>();for(Chunk chunk:offered)if(FixedVettingReferences.isFixed(chunk))active.add(chunk.getId());
+        for(Chunk chunk:selected.getChunks())if(FixedVettingReferences.isFixed(chunk))active.add(chunk.getId());
+        fixed.admit(selected,bounded,active);return selected;
+    }
+    private static String pendingRequestedText(List<Chunk> project,List<Chunk> fixed,List<Chunk> selected){
+        Set<String> ids=selected.stream().map(Chunk::getId).collect(Collectors.toSet());
+        return java.util.stream.Stream.concat(project.stream(),fixed.stream()).anyMatch(c->!ids.contains(c.getId()))
+                ?" Complete requested source text did not fit the finite direction allowance; the corresponding comparisons remain pending. Request a narrower source-bound subclause; do not infer its wording or completeness.":"";
     }
     private static List<Chunk> sourceOrderedText(List<Chunk> selected){
         Map<List<Object>,List<Chunk>> groups=new LinkedHashMap<>();
@@ -1236,6 +1334,7 @@ public class VettingSemanticReview {
                     try (VettingReviewProbe.Timer timer=topicProbe.measure("ai_gateway_call","One complete gateway attempt; generation attempts are accounted independently")) {
                         progressStage(result,packet.getAttempts().size()>1?"Rechecking the model response.":"The model is reviewing the selected passages.");
                         packet.setActualGatewayCallStarted(true);result.setActualGatewayCallCount(result.getActualGatewayCallCount()+1);
+                        try {
                         if(evidenceRepair!=null) {
                             List<JsonNode> patches;
                             if(qwenPacket)patches=operation().getQwen().complete(dispatchInput,dispatchBudget,dispatchSystem,dispatchUser,dispatchSchema,JsonNode.class,rawResponses,gatewayPhaseWallNanos,
@@ -1251,9 +1350,26 @@ public class VettingSemanticReview {
                                 metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());});
                         else records=topicProbe.enabled()?ai.completeStructuredJsonList(actualSystem,dispatchUser,Record.class,actualSchema,rawResponses,gatewayPhaseWallNanos)
                                 :ai.completeStructuredJsonList(actualSystem,dispatchUser,Record.class,actualSchema,rawResponses);
+                        } catch (com.consense.ai.StructuredOutputValidationException invalid) {
+                            if (evidenceRepair!=null || attempt.getOrdinal()<VettingCheckpointService.MAX_MODEL_ATTEMPTS
+                                    || invalid.getReason()!=com.consense.ai.StructuredOutputValidationException.Reason.SCHEMA_MISMATCH
+                                    || rawResponses.size()<=rawStart) throw invalid;
+                            List<Integer> rejected=new ArrayList<>();List<String> unverified=new ArrayList<>();VettingReviewDirections.Direction reviewDirection=activeDirection.get();
+                            try { records=AiGateway.decodeValidStructuredRecords(rawResponses.get(rawResponses.size()-1),Record.class,actualSchema,qwenPacket&&qwenJsonRecords(),rejected,reviewDirection==null?Collections.emptyList():reviewDirection.itemIds(),unverified); }
+                            catch (com.consense.ai.StructuredOutputValidationException unusable) { throw invalid; }
+                            packet.setUnverifiedChecklistItemIds(unverified);
+                            schemaFailure(topicProbe,topicIndex,attempt.getOrdinal(),"original",invalid);
+                            audit.setRejectedRecords(audit.getRejectedRecords()+rejected.size());
+                            List<Integer> accepted=new ArrayList<>(),displayRejected=new ArrayList<>();
+                            for(int i=0;i<records.size()+rejected.size();i++)if(!rejected.contains(i))accepted.add(i);
+                            for(int index:rejected)displayRejected.add(index+1);
+                            attempt.setValidationReason("PARTIAL_SCHEMA_REJECTION:"+JsonUtils.write(rejected));
+                            result.getWarnings().add("Model records "+displayRejected+" failed structural validation and remain unassessed; other records still require source and business checks.");
+                            topicProbe.summary("partial_schema_rejection",VettingReviewProbe.map("directionIndex",topicIndex,"attemptOrdinal",attempt.getOrdinal(),"rejectedOriginalIndices",rejected,"acceptedOriginalIndices",accepted));
+                        }
                         references.resolve(records);
                         int uncertain=retainContradictoryIssuesAsPending(records);
-                        if(uncertain>0)result.getWarnings().add(uncertain+" model record(s) reported both an issue and insufficient evidence; they were treated as insufficient context, not confirmed findings.");
+                        if(uncertain>0)result.getWarnings().add(uncertain+" model record(s) asserted an issue while its required evidence remains pending; they were treated as insufficient context, not confirmed findings.");
                         audit.setReturnedAssessments(records==null?0:records.size());
                         audit.setIssueAssessments(0);audit.setConsistentAssessments(0);audit.setInsufficientContextAssessments(0);
                         if(records!=null)for(Record record:records)if(record!=null) {
@@ -1265,7 +1381,8 @@ public class VettingSemanticReview {
                         if(!shapeReasons.isEmpty()){
                             if(records==null||shapeReasons.size()==records.size())throw new RecordShapeException(shapeReasons);
                             for(Map<String,Object> reason:shapeReasons)shapeRejectedRecords.add(((Number)reason.get("recordIndex")).intValue());
-                            attempt.setValidationReason(BUSINESS_SHAPE_REASON+JsonUtils.write(shapeReasons));
+                            String reason=BUSINESS_SHAPE_REASON+JsonUtils.write(shapeReasons);
+                            attempt.setValidationReason(attempt.getValidationReason()==null?reason:attempt.getValidationReason()+"; "+reason);
                             topicProbe.event("record_business_shape_rejections",VettingReviewProbe.map("reasons",shapeReasons,"wholePacketRejection",false));
                         }
                         List<Map<String,Object>> attributionReasons=VettingSourceAttribution.reasons(records,byId,sourceLocators,references.bindings()).stream()
@@ -1730,11 +1847,26 @@ public class VettingSemanticReview {
     static int retainContradictoryIssuesAsPending(List<Record> records){
         if(records==null)return 0;int count=0;
         for(Record record:records)if(record!=null&&"issue".equals(record.getAssessment())&&"review".equals(record.getSuggestedAction())
-                &&record.getPendingFacts()!=null&&!record.getPendingFacts().isEmpty()&&record.getChecklistAssessments()!=null&&!record.getChecklistAssessments().isEmpty()
-                &&record.getChecklistAssessments().stream().allMatch(check->check!=null&&"insufficient_evidence".equals(check.getStatus()))){
-            record.setAssessment("insufficient_context");count++;
+                &&record.getPendingFacts()!=null&&!record.getPendingFacts().isEmpty()&&record.getChecklistAssessments()!=null){
+            boolean checklistPending=!record.getChecklistAssessments().isEmpty()&&record.getChecklistAssessments().stream()
+                    .allMatch(check->check!=null&&"insufficient_evidence".equals(check.getStatus()));
+            String uncertainDefinition=record.getChecklistAssessments().isEmpty()?pendingUndefinedTerm(record):null;
+            if(checklistPending||uncertainDefinition!=null){
+                if(uncertainDefinition!=null)record.setTitle("Definition of '"+uncertainDefinition+"' requires confirmation");
+                record.setAssessment("insufficient_context");count++;
+            }
         }
         return count;
+    }
+    private static String pendingUndefinedTerm(Record record){
+        if(record.getTitle()==null)return null;
+        java.util.regex.Matcher named=java.util.regex.Pattern.compile("(?iu)\\bundefined\\s+['\"‘“]([^'\"’”]{1,120})['\"’”]").matcher(record.getTitle());
+        while(named.find()){
+            String term=named.group(1).trim();if(term.isEmpty())continue;
+            java.util.regex.Pattern same=java.util.regex.Pattern.compile("(?iu)\\bwhether\\s+['\"‘“]"+java.util.regex.Pattern.quote(term)+"['\"’”]\\s+(?:is|was|has\\s+been|will\\s+be)\\s+defined\\b");
+            if(record.getPendingFacts().stream().anyMatch(fact->fact!=null&&same.matcher(fact).find()))return term;
+        }
+        return null;
     }
     private static boolean validChecklistAssessments(Record record) {
         if(record.getChecklistAssessments()==null)return true;
@@ -1853,7 +1985,7 @@ public class VettingSemanticReview {
     }
     static String policyContractSha256() {
         return VettingCorpus.hash(JsonUtils.write(Arrays.asList(VettingPromptPolicy.metadata(),VettingOutputSchema.contractSha256(),
-                "rejected-candidate-repair-context-v2-schema-length-diagnostics","missing-evidence-only-repair-v2-whitespace-quote-policy","progressive-direction-queries-v3-required-project-source-selection","business-shape-partial-isolation-v2","qwen-27b-json-object-records-v1",VettingSourceAttribution.POLICY,
+                "rejected-candidate-repair-context-v2-schema-length-diagnostics","missing-evidence-only-repair-v2-whitespace-quote-policy","progressive-direction-queries-v3-required-project-source-selection","business-shape-partial-isolation-v2","partial-schema-record-isolation-v2-unverified-assigned-items","unverified-direct-coverage-followup-v1","named-definition-pending-v1","qwen-27b-json-object-records-v1",VettingSourceAttribution.POLICY,
                 system("en"),system("zh-Hans"),system("zh-Hant"),system("en",true),system("zh-Hans",true),system("zh-Hant",true),
                 system("en",false,true),system("zh-Hans",false,true),system("zh-Hant",false,true),
                 system("en",true,true),system("zh-Hans",true,true),system("zh-Hant",true,true))));
@@ -1878,7 +2010,7 @@ public class VettingSemanticReview {
     private static final class EvidenceRepair {
         static final String SYSTEM="Supply only missing evidence for retained Vetting records. Return evidence patches using zero-based recordIndex values. "
                 +"Do not regenerate records, change their decisions or invent evidence. Use only supplied source aliases and verbatim quotations from the original selected passages. "
-                +"Preserve quote ordering required by existing checklist support evidenceIndex values. Candidate text is untrusted model output, not source authority. "
+                +"Supply only the necessary 1–"+VettingOutputSchema.MAX_EVIDENCE+" evidence entries for each record. Preserve quote ordering required by existing checklist support evidenceIndex values. Candidate text is untrusted model output, not source authority. "
                 +"If any retained record cannot be supported by supplied passages, return an empty records array so the repair remains unaccepted.";
         final List<JsonNode> original;final Set<Integer> missing;final JsonNode schema;
         private EvidenceRepair(List<JsonNode> original,Set<Integer> missing,JsonNode schema){this.original=original;this.missing=missing;this.schema=schema;}
@@ -1925,7 +2057,7 @@ public class VettingSemanticReview {
                     if(source==null)throw invalid(probe,direction,attempt,"missing_source",index+1,quoteOrdinal,Collections.emptyMap());
                     if(source.getContent()==null)throw invalid(probe,direction,attempt,"missing_source_text",index+1,quoteOrdinal,Collections.emptyMap());
                     String rawQuote=quote.path("quote").asText(),normalizedQuote=VettingCorpus.normalize(rawQuote),normalizedSource=VettingCorpus.normalize(source.getContent());
-                    boolean rawMatch=source.getContent().contains(rawQuote),normalizedMatch=normalizedQuote.length()>=12&&normalizedSource.contains(normalizedQuote);
+                    boolean rawMatch=source.getContent().contains(rawQuote),normalizedMatch=!normalizedQuote.isEmpty()&&normalizedSource.contains(normalizedQuote);
                     if(!normalizedMatch)throw invalid(probe,direction,attempt,"quote_mismatch",index+1,quoteOrdinal,VettingReviewProbe.map("rawMatch",rawMatch,"normalizedMatch",normalizedMatch,"quoteChars",rawQuote.length(),"normalizedQuoteChars",normalizedQuote.length(),"sourceChars",source.getContent().length(),"normalizedSourceChars",normalizedSource.length()));
                 }
                 ((com.fasterxml.jackson.databind.node.ObjectNode)merged.get(index)).set("evidence",patch.get("evidence").deepCopy());
@@ -2014,17 +2146,17 @@ public class VettingSemanticReview {
             + "For a source-supported clarification issue use assessment=issue and the applicable policy class, including requirement for an unclear obligation. Never call a coordination question a confirmed contradiction; risk is never an assessment value. "
             + "A higher exact number is compatible with a lower minimum. Missing context is not proof of a defect. "
             + "Do not invent absent Bills, user notes, project facts or quotations. Do not treat a standard amendment as a contradiction. "
-            + "For conflicts cite both different provisions verbatim, each at least 12 characters and sufficiently long to substantiate the point. "
+            + "For conflicts cite both different provisions verbatim, each sufficiently long to substantiate the point. "
             + "For reference errors cite the offending reference and the target provision when supplied. "
-             + (objectRecords?"Return {\"records\":[]} if there is no concrete issue. ":"Return [] if there is no concrete issue. ")+"If you include a consistency or incomplete-context assessment, label it accordingly; it will not become a finding. "
+             + (objectRecords?"Return {\"records\":[]} only when no evidence-bound assessment can be made for this packet. ":"Return [] only when no evidence-bound assessment can be made for this packet. ")+"A lack of defects does not remove the assigned checklist work: return supported consistent, insufficient_context or not_applicable assessments as appropriate; they will not become findings. "
             + "Use not_applicable only for an explicit applicable-scope exclusion supported by substantive project tender quotations and a stated reason; absence, missing evidence or unknown applicability cannot establish it. "
-             + (objectRecords?"Return all supported assessments in the records array of one JSON object; ":"Return all supported assessments in a JSON array; ")+"do not cap finding counts. Each record must satisfy the supplied schema: title at most 160 characters, comment at most 1200, impact and suggestion at most 600 each; keep explanations concise. Every record, including insufficient_context, requires 1–4 evidence entries with exact quotations of 12–1200 characters from supplied passages. If no affected tender passage supports an assessment, omit that record rather than returning empty evidence. Use keys assessment(issue|consistent|insufficient_context|not_applicable), type(reference|conflict|language|risk|gap|substantive|requirement), "
+             + (objectRecords?"Return all supported assessments in the records array of one JSON object; ":"Return all supported assessments in a JSON array; ")+"do not cap finding counts. Each record must satisfy the supplied schema: title at most 160 characters, comment at most 1200, impact and suggestion at most 600 each; keep explanations concise. Every record, including insufficient_context, requires 1–"+VettingOutputSchema.MAX_EVIDENCE+" necessary evidence entries with nonblank exact quotations of up to 1200 characters from supplied passages. If no affected tender passage supports an assessment, omit that record rather than returning empty evidence. Use keys assessment(issue|consistent|insufficient_context|not_applicable), type(reference|conflict|language|risk|gap|substantive|requirement), "
             + "severity(high|medium|low), title, comment, impact, suggestion, evidence:[{chunkId,side,quote}], subDimension, factBasis, pendingFacts, suggestedAction(delete|amend|insert|review), checklistAssessments:[{itemId,status,reason,support}]. "
             + "support must be null unless exact text within the cited evidence supports the declared requirement kind and fact slots; each fact contains slot, evidenceIndex and text copied verbatim from that evidence quote. The server resolves native positions and character intervals. Never calculate native indexes or offsets, or supply relevance, verification or server requirementRelation verdicts. A text or location match does not establish legal intent, a same-object relationship or complete appendix/page scope. "
             + "Each issue requires a specific subDimension, a source-supported factBasis and explicit suggestedAction. List unconfirmed facts in pendingFacts; if any are pending, use suggestedAction=review, never assume them to justify deletion or amendment. "
             + "For non-issue assessments subDimension and factBasis may be empty; pendingFacts and checklistAssessments may be empty arrays. "
             + "Checklist assessments must name an APP-I source row actually assessed against this record's exact evidence, not a CK group or annex example. "
-            + "Do not enumerate the checklist catalogue or add unassessed rows as insufficient_evidence. Keep each record limited to one supported assessment; split different assessment/status pairs into separate evidence-bound records. "
+            + "Attempt every assigned in-scope checklist row; do not enumerate unassigned catalogue rows or add evidence-free insufficient_evidence placeholders. Keep each record limited to one supported assessment; split different assessment/status pairs into separate evidence-bound records. "
             + "Use fulfilled only with assessment=consistent, not_fulfilled only with issue, insufficient_evidence only with insufficient_context, and not_applicable only with not_applicable. "
             + "Pricing-only requirements cannot receive automated fulfilment or applicability conclusions. Unassessed requirements must be omitted, not marked passed or failed. "
             + "Use supplied chunk IDs and exact source quotes; all prose in " + ("en".equals(lang) ? "English" : "Chinese") + ". "

@@ -56,6 +56,7 @@ public class OerBusinessEvidence {
         private boolean closedSourceProof;
         private Runnable initialAskExit;
         private Runnable adviceTextByteGuard;
+        private String adviceQuestion;
         private int queryChunkCount;
         private CanonicalEvidenceService.CompactBindingScope semanticScope;
         private OerCanonicalRetrievalClient.SemanticSources semanticSources;
@@ -557,7 +558,7 @@ public class OerBusinessEvidence {
         Runnable fullExit=()->{AdvisorySourceProof after=verifySequentialAdvisory(session,captured);require(proof.chunks==after.chunks&&proof.kinds.equals(after.kinds),"cold Advisory source denominator or producer changed");guard.run();};
         boolean initialAsk=buildMissing&&!rebuild;Runnable operationExit=initialAsk?guard:fullExit;
         OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,operationExit,rebuild,rebuild);
-        if(!state.ready&&buildMissing&&!rebuild)state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,operationExit,true,false);
+        if(!state.ready&&buildMissing&&!rebuild)state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,fullExit,true,false);
         if(state.ready){session.queryScope=captured;session.querySelection=currentSelected;session.querySourceGeneration=generation;session.queryChunkCount=proof.chunks;session.closedSourceProof=true;currentQueryScope(session);}
         if(initialAsk)session.initialAskExit=fullExit;
         return new AdvisoryRead(session,state);
@@ -719,6 +720,9 @@ public class OerBusinessEvidence {
         List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(projectId,module,new ArrayList<>(after.values()),originals);
         require(identity.equals(renderFingerprint(fingerprint(current),sourceRenderPins(current))),"current source identity changed during availability check");
         retrieval.sourceGenerationLinked(module,key,sourceGeneration(new ArrayList<>(after.values())));
+        if(state.ready)for(SourceDocument source:after.values()){
+            currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,originals.get(source.getId()));
+        }
         return new CurrentIndexStatus(key,state.chunkCount,selected.size(),state);
     }
     /** A status read owns one fresh frame; the selected catalog is fetched before health and after close. */
@@ -948,6 +952,18 @@ public class OerBusinessEvidence {
         if(selected.isEmpty())return Collections.emptyList();
         return retrieveReviewText(session,clause,"package_manifest",sourceGuard,true,contextChars,selected);
     }
+    public List<Chunk> retrieveRequiredProjectText(Session session,String clause,List<Chunk> nearby,Runnable sourceGuard,int contextChars){
+        if(session==null||session.semanticScope==null)return retrieveRequiredProjectText(session,clause,sourceGuard,contextChars);
+        require(clause!=null&&clause.matches("(?i)[A-Z][A-Z0-9_-]*\\.[A-Z0-9]+(?:\\.[A-Z0-9]+)*(?:\\([A-Z0-9]+\\))*"),"required project clause locator invalid");
+        String family=clause.substring(0,clause.indexOf('.'));List<Chunk> seeds=nearby.stream()
+                .filter(c->"tender".equals(c.getRole())&&family.equalsIgnoreCase(c.getFileKey())).collect(Collectors.toList());
+        if(seeds.isEmpty())return retrieveRequiredProjectText(session,clause,sourceGuard,contextChars);
+        sourceGuard.run();current(session);
+        if(session.reviewTextIndex==null)session.reviewTextIndex=new ReviewTextIndex(session.chunks);
+        List<Chunk> required=new ArrayList<>(requestedReviewText(session.reviewTextIndex,seeds,clause,contextChars,null).values());
+        checkSemanticViews(session,required);sourceGuard.run();
+        return new ReviewTextChunks(required.stream().map(OerBusinessEvidence::copy).collect(Collectors.toList()),Collections.emptySet());
+    }
     /** A model-free preview verifies only selected ranked text; it does not rescan the full corpus. */
     public List<Chunk> retrieveReviewTextForPreview(Session session,String query,String role,Runnable sourceGuard){
         return retrieveReviewText(session,query,role,sourceGuard,false,0);
@@ -972,6 +988,8 @@ public class OerBusinessEvidence {
                 CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(original,compact);compact.setSnapshotJson(null);bindings.add(compact);
             }
             List<SourceDocument> selected=new ArrayList<>(session.semanticDocuments.values());
+            require(session.documentIds.equals(bindings.stream().map(CanonicalSourceBinding::getDocumentId).collect(Collectors.toList()))
+                    &&session.documentIds.equals(selected.stream().map(SourceDocument::getId).collect(Collectors.toList())),"compact review index scope differs");
             String generation=sourceGeneration(selected);
             queryScope=new Session(session.projectId,"vetting",session.documentIds,bindings,new LinkedHashMap<>(),session.sourceRenderPins);
             queryScope.originalFileStates=observeOriginals(selected);
@@ -980,7 +998,12 @@ public class OerBusinessEvidence {
                 Set<String> kinds=new HashSet<>();for(JsonNode source:session.semanticSources.sourceCatalog()){
                     require(NormalObservedContract.PRODUCER.equals(source.path("producerKind").asText()),"compact review index source kind unsupported; refresh the source-bound index");kinds.add("normal");
                 }
-                available=retrieval.compactIndex("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),kinds,generation,guard,guard,true,false);
+                Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originals=queryScope.originalFileStates;
+                Runnable buildProof=()->{guard.run();for(SourceDocument source:selected){
+                    currentSources.requireOriginalFreshness(source,originals.get(source.getId()));currentSources.requireOriginalBytes(source);
+                    currentSources.requireOriginalFreshness(source,originals.get(source.getId()));
+                }evidence.revalidateCompactRegistry(session.semanticScope);guard.run();};
+                available=retrieval.compactIndex("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),kinds,generation,guard,buildProof,true,false);
             }
             require(available.ready,"source-bound review index unavailable");
             queryScope.queryScope=bindings;queryScope.querySelection=()->{guard.run();return selected;};queryScope.querySourceGeneration=generation;
@@ -1089,22 +1112,8 @@ public class OerBusinessEvidence {
         return reviewTextContext(new ReviewTextIndex(corpus),seeds,result,query,maxChars,null);
     }
     private static List<Chunk> reviewTextContext(ReviewTextIndex index,List<Chunk> seeds,JsonNode result,String query,int maxChars,ReviewTextStats stats){
-        LinkedHashMap<String,Chunk> selected=new LinkedHashMap<>();int[] remaining={Math.max(0,maxChars)};
-        Map<String,Boolean> requestedClauses=new HashMap<>();
-        for(Chunk seed:seeds){
-            List<Object> key=reviewSourceKey(seed);if(key==null)continue;
-            List<Chunk> rows=index.sources.get(key);if(rows==null)continue;
-            int position=rows.indexOf(index.byId.get(seed.getId()));boolean ordered=index.ordered.contains(key);if(position<0)continue;
-            if(ordered){
-                // An explicit request can find a new clause even when ranking repeats the same seed.
-                Map<String,Integer> requested=new LinkedHashMap<>();
-                for(Map.Entry<String,List<Integer>> clause:index.clauses.get(key).entrySet())if(requestedClauses.computeIfAbsent(clause.getKey(),id->requestsReviewClause(query,id)))
-                    for(int i:clause.getValue()){Integer previous=requested.get(clause.getKey());
-                        if(previous==null||Math.abs(i-position)<Math.abs(previous-position))requested.put(clause.getKey(),i);}
-                int requests=0;for(Integer start:requested.values()){if(requests++>=4)break;
-                    for(Chunk context:reviewClauseText(rows,start))addReviewText(selected,context,remaining,stats);}
-            }
-        }
+        LinkedHashMap<String,Chunk> selected=requestedReviewText(index,seeds,query,maxChars,stats);
+        int[] remaining={Math.max(0,maxChars)-selected.values().stream().mapToInt(c->c.getContent().length()).sum()};
         // Assigned clause text must fit before unrelated ranked seeds consume its allowance.
         for(Chunk seed:seeds)addReviewText(selected,seed,remaining,stats);
         for(Chunk seed:seeds){
@@ -1130,6 +1139,31 @@ public class OerBusinessEvidence {
             groups.computeIfAbsent(key==null?Arrays.asList("unbound",chunk.getId()):key,ignored->new ArrayList<>()).add(chunk);}
         List<Chunk> out=new ArrayList<>();groups.forEach((key,rows)->{if(index.ordered.contains(key))rows.sort(Comparator.comparing(OerBusinessEvidence::reviewPosition));out.addAll(rows);});return out;
     }
+    private static LinkedHashMap<String,Chunk> requestedReviewText(ReviewTextIndex index,List<Chunk> seeds,String query,int maxChars,ReviewTextStats stats){
+        LinkedHashMap<String,Chunk> selected=new LinkedHashMap<>();int[] remaining={Math.max(0,maxChars)};
+        Map<String,Integer> requestedClauses=new HashMap<>();
+        for(Chunk seed:seeds){
+            List<Object> key=reviewSourceKey(seed);if(key==null)continue;
+            List<Chunk> rows=index.sources.get(key);if(rows==null)continue;
+            int position=rows.indexOf(index.byId.get(seed.getId()));boolean ordered=index.ordered.contains(key);if(position<0)continue;
+            if(ordered){
+                // An explicit request can find a new clause even when ranking repeats the same seed.
+                Map<String,Integer> requested=new LinkedHashMap<>();
+                for(Map.Entry<String,List<Integer>> clause:index.clauses.get(key).entrySet())if(requestedClauses.computeIfAbsent(clause.getKey(),id->requestedReviewClauseOffset(query,id))>=0)
+                    for(int i:clause.getValue()){Integer previous=requested.get(clause.getKey());
+                        boolean body=reviewClauseText(rows,i,128).size()>1,previousBody=previous!=null&&reviewClauseText(rows,previous,128).size()>1;
+                        if(previous==null||body&&!previousBody||body==previousBody&&Math.abs(i-position)<Math.abs(previous-position))requested.put(clause.getKey(),i);}
+                List<Map.Entry<String,Integer>> windows=new ArrayList<>(requested.entrySet());
+                windows.removeIf(parent->{String section=parent.getKey().replaceFirst("\\.P$","");
+                    return section.matches("[A-Z]{1,8}\\.[A-Z][0-9]+")&&requested.keySet().stream()
+                            .anyMatch(child->!child.equals(parent.getKey())&&child.startsWith(section+"."));});
+                windows.sort(Comparator.comparingInt(entry->requestedClauses.get(entry.getKey())));
+                int requests=0;for(Map.Entry<String,Integer> window:windows){if(requests++>=4)break;
+                    for(Chunk context:reviewClauseText(rows,window.getValue(),128))addReviewText(selected,context,remaining,stats);}
+            }
+        }
+        return selected;
+    }
     private static void addReviewText(Map<String,Chunk> selected,Chunk chunk,int[] remaining,ReviewTextStats stats){
         if(chunk==null||selected.containsKey(chunk.getId())||JsonUtils.isBlankText(chunk.getContent()))return;
         boolean overBudget=chunk.getContent().length()>remaining[0];if(stats!=null)stats.candidate(chunk,overBudget);
@@ -1137,6 +1171,9 @@ public class OerBusinessEvidence {
         selected.put(chunk.getId(),chunk);remaining[0]-=chunk.getContent().length();
     }
     private static List<Chunk> reviewClauseText(List<Chunk> rows,int seed){
+        return reviewClauseText(rows,seed,64);
+    }
+    private static List<Chunk> reviewClauseText(List<Chunk> rows,int seed,int maximum){
         int start=seed;String clause=reviewClause(rows.get(seed));
         // A title can precede an unlabelled continuation, but only within a short observed window.
         if(clause.isEmpty())for(int i=seed-1;i>=Math.max(0,seed-32);i--){
@@ -1146,7 +1183,7 @@ public class OerBusinessEvidence {
                 &&!differentReviewClause(rows.get(seed),rows.get(start-1)))start--;
         if(clause.isEmpty())return Collections.singletonList(rows.get(seed));
         List<Chunk> out=new ArrayList<>();Chunk first=rows.get(start);
-        for(int i=start;i<rows.size()&&out.size()<64;i++){
+        for(int i=start;i<rows.size()&&out.size()<maximum;i++){
             Chunk row=rows.get(i);if(i>start&&!numberedTechnicalItem(first,row)&&(differentReviewClause(first,row)
                     ||!reviewHeading(row).isEmpty()&&(!clause.equals(reviewHeading(row))
                         ||JsonUtils.isBlankText(first.getClauseHeadingLocation())||!Objects.equals(first.getClauseHeadingLocation(),row.getClauseHeadingLocation()))))break;
@@ -1175,12 +1212,14 @@ public class OerBusinessEvidence {
         if(id.matches("[0-9]+")&&match.group(1)==null&&(match.end(2)>=text.length()||".)".indexOf(text.charAt(match.end(2)))<0))return "";
         return id;
     }
-    private static boolean requestsReviewClause(String query,String clause){
-        if(clause.isEmpty()||query==null)return false;
-        String prefix=clause.matches("[0-9]+")?"(?:clause|GCC|GCT|SCT|SCC|NTT|PRE|SL)\\s+":"";
+    private static boolean requestsReviewClause(String query,String clause){return requestedReviewClauseOffset(query,clause)>=0;}
+    private static int requestedReviewClauseOffset(String query,String clause){
+        if(clause.isEmpty()||query==null)return -1;
+        String prefix=clause.matches("[0-9]+")?"(?<!sub-)(?:clause|GCC|GCT|SCT|SCC|NTT|PRE|SL)\\s+":"";
         boolean projectVariant=clause.endsWith(".P")&&clause.matches(REVIEW_TECHNICAL_LABEL);
         String identifier=projectVariant?clause.substring(0,clause.length()-2):clause;
-        return java.util.regex.Pattern.compile("(?i)(?<![A-Z0-9.])"+prefix+java.util.regex.Pattern.quote(identifier)+(projectVariant?"(?:\\.P)?":"")+"(?![A-Z0-9.])").matcher(query).find();
+        java.util.regex.Matcher match=java.util.regex.Pattern.compile("(?i)(?<![A-Z0-9.])"+prefix+java.util.regex.Pattern.quote(identifier)+(projectVariant?"(?:\\.P)?":"")+"(?![A-Z0-9.])").matcher(query);
+        return match.find()?match.start():-1;
     }
     private static java.math.BigInteger reviewPosition(Chunk chunk){
         JsonNode order=chunk.getCanonicalEvidence()==null?null:chunk.getCanonicalEvidence().getSourceOrder();
@@ -1313,6 +1352,7 @@ public class OerBusinessEvidence {
         return withWordSourceScopes(session,adviceHits(session,question,false));
     }
     public List<VectorStore.SearchHit> adviceTextHits(Session session,String question) {
+        session.adviceQuestion=question;
         return adviceHits(session,question,true);
     }
     private List<VectorStore.SearchHit> adviceHits(Session session,String question,boolean textOnly){
@@ -1332,13 +1372,18 @@ public class OerBusinessEvidence {
             for(JsonNode id:envelope.path("requiredMemberIds"))retained.add(id.asText());
             for(JsonNode member:envelope.path("members"))retained.add(member.path("id").asText());
         }
-        CanonicalEvidenceService.SelectedNormalTextSources text=evidence.selectedNormalTextSources(session.projectId,session.module,selected,bindings,retained);
+        Set<String> clauses=requestedAdviceClauses(session.adviceQuestion),contextSeeds=new LinkedHashSet<>();
+        for(JsonNode hit:result.path("hits")){JsonNode raw=hit.path("payload");SourceDocument source=selected.stream().filter(value->String.valueOf(value.getId()).equals(raw.path("documentId").asText())).findFirst().orElse(null);
+            if(source!=null&&contextSeeds.size()<10&&adviceClauseSeed(source.getFileKey(),raw.path("content").asText(),clauses))contextSeeds.add(hit.path("id").asText());}
+        CanonicalEvidenceService.SelectedNormalTextSources text=contextSeeds.isEmpty()?evidence.selectedNormalTextSources(session.projectId,session.module,selected,bindings,retained)
+                :evidence.selectedNormalTextSources(session.projectId,session.module,selected,bindings,retained,contextSeeds,24000);
         if(text==null){logAdviceAdmission(ids.size(),bindings.size(),result.path("hits").size(),0,"fallback_registered_authority_not_normal");return null;}
         CanonicalEvidenceService.CompactBindingScope scope=text.scope();Map<Long,SourceDocument> sources=text.sources();Map<Long,JsonNode> headers=text.headers();
         Map<String,JsonNode> parents=text.chunks();Map<Long,CanonicalSourceBinding> byDocument=new LinkedHashMap<>();bindings.forEach(binding->byDocument.put(binding.getDocumentId(),binding));
         ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","catalog");demand.put("maxBytes",16777216);
         evidence.assertCompactCurrent(scope);JsonNode catalog=retrieval.readSources(session.module,demand,bindings);evidence.assertCompactCurrent(scope);currentQueryScope(session);
-        for(String id:seeds){JsonNode raw=parents.get(id);require(raw!=null,"ranked source origin unavailable");Long document=Long.valueOf(raw.path("documentId").asText());CanonicalSourceBinding binding=byDocument.get(document);
+        for(String id:seeds)require(parents.containsKey(id),"ranked source origin unavailable");
+        for(Map.Entry<String,JsonNode> entry:parents.entrySet()){String id=entry.getKey();JsonNode raw=entry.getValue();Long document=Long.valueOf(raw.path("documentId").asText());CanonicalSourceBinding binding=byDocument.get(document);
             require(binding!=null,"ranked source outside selected documents");EvidencePointer pointer=CanonicalEvidenceService.compactNormalPointer(binding,headers.get(document),raw,session.module);
             if(sourcePages!=null)pointer=sourcePages.enrich(pointer);require(Objects.equals(session.sourceRenderPins.get(binding.getProjectionSha256()),pointer.getSourceRenderEvidenceIdentitySha256()),"source render pointer differs from reviewed identity");
             Chunk view=view(raw,pointer,sources.get(document));require(canonicalViewStatus(view)==null,"selected normal text view differs");session.byId.put(id,view);session.chunks.owned.add(view);session.viewPayloads.put(id,JsonUtils.serializedSha256(view));
@@ -1363,9 +1408,66 @@ public class OerBusinessEvidence {
 
     /** Advisory declares its context needs; source selection and observed closure stay in shared OER. */
     public List<VectorStore.SearchHit> advisoryTextContext(Session session,List<VectorStore.SearchHit> hits){
-        if(session.adviceTextByteGuard==null)return withIncorporationContext(session,hits,true);
-        List<VectorStore.SearchHit> deferred=new ArrayList<>();for(VectorStore.SearchHit hit:hits){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());
-            if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit)){payload.put("applicabilityContextComplete",false);payload.put("applicabilityContextRequiredUnits",Collections.emptyList());}deferred.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}return deferred;
+        String question=session.adviceQuestion;
+        if(session.adviceTextByteGuard==null&&(session.queryScope==null||!session.byId.isEmpty()))return withIncorporationContext(session,hits,true);
+        List<VectorStore.SearchHit> libraries=hits.stream().filter(hit->fixedBaselineHit(hit)&&!String.valueOf(hit.getPayload().getOrDefault("fixedReferenceDocumentTitle","")).isEmpty()).collect(Collectors.toList());
+        if(libraries.isEmpty())return hits;
+        Set<String> composition=new LinkedHashSet<>(),amendments=new LinkedHashSet<>(),amendmentDocuments=new LinkedHashSet<>();
+        for(SourceDocument source:session.querySelection.get())if("tender".equals(VettingCorpus.sourceRole(source))){
+            String name=text(source.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
+            if(name.matches(".*\\bcoc\\b.*")||name.contains("conditions of contract")&&!name.contains("special"))composition.add(source.getSourceSha256());
+            if(name.matches(".*\\bscc\\b.*")||name.contains("special conditions of contract")){amendments.add(source.getSourceSha256());amendmentDocuments.add(String.valueOf(source.getId()));}
+        }
+        Set<String> titles=libraries.stream().map(hit->String.valueOf(hit.getPayload().get("fixedReferenceDocumentTitle"))).collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> clauses=requestedAdviceClauses(question);
+        if(clauses.isEmpty())for(VectorStore.SearchHit library:libraries){String label=String.valueOf(library.getPayload().getOrDefault("clauseId",""));
+            if(label.isEmpty()||"null".equals(label))label=text(library.text()).split("\\R",2)[0];
+            java.util.regex.Matcher primary=java.util.regex.Pattern.compile("(?i)^\\s*(?:GCC\\s*)?(\\d{1,2}\\.\\d{1,3})(?=\\s|[.(]|$)").matcher(label);
+            if(primary.find()){clauses.add(primary.group(1));break;}}
+        List<VectorStore.SearchHit> contexts=new ArrayList<>();
+        boolean adoptionPresent=titles.stream().allMatch(title->hits.stream().anyMatch(hit->"tender".equals(hit.getPayload().get("sourceRole"))&&FixedReferenceEvidence.adoptionMatches(hit.fileLabel(),hit.text(),title)));
+        if(!composition.isEmpty()&&!adoptionPresent)for(VectorStore.SearchHit hit:compactAdviceContext(session,String.join(" ",titles)+" documents forming part of the Contract",composition))
+            if(titles.stream().anyMatch(title->FixedReferenceEvidence.adoptionMatches(hit.fileLabel(),hit.text(),title)))contexts.add(hit);
+        boolean amendmentsPresent=clauses.stream().allMatch(number->session.chunks.stream().anyMatch(chunk->amendmentDocuments.contains(chunk.getDocumentId())
+                &&java.util.regex.Pattern.compile("(?i)\\b(?:gcc\\s+)?clauses?\\s+"+java.util.regex.Pattern.quote(number)+"(?=\\b|\\()").matcher(chunk.getContent()).find()
+                &&chunk.getContent().toLowerCase(Locale.ROOT).matches("(?s).*\\b(?:amended|substitut\\w*|replac\\w*)\\b.*")));
+        if(!amendments.isEmpty()&&!clauses.isEmpty()&&!amendmentsPresent)contexts.addAll(compactAdviceContext(session,clauses.stream().map(value->"Clause "+value).collect(Collectors.joining(" "))+" of the General Conditions of Contract is amended substituted following",amendments));
+        List<Chunk> clauseSeeds=session.chunks.stream().filter(chunk->adviceClauseSeed(chunk.getFileKey(),chunk.getContent(),clauses)).collect(Collectors.toList());
+        if(!clauseSeeds.isEmpty())for(Chunk chunk:reviewTextContext(session.chunks,clauseSeeds,JsonUtils.mapper().createObjectNode(),String.join(" ",clauses),12000)){
+            ObjectNode unit=OerCanonicalSourceUnits.resolve(canonicalParents(session),chunk.getCanonicalPayload());unit.put("kind","unknown");unit.put("status","unknown");unit.put("reason","additional_source_context_deferred");unit.putArray("requiredMemberIds");unit.putArray("members");unit.remove("hierarchyContext");unit.remove("attachmentContext");
+            contexts.add(businessHit(session,chunk.getId(),unit,0d,"context_only"));}
+        // Necessary scope text precedes ranked detail so a byte bound cannot silently discard adoption.
+        List<VectorStore.SearchHit> result=new ArrayList<>();Set<String> present=new LinkedHashSet<>();int chars=0;
+        for(VectorStore.SearchHit hit:contexts)if(chars+hit.text().length()<=12000&&result.size()<64&&present.add(hit.getId())){result.add(hit);chars+=hit.text().length();}
+        for(VectorStore.SearchHit hit:hits)if(present.add(hit.getId()))result.add(hit);
+        return result;
+    }
+    static Set<String> requestedAdviceClauses(String question){
+        return FixedReferenceEvidence.requestedClauseLabels(question);
+    }
+    private static boolean adviceClauseSeed(String family,String content,Set<String> clauses){
+        if(!Arrays.asList("SCC","PRE").contains(text(family).toUpperCase(Locale.ROOT)))return false;
+        String value=text(content);java.util.regex.Matcher heading=REVIEW_HEADING.matcher(value);boolean technical=heading.find()&&heading.group(2).toUpperCase(Locale.ROOT).matches(REVIEW_TECHNICAL_LABEL);
+        if(clauses.isEmpty())return technical||value.matches("(?is).*\\bclauses?\\s+\\d+\\.\\d+.*\\b(?:amended|substitut\\w*|replac\\w*)\\b.*");
+        for(String clause:clauses)if(java.util.regex.Pattern.compile("(?i)(?<![0-9.])"+java.util.regex.Pattern.quote(clause)+"(?![0-9.])").matcher(value).find()
+                ||technical&&"SCC".equalsIgnoreCase(family)&&heading.group(2).toUpperCase(Locale.ROOT).startsWith("SCC"+clause.substring(0,clause.indexOf('.'))+"."))return true;
+        return false;
+    }
+    private List<VectorStore.SearchHit> compactAdviceContext(Session session,String query,Set<String> selectedSources){
+        currentQueryScope(session);
+        Session selected=new Session(session.projectId,session.module,session.documentIds,session.queryScope,new LinkedHashMap<>(),session.sourceRenderPins);
+        selected.queryScope=session.queryScope;selected.querySelection=session.querySelection;selected.querySourceGeneration=session.querySourceGeneration;selected.originalFileStates=session.originalFileStates;
+        selected.adviceQuestion=query;
+        java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> noGraphs=ids->{throw new IllegalStateException("Advice scope text requires compact proof; complete source graphs were not loaded");};
+        JsonNode response=retrieval.retrieveCompact(session.module,session.indexKey,query,"tender",session.queryScope,session.querySourceGeneration,()->currentQueryScope(selected),noGraphs,
+                (ids,result)->compactAdviceParents(selected,ids,result),true,selectedSources);
+        List<VectorStore.SearchHit> hits=new ArrayList<>();for(int i=0;i<response.path("hits").size();i++){
+            JsonNode hit=response.path("hits").get(i);hits.add(businessHit(selected,hit.path("id").asText(),response.path("sourceUnits").path("units").get(i),hit.path("score").asDouble(),"requested_scope_context"));
+        }
+        selected.completeInitialAsk();
+        if(selected.adviceTextByteGuard!=null){Runnable previous=session.adviceTextByteGuard,additional=selected.adviceTextByteGuard;session.adviceTextByteGuard=()->{if(previous!=null)previous.run();additional.run();};}
+        for(Chunk view:selected.byId.values())if(!session.byId.containsKey(view.getId())){session.byId.put(view.getId(),view);session.viewPayloads.put(view.getId(),selected.viewPayloads.get(view.getId()));session.chunks.owned.add(view);}
+        currentQueryScope(session);return hits;
     }
     public List<VectorStore.SearchHit> advisoryContext(Session session,List<VectorStore.SearchHit> hits,boolean includeSmallCorpus,int stuffingLimit){
         List<VectorStore.SearchHit> selected=withIncorporationContext(session,hits);

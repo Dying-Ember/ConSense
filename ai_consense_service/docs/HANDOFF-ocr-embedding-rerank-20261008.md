@@ -1,3 +1,6 @@
+<!-- external-app-deployment-20261029 -->
+**部署拆分入口（2026-10-29）：** App 外置模式的实际实现、验证边界与后续工作见[部署检查点](testing/external-app-deployment-20261029.md)。此模式外置 JAR 与前端 dist；Python 协调器／worker 外置、固定 GPU worker、镜像构建和赛方环境验收均未完成。
+
 <!-- drafting-project-scc-authority-20261029 -->
 **Drafting 项目版次决定（2026-10-29）：** 用户已决定，本次项目以当前上传的 Word SCC 为准逐项对照冲突，NSC 通信事实继续保留；这不代表条号、适用性或付款主体冲突已解决。此决定仅适用于本项目，不推广为其他项目的选版规则。source 25 身份、决定回执及未决事项见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)。
 

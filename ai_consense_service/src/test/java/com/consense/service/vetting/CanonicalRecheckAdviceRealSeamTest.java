@@ -222,6 +222,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         doAnswer(call->{CanonicalSourceBinding binding=call.getArgument(0);events.add("source:"+binding.getDocumentId()+":start");Object result=call.callRealMethod();events.add("source:"+binding.getDocumentId()+":end");return result;}).when(reader).assertSourceCurrent(any(),anyString());
         doAnswer(call->{events.add("selected-scope:start");Object result=call.callRealMethod();events.add("selected-scope:end");return result;}).when(business).assertSelected(any(),anyList());
         doAnswer(call->{events.add("scalar:start");Object result=call.callRealMethod();events.add("scalar:end");return result;}).when(evidence).currentDisplayBindings(anyString(),anyString(),anyList());
+        doAnswer(call->{events.add("scalar:start");Object result=call.callRealMethod();events.add("scalar:end");return result;}).when(evidence).currentDisplayBindings(anyString(),anyString(),anyList(),anyMap());
         org.mockito.stubbing.Answer<?> repositoryDelegate=mockingDetails(history).getMockCreationSettings().getDefaultAnswer();
         doAnswer(call->{ChatMessage message=call.getArgument(0);String event="persist-"+message.getRole();events.add(event+":start");Object result=repositoryDelegate.answer(call);events.add(event+":end");return result;}).when(history).save(any(ChatMessage.class));
         when(llm.chat(anyList())).thenAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());chatCalls.incrementAndGet();events.add("llm:start");runOnce(chatMutation);events.add("llm:end");return "{\"grounded\":true,\"answer\":\"AUTHORED supported literal\",\"citations\":[\"[1]\"]}";});
@@ -244,10 +245,13 @@ class CanonicalRecheckAdviceRealSeamTest {
         boolean optimized=Boolean.parseBoolean(System.getProperty("consense.recheck.expectOptimized","true"));
         boolean staged=Boolean.parseBoolean(System.getProperty("consense.recheck.expectStage","true"));
         assertEquals(staged?0:optimized?7:10,rounds,"real successful Advice chain currentBindings budget");
-        assertEquals(staged?18:optimized?18:24,snapshotReads.get(),"service + client real local fake registry GET count");
-        assertEquals(staged?66:optimized?32:66,gates,"actual fresh proxied reader source gate count");
-        if(staged){assertEquals(9,snapshotCounts().get("42"));assertEquals(9,snapshotCounts().get("43"));assertEquals(3,receipt.path("verifiedFrameRounds").asInt());assertWaitGuards("health");assertWaitGuards("index");assertWaitGuards("status");}
-        assertEquals(1,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        assertEquals(staged?12:optimized?18:24,snapshotReads.get(),"service + client real local fake registry GET count");
+        assertEquals(staged?36:optimized?32:66,gates,"actual fresh proxied reader source gate count");
+        if(staged){assertEquals(6,snapshotCounts().get("42"));assertEquals(6,snapshotCounts().get("43"));assertEquals(6,receipt.path("verifiedFrameRounds").asInt());
+            List<String> sequence=new ArrayList<>(events);int firstHealth=sequence.indexOf("health:start"),firstHealthEnd=sequence.indexOf("health:end"),indexStart=sequence.indexOf("index:start"),indexEnd=sequence.indexOf("index:end"),lastHealth=sequence.lastIndexOf("health:start"),lastHealthEnd=sequence.lastIndexOf("health:end");
+            assertTrue(firstHealth>=0&&firstHealthEnd<indexStart&&indexStart<indexEnd&&indexEnd<lastHealth&&lastHealth<lastHealthEnd);
+            assertCompletePerSourceProof(sequence.subList(0,firstHealth));assertCompletePerSourceProof(sequence.subList(firstHealthEnd+1,indexStart));assertCompletePerSourceProof(sequence.subList(lastHealthEnd+1,sequence.size()));}
+        assertEquals(1,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
         assertFalse(indexRequest.get().has("sourcePageEvidence"),"legacy unpinned request remains unchanged");
         String baseline=System.getProperty("consense.recheck.baselineResponse");
         if(baseline!=null){JsonNode old=JsonUtils.parse(new String(Files.readAllBytes(Paths.get(baseline)),StandardCharsets.UTF_8));
@@ -520,7 +524,10 @@ class CanonicalRecheckAdviceRealSeamTest {
             if("selected".equals(operation))assertEquals(1,evidence.selectedPointers(PROJECT,43L,normal.getProjectionSha256(),Collections.singletonList(chunk.path("unitId").asText()),"advisory").size());
             else if("single".equals(operation))assertNotNull(evidence.pointer(PROJECT,43L,normal.getProjectionSha256(),chunk.path("unitId").asText(),"advisory"));
             else evidence.wordSourceScopeContext(PROJECT,43L,normal.getProjectionSha256(),chunk.path("id").asText(),"advisory");
-            assertEquals(1,NormalSourceSql.reads.size(),"One selected-source operation must load complete normal content once, then retain its verified stamp");
+            if("single".equals(operation)) {
+                assertTrue(NormalSourceSql.reads.isEmpty(),"The bounded JDBC proof is outside Hibernate's statement inspector");
+                verify(reader,times(1)).normalPointerProof(any(),eq("advisory"),anyString());
+            } else assertEquals(1,NormalSourceSql.reads.size(),"One selected-source operation must load complete normal content once, then retain its verified stamp");
         } finally {NormalSourceSql.capture=false;}
         verify(reader,never()).assertSourceCurrent(any(),eq("advisory"));
         assertEquals(1,snapshotReads.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
@@ -656,15 +663,15 @@ class CanonicalRecheckAdviceRealSeamTest {
     @Test void explicitPreparationRetainsCompleteDenominatorWhenBackendIsUnavailable(){
         server.stop(0);normalServer.stop(0);long before=bindings.count();SourcePreparationVO result=advice.prepareSources(PROJECT,"fullset");
         assertEquals(2,result.getSelectedDocuments());assertEquals(0,result.getPreparedDocuments());assertFalse(result.isComplete());assertFalse(result.isHumanConfirmed());assertFalse(result.isSourceQualityAccepted());
-        assertEquals(2,result.getResults().size());assertEquals("failed",result.getResults().get(0).getStatus());assertEquals("evidence_backend_unavailable",result.getResults().get(0).getReason());assertEquals("unexecuted",result.getResults().get(1).getStatus());
+        assertEquals(2,result.getResults().size());for(int i=0;i<2;i++){assertEquals(String.valueOf(42+i),result.getResults().get(i).getDocumentId());assertEquals("failed",result.getResults().get(i).getStatus());assertEquals("evidence_backend_unavailable",result.getResults().get(i).getReason());}
         assertEquals(before,bindings.count());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
     }
 
     @Test void staleReviewedSourceNeverBecomesAnAutomaticNormalBinding(){
         long before=bindings.count();jdbc.update("UPDATE source_document SET text_content=? WHERE id=?","changed synthetic source",42L);
         SourcePreparationVO result=advice.prepareSources(PROJECT,"fullset");
-        assertFalse(result.isComplete());assertEquals(2,result.getSelectedDocuments());assertEquals("failed",result.getResults().get(0).getStatus());assertEquals("source_stale",result.getResults().get(0).getReason());assertEquals("unexecuted",result.getResults().get(1).getStatus());
-        assertEquals(before,bindings.count());assertNull(documents.findById(42L).get().getNormalCandidateJson());assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());
+        assertFalse(result.isComplete());assertEquals(2,result.getSelectedDocuments());assertEquals(1,result.getPreparedDocuments());assertEquals(2,result.getResults().size());assertEquals("42",result.getResults().get(0).getDocumentId());assertEquals("failed",result.getResults().get(0).getStatus());assertEquals("source_stale",result.getResults().get(0).getReason());assertEquals("43",result.getResults().get(1).getDocumentId());assertEquals("already_registered",result.getResults().get(1).getStatus());
+        assertEquals(before,bindings.count());assertNull(documents.findById(42L).get().getNormalCandidateJson());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
     }
 
     @Test void missingNormalSourceStructureFailsWithoutSilentlyReducingSelectedScope(){
@@ -704,6 +711,32 @@ class CanonicalRecheckAdviceRealSeamTest {
         assertFalse(canonicalRetrieval.indexStatus("authored-http-explicit-pins","advisory",selected).ready);
     }
 
+    @DirtiesContext(methodMode=DirtiesContext.MethodMode.BEFORE_METHOD)
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"original_same_length_restored_mtime","cas_same_length_restored_mtime"})
+    void advisoryAutomaticBuildRechecksActualSourcesBeforeIndex(String change)throws Exception{
+        resetCounters();statusMutation.set(()->mutate(42L,change));
+        assertThrows(RuntimeException.class,()->business.openQuerySession(PROJECT,()->documents.findScopeSourcesByProjectId(PROJECT)));
+        assertTrue(events.contains("status:end"),"Mutation must occur during the missing-index response");
+        assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+    @DirtiesContext(methodMode=DirtiesContext.MethodMode.BEFORE_METHOD)
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"original_same_length_restored_mtime","cas_same_length_restored_mtime"})
+    void vettingCompactBuildRechecksActualSourcesBeforeIndex(String change)throws Exception{
+        replaceReviewedDocxWithUnregisteredNormal();configureVettingSemanticPreparation();
+        ((ObjectNode)health.path("oer").path("sourceRead")).putObject("semanticPreparation").put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+        assertTrue(evidence.prepareNormalObserved(PROJECT,43L,"vetting"));
+        List<SourceDocument> selected=Collections.singletonList(documents.findScopeSourcesByProjectId(PROJECT).stream().filter(source->source.getId()==43L).findFirst().orElseThrow());
+        try(OerBusinessEvidence.Session session=business.loadSemantic(PROJECT,"vetting",selected)){
+            resetCounters();healthMutationOrdinal=2;healthMutation.set(()->{
+                if(!"cas_same_length_restored_mtime".equals(change)){mutate(43L,change);return;}
+                try{changeExactLengthRestoredMtime(normalCasRoots.get(43L).resolve(snapshots.get(43L).path("observationManifestRef").path("relativePath").asText()));}
+                catch(IOException error){throw new IllegalStateException(error);}
+            });
+            assertThrows(RuntimeException.class,()->business.retrieveReviewTextForPreview(session,"AUTHORED source","tender",()->{}));
+            assertTrue(healthReads.get()>=2,"Mutation must occur after bootstrap and before index build");
+            assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        }
+    }
     static Stream<Arguments> sourceMutations(){return Stream.of(42L,43L).flatMap(id->Stream.of("original_same_length_restored_mtime","db_parsed","binding_revision","cas_same_length_restored_mtime").map(kind->Arguments.of(id,kind)));}
     @ParameterizedTest @MethodSource("sourceMutations") void persistentSourceDriftDuringIndexRefusesReadyAndSavesZeroHistory(Long id,String kind){
         indexMutation.set(()->mutate(id,kind));assertThrows(RuntimeException.class,()->advice.rebuildIndex(PROJECT,"fullset"));
@@ -949,7 +982,7 @@ class CanonicalRecheckAdviceRealSeamTest {
             for(JsonNode address:request.path("projectionSha256")){
                 Long id=idForProjection(address.asText());JsonNode snapshot=snapshots.get(id),identity=snapshot.path("projectionIdentity");
                 preparedOriginalPaths.put(id,Paths.get(SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(id).orElseThrow()).getStoragePath()));preparedOriginalShas.put(id,snapshot.path("source").path("sourceSha256").asText());
-                ObjectNode row=sources.addObject();row.put("projectionSha256",address.asText());row.put("documentId",String.valueOf(id));row.set("originalSourceSha256",snapshot.path("source").path("sourceSha256"));row.set("sourceHash",snapshot.path("sourceHash"));row.set("javaParsedSourceHash",snapshot.path("source").path("parsedSourceHash"));row.set("sourceRevisionSha256",snapshot.path("source").path("sourceRevisionSha256"));
+                ObjectNode row=sources.addObject();row.put("projectionSha256",address.asText());row.put("documentId",String.valueOf(id));row.set("originalSourceSha256",snapshot.path("source").path("sourceSha256"));row.set("sourceHash",snapshot.path("sourceHash"));row.set("javaParsedSourceHash",snapshot.path("source").path("parsedSourceHash"));row.set("sourceRevisionSha256",snapshot.path("source").path("sourceRevisionSha256"));row.set("producerKind",snapshot.path("producerKind"));row.set("projectionRevisionSha256",snapshot.path("projectionRevisionSha256"));
                 int count=snapshots.get(id).path("chunks").size();row.put("chunkCount",count);total+=count;manifests.add(VettingCorpus.hash("AUTHORED semantic manifest "+id));
             }
             if(request.has("normalProofVersion")){result.set("normalProofVersion",request.path("normalProofVersion"));ArrayNode proofs=result.putArray("normalProofs");for(JsonNode address:request.path("projectionSha256")){
@@ -1027,11 +1060,12 @@ class CanonicalRecheckAdviceRealSeamTest {
     void newScopeMember(){SourceDocument d=new SourceDocument();d.setProjectId(PROJECT);d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);d.setFileKey("PRE");d.setFileName("new-current-project-PRE.txt");d.setParseStatus("PARSED");d.setReviewRole("tender");d.setTextContent("NEW scope source");documents.saveAndFlush(d);}
     void verifyActualCas(Long id)throws IOException{
         if(normalCasRoots.containsKey(id)){JsonNode descriptor=snapshots.get(id).path("observationManifestRef");byte[] bytes=Files.readAllBytes(normalCasRoots.get(id).resolve(descriptor.path("relativePath").asText()));if(bytes.length!=descriptor.path("byteCount").asLong()||!shaBytes(bytes).equals(descriptor.path("sha256").asText()))throw new IOException("Actual normal observation CAS bytes changed");return;}
-        for(JsonNode record:casLedgers.get(id)){byte[] actual=Files.readAllBytes(temporary.resolve(record.path("relativePath").asText()));
+        for(JsonNode record:casLedgers.get(id)){byte[] actual=Files.readAllBytes(temporary.resolve(record.path("relativePath").asText()));events.add("actual-cas:"+id+":read");
         if(actual.length!=record.path("byteCount").asInt()||!shaBytes(actual).equals(record.path("sha256").asText()))throw new IOException("SYNTHETIC actual CAS bytes changed");}}
     Long idForProjection(String projection){return snapshots.entrySet().stream().filter(e->e.getValue().path("projectionSha256").asText().equals(projection)).map(Map.Entry::getKey).findFirst().orElseThrow(()->new IllegalArgumentException("Unknown projection"));}
     Map<String,Integer> snapshotCounts(){Map<String,Integer> result=new TreeMap<>();perDocumentSnapshotReads.forEach((id,count)->result.put(String.valueOf(id),count.get()));return result;}
     void resetCounters(){snapshotReads.set(0);unchangedSnapshotReads.set(0);snapshotResponseBytes.set(0);indexCalls.set(0);retrieveCalls.set(0);chatCalls.set(0);sourceReadCalls.set(0);healthReads.set(0);healthMutationOrdinal=1;perDocumentSnapshotReads.clear();events.clear();conditionalSnapshotTags.clear();compactAdvicePrepareRequests.clear();compactAdvicePrepareCasReads.set(0);compactAdvicePrepareCasBytes.set(0);clearInvocations(evidence,reader,business,llm,history);}
+    void assertCompletePerSourceProof(List<String> sequence){for(long id:new long[]{42,43}){assertTrue(sequence.contains("source:"+id+":end"),"source guard for "+id);assertEquals(2,sequence.stream().filter(("cas:"+id+":end")::equals).count(),"complete CAS proof for "+id);}}
     void assertScalarAvailabilityGuards(){List<String> sequence=new ArrayList<>(events);int start=sequence.indexOf("availability:start"),end=sequence.indexOf("availability:end");assertTrue(start>=0&&end>start);
         int firstHealth=sequence.subList(0,start).lastIndexOf("health:start"),lastHealth=sequence.subList(end+1,sequence.size()).indexOf("health:end")+end+1;
         assertTrue(firstHealth>=0&&lastHealth>end);assertTrue(sequence.subList(0,firstHealth).contains("scalar:end"));assertTrue(sequence.subList(lastHealth+1,sequence.size()).contains("scalar:start"));
@@ -1283,8 +1317,9 @@ class CanonicalRecheckAdviceRealSeamTest {
         receipt.put("verifiedFrameRounds",mockingDetails(evidence).getInvocations().stream().filter(i->i.getMethod().getName().equals("verifiedBindings")).count());
         receipt.set("events",JsonUtils.mapper().valueToTree(new ArrayList<>(events)));receipt.set("completeStatusResponse",JsonUtils.mapper().valueToTree(result));write("single-frame-missing-status.json",receipt);
         assertEquals(4,snapshotReads.get());assertEquals(Integer.valueOf(2),snapshotCounts().get("42"));assertEquals(Integer.valueOf(2),snapshotCounts().get("43"));
-        assertEquals(1,healthReads.get());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
-        assertEquals(1,receipt.path("verifiedFrameRounds").asInt());for(long count:sourceCounts.values())assertEquals(8L,count);assertWaitGuards("health");assertWaitGuards("status");
+        assertEquals(5,healthReads.get());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        assertEquals(2,receipt.path("verifiedFrameRounds").asInt());for(long count:sourceCounts.values())assertEquals(6L,count);
+        List<String> sequence=new ArrayList<>(events);int statusEnd=sequence.indexOf("status:end"),lastHealth=sequence.lastIndexOf("health:start");assertTrue(statusEnd>=0&&lastHealth>statusEnd);assertCompletePerSourceProof(sequence.subList(statusEnd+1,lastHealth));
     }
     @Test void newEligibleSelectedScopeMemberDuringAvailabilityResponseRefusesOldReadyResponse(){
         advice.rebuildIndex(PROJECT,"fullset");resetCounters();availabilityMutation.set(this::newScopeMember);
@@ -1305,8 +1340,9 @@ class CanonicalRecheckAdviceRealSeamTest {
         }
         advice.rebuildIndex(PROJECT,"fullset");resetCounters();assertTrue(advice.status(PROJECT,"fullset").isVectorReady());assertEquals(0,snapshotReads.get());assertScalarAvailabilityGuards();
         resetCounters();mutate(42L,"cas_same_length_restored_mtime");
-        assertThrows(RuntimeException.class,()->business.currentIndexStatus(PROJECT,"advisory",()->documents.findScopeSourcesByProjectId(PROJECT)));assertTrue(snapshotReads.get()>0,"explicit integrity request must read actual CAS again");
-        assertEquals(0,healthReads.get());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        assertThrows(RuntimeException.class,()->business.currentIndexStatus(PROJECT,"advisory",()->documents.findScopeSourcesByProjectId(PROJECT)));
+        assertEquals(1,sourceReadCalls.get());assertTrue(events.contains("sources:start"));assertTrue(events.contains("actual-cas:42:read"),"catalog must read the corrupted actual CAS bytes");assertFalse(events.contains("sources:end"),"catalog must reject before returning its proof");
+        assertEquals(1,healthReads.get());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
         writeNegative("status-new-request-fresh-cas");
     }
 

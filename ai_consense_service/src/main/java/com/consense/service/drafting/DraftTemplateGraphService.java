@@ -92,6 +92,16 @@ public class DraftTemplateGraphService {
         head.setDraftRevisionId(saved.getId());heads.save(head);return revisionVO(saved,true);
     }
     @Transactional
+    public Map<String,Object> saveDelta(String projectId,Map<String,Object> delta,String expectedCurrent,String expectedDraft) {
+        DraftTemplateGraphHead head=lockedHead(projectId);expected(head.getCurrentRevisionId(),expectedCurrent);expected(head.getDraftRevisionId(),expectedDraft);
+        String baseId=head.getDraftRevisionId()==null?head.getCurrentRevisionId():head.getDraftRevisionId();
+        if(baseId==null||!Objects.equals(baseId,delta.get("baseRevisionId")))throw conflict("The delta baseline changed; reload before saving.");
+        DraftTemplateGraphRevision baseline=requireRevision(projectId,baseId);if(!Objects.equals(baseline.getGraphSha256(),delta.get("baseGraphSha256")))throw conflict("The delta baseline content changed; reload before saving.");
+        Map<String,Object> graph=JsonUtils.readMap(baseline.getGraphJson()),proposed=DraftGraphSaveDelta.apply(graph,delta);
+        Map<String,Object> saved=save(projectId,proposed,expectedCurrent,expectedDraft,true);
+        return DraftGraphSaveDelta.receipt(baseId,baseline.getGraphSha256(),graph,saved);
+    }
+    @Transactional
     public Map<String,Object> confirmDefinitions(String projectId,String draftId,String expectedCurrent,String reason,boolean acknowledgeUnresolved) {
         return confirmDefinitions(projectId,draftId,expectedCurrent,reason,acknowledgeUnresolved,null);
     }

@@ -1,7 +1,9 @@
 """Public preparation and handoff boundaries; no Docker, cluster or database calls."""
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -38,6 +40,72 @@ class DeliveryFixture:
 
 
 class DeliveryPreparationTest(DeliveryFixture, unittest.TestCase):
+    def external_app(self):
+        for path, content in [('release/app.jar', b'fixture jar'), ('release/web/index.html', b'fixture html'),
+                              ('release/web/assets/main.js', b'fixture js')]:
+            target = self.root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            self.manifest['assets'].append({'path': path, 'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()})
+        self.manifest['externalApp'] = {'jar': 'release/app.jar', 'webDirectory': 'release/web'}
+        del self.manifest['images']['web']
+
+    def test_external_app_uses_pinned_mounted_release_and_no_web_container(self):
+        self.external_app()
+        self.prepare()
+        docs = json.loads((self.root / 'prepared/kubernetes.json').read_bytes())['items']
+        deployments = [d for d in docs if d['kind'] == 'Deployment']
+        self.assertEqual({'consense-mysql', 'consense-qdrant', 'consense-backend'}, {d['metadata']['name'] for d in deployments})
+        backend = next(d for d in deployments if d['metadata']['name'] == 'consense-backend')['spec']['template']['spec']
+        container = backend['containers'][0]
+        self.assertEqual(['/bin/sh', '/app/app-entrypoint.sh'], container['command'])
+        self.assertEqual({'release/app.jar', 'release/web'}, {v['value'] for v in container['env'] if v['name'] in ('APP_JAR', 'APP_WEB_DIRECTORY')})
+        self.assertTrue(next(m for m in container['volumeMounts'] if m['name'] == 'artifacts')['readOnly'])
+        config = next(d for d in docs if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'consense-app-files-authored-test')
+        self.assertIn('release/app.jar\n', config['data']['sha256sums'])
+        self.assertEqual('release/web/assets/main.js\nrelease/web/index.html\n', config['data']['web-files'])
+        self.assertFalse(any(d['metadata']['name'] == 'consense-web' for d in docs if d['kind'] == 'Service'))
+
+    def test_external_app_rejects_unlisted_web_files_and_path_escape(self):
+        self.external_app()
+        (self.root / 'release/web/unlisted.js').write_text('unexpected')
+        with self.assertRaisesRegex(ValueError, 'inventory'):
+            delivery.validate(self.manifest, self.root)
+        self.manifest['externalApp']['webDirectory'] = '../outside'
+        with self.assertRaisesRegex(ValueError, 'path'):
+            delivery.validate(self.manifest, self.root)
+
+    @unittest.skipIf(os.name == 'nt', 'requires Linux shell utilities')
+    def test_external_entrypoint_checks_actual_files_before_starting_java(self):
+        self.external_app()
+        self.prepare()
+        docs = json.loads((self.root / 'prepared/kubernetes.json').read_bytes())['items']
+        config = next(d for d in docs if d['kind'] == 'ConfigMap')['data']
+        checks = self.root / 'checks'; checks.mkdir()
+        for name, value in config.items():
+            (checks / name).write_text(value)
+        binaries = self.root / 'bin'; binaries.mkdir()
+        java = binaries / 'java'
+        java.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$JAVA_ARGS"\n')
+        java.chmod(0o755)
+        marker = self.root / 'java-args'
+        env = {**os.environ, 'APP_ARTIFACT_ROOT': str(self.root), 'APP_FILE_MANIFEST': str(checks),
+               'APP_JAR': 'release/app.jar', 'APP_WEB_DIRECTORY': 'release/web', 'JAVA_ARGS': str(marker),
+               'PATH': str(binaries) + os.pathsep + os.environ['PATH']}
+        entrypoint = Path(__file__).with_name('app-entrypoint.sh')
+        def run():
+            return subprocess.run(['sh', str(entrypoint)], env=env, capture_output=True, text=True)
+        self.assertEqual(0, run().returncode)
+        self.assertIn('--spring.web.resources.static-locations=file:' + str(self.root) + '/release/web/', marker.read_text())
+        marker.unlink()
+        (self.root / 'release/web/assets/main.js').write_text('tampered')
+        self.assertNotEqual(0, run().returncode)
+        self.assertFalse(marker.exists())
+        (self.root / 'release/web/assets/main.js').write_bytes(b'fixture js')
+        (self.root / 'release/web/extra.js').write_text('unexpected')
+        self.assertNotEqual(0, run().returncode)
+        self.assertFalse(marker.exists())
+
     def test_prepares_digest_bound_offline_cpu_services_and_complete_gpu_stages(self):
         receipt = self.prepare()
         self.assertFalse(receipt['targetAccepted'])
@@ -131,6 +199,15 @@ class DeliveryPreparationTest(DeliveryFixture, unittest.TestCase):
         resources.append(job['spec']['template']['spec']['containers'][0]['resources']['requests'])
         self.assertEqual(27, sum(int(row['cpu']) for row in resources))
         self.assertEqual(246, sum(int(row['memory'].removesuffix('G')) for row in resources))
+        self.external_app()
+        delivery.validate(self.manifest, self.root)
+        external = delivery.documents(self.manifest, 'a' * 64)
+        deployments = [row for row in external if row['kind'] == 'Deployment']
+        self.assertEqual(4, len(deployments))
+        resources = [row['spec']['template']['spec']['containers'][0]['resources']['requests'] for row in deployments]
+        resources.append(job['spec']['template']['spec']['containers'][0]['resources']['requests'])
+        self.assertEqual(26, sum(int(row['cpu']) for row in resources))
+        self.assertEqual(244, sum(int(row['memory'].removesuffix('G')) for row in resources))
 
 
 if __name__ == '__main__':

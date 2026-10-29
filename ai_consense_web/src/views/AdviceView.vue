@@ -14,6 +14,7 @@ import AdviceAnswer from '@/components/AdviceAnswer.vue'
 import AppModal from '@/components/AppModal.vue'
 import AdviceSourceReader from '@/components/AdviceSourceReader.vue'
 import { streamAdvice, stopAdvice } from '@/advice/adviceStream'
+import { answerParts } from '@/advice/answerFlowchart'
 import { claimReviewHandoff, handoffSourceWarnings, reviewHandoffCopy, reviewQuestion, type ReviewHandoff } from '@/advice/reviewHandoff'
 
 const { t } = useI18n()
@@ -26,12 +27,14 @@ const messages = ref<ChatMessage[]>([])
 const quickQuestions = ref<QuickQuestion[]>([])
 const indexStatus = ref<IndexStatus | null>(null)
 const question = ref('')
+const referenceDraftScope = ref<{ projectId: string; key: string } | null>(null)
 const scope = ref('fullset')
 const basisScope = ref<AdviceBasisScope>('project_contract')
 const sessions = ref<AdviceSession[]>([])
+const sessionsLoaded = ref(false)
 const sessionId = ref('')
 const choosingNewScope = ref(false)
-const previousConversation = ref<{ id: string; question: string } | null>(null)
+const previousConversation = ref<{ id: string; question: string; draftKey: string | null } | null>(null)
 const clearTarget = ref<{ projectId: string; sessionId: string; epoch: number; scopeEpoch: number; label: string } | null>(null)
 const sessionCreating = ref(false)
 const sessionError = ref('')
@@ -79,6 +82,7 @@ let preparationSequence = 0
 let activeRebuildBusy: { sequence: number; message: string } | null = null
 
 const evidenceCopy = {
+  draftReady: { zhHans: '流程图草稿已生成，可供核对；实质性答复尚未验证。', zhHant: '流程圖草稿已產生，可供核對；實質性答覆尚未驗證。', en: 'Draft flowchart ready for review; the substantive answer has not been validated.' },
   referenceScope: { zhHans: '本次仅查询固定标准；每次咨询会核验来源与版本。当前界面尚未确认固定检索就绪。', zhHant: '本次僅查詢固定標準；每次諮詢會核驗來源與版本。目前介面尚未確認固定檢索就緒。', en: 'This session queries fixed standards only. Each question verifies its sources and versions; this view has not confirmed fixed retrieval readiness.' },
   session: { zhHans: '咨询会话', zhHant: '諮詢會話', en: 'Advisory session' },
   legacy: { zhHans: '历史对话／新会话范围', zhHant: '歷史對話／新會話範圍', en: 'Legacy history / new session scope' },
@@ -118,6 +122,22 @@ const evidenceCopy = {
 }
 
 const projectId = computed(() => store.activeProjectId)
+const questionDraftKey = computed(() => {
+  if (!projectId.value || !sessionsLoaded.value || referenceDraftScope.value?.projectId !== projectId.value) return null
+  const selected = sessions.value.find(item => item.id === sessionId.value)
+  if (sessionId.value && (!selected || selected.scope !== scope.value || selected.basisScope !== basisScope.value)) return null
+  return `consense.advice.question.v1.${JSON.stringify([projectId.value, sessionId.value, scope.value, basisScope.value, referenceDraftScope.value.key])}`
+})
+let activeDraftKey: string | null = null
+function saveQuestionDraft(key: string | null, value: string) {
+  if (!key) return
+  try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key) }
+  catch { /* Keep the editable draft when tab storage is unavailable. */ }
+}
+function loadQuestionDraft(key: string) {
+  try { return sessionStorage.getItem(key) ?? '' }
+  catch { return '' }
+}
 const projectName = computed(() => store.activeProject?.id === projectId.value ? pick(store.activeProject.name) : t('common.empty'))
 const activeSessionLabel = computed(() => {
   if (!sessionId.value) return pick(choosingNewScope.value ? evidenceCopy.newScope : evidenceCopy.legacy)
@@ -293,7 +313,7 @@ async function reload() {
 
 async function reloadSessions() {
   const id = projectId.value, epoch = viewEpoch, sequence = ++sessionSequence, selectedScopeEpoch = scopeEpoch
-  sessions.value = []; sessionError.value = ''
+  sessionsLoaded.value = false; sessions.value = []; sessionError.value = ''
   if (!id) return
   try {
     const list = await adviceApi.sessions(id)
@@ -306,6 +326,7 @@ async function reloadSessions() {
       else if (saved) sessionStorage.removeItem(`consense.advice.session.${id}`)
     } catch { /* Conversation history remains available when browser storage is disabled. */ }
   } catch (caught) { if (epoch === viewEpoch && sequence === sessionSequence) sessionError.value = adviceError(caught) }
+  finally { if (epoch === viewEpoch && id === projectId.value && sequence === sessionSequence) sessionsLoaded.value = true }
 }
 
 async function createSession() {
@@ -316,7 +337,10 @@ async function createSession() {
     const created = await adviceApi.createSession(id, selectedScope, basis)
     if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch) return false
     if (created.projectId !== id || created.scope !== selectedScope || created.basisScope !== basis || !created.id) throw new Error('ADVICE_SESSION_IDENTITY_MISMATCH')
+    const draft = question.value
+    saveQuestionDraft(activeDraftKey, '')
     sessions.value.push(created); choosingNewScope.value = false; sessionId.value = created.id
+    question.value = draft
     await nextTick()
     return true
   } catch (caught) { if (epoch === viewEpoch) sessionError.value = adviceError(caught); return false }
@@ -325,16 +349,18 @@ async function createSession() {
 
 function changeReferenceScope() {
   if (asking.value || sessionCreating.value) return
-  previousConversation.value = { id: sessionId.value, question: question.value }
-  question.value = ''
+  previousConversation.value = { id: sessionId.value, question: question.value, draftKey: activeDraftKey }
   choosingNewScope.value = true
   sessionId.value = ''
+  question.value = ''
 }
 
-function cancelReferenceScope() {
+async function cancelReferenceScope() {
   if (asking.value || sessionCreating.value || !previousConversation.value) return
-  question.value = previousConversation.value.question
-  sessionId.value = previousConversation.value.id
+  const previous = previousConversation.value
+  sessionId.value = previous.id
+  await nextTick()
+  if (sessionId.value === previous.id && activeDraftKey === previous.draftKey) question.value = previous.question
 }
 
 async function reloadScope() {
@@ -388,9 +414,10 @@ async function prepareSources() {
 onMounted(() => { void reload(); void reloadSessions(); void reloadScope(); void reloadIndexStatus() })
 watch(projectId, async () => {
   const epoch = ++viewEpoch
-  ++sessionSequence; sessions.value = []; sessionId.value = ''; choosingNewScope.value = false; previousConversation.value = null; sessionCreating.value = false; sessionError.value = ''
+  ++sessionSequence; sessionsLoaded.value = false; sessions.value = []; sessionId.value = ''; choosingNewScope.value = false; previousConversation.value = null; sessionCreating.value = false; sessionError.value = ''
   resetScopedState()
   if (handoff.value || handoffError.value) clearImportedDraft()
+  question.value = ''
   scopeLoaded.value = false
   messages.value = []; scopeDocuments.value = []; activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
   await nextTick()
@@ -400,6 +427,7 @@ watch(projectId, async () => {
 watch(() => [projectId.value, route.query.review], claimImportedDraft, { immediate: true })
 watch(() => [scope.value, basisScope.value], () => { resetScopedState(); messages.value = []; void reload(); void reloadScope(); void reloadIndexStatus() })
 watch(sessionId, () => {
+  if (!questionDraftKey.value && !handoff.value && !sessionCreating.value) question.value = ''
   const selected = sessions.value.find(item => item.id === sessionId.value)
   if (selected) {
     choosingNewScope.value = false; previousConversation.value = null
@@ -413,6 +441,13 @@ watch(sessionId, () => {
   if (selected) { scope.value = selected.scope; basisScope.value = selected.basisScope }
   void reload()
 })
+watch(questionDraftKey, key => {
+  if (key === activeDraftKey) return
+  const pending = activeDraftKey === null ? question.value : ''
+  activeDraftKey = key
+  question.value = key ? pending || loadQuestionDraft(key) : ''
+}, { immediate: true, flush: 'sync' })
+watch(question, value => saveQuestionDraft(activeDraftKey, value), { flush: 'sync' })
 watch(() => messages.value.length, () => void scrollToBottom())
 onBeforeUnmount(() => { ++viewEpoch; ++scopeSequence; resetScopedState() })
 
@@ -531,7 +566,7 @@ async function ask(text?: string) {
     if (!activeCitation.value) { activeSources.value = response.sources ?? []; activeSourceScope.value = response.sourceScope ?? selectedScope; activeCitation.value = response.sources?.[0] ?? null }
     clarificationReply.value = null
     if (!response.grounded) {
-      store.notify(t('advice.unknown.title'))
+      store.notify(draftFlowchartReady(response) ? pick(evidenceCopy.draftReady) : t('advice.unknown.title'))
     }
     await scrollToBottom()
   } catch (caught) {
@@ -632,54 +667,25 @@ function openMessageSources(message: ChatMessage, citationText?: string) {
   sourceDetails.value = false
 }
 
+function draftFlowchartReady(message: Pick<ChatMessage, 'title' | 'content' | 'clarifications'>) {
+  return message.title?.en === 'Draft flowchart - not independently verified' && !message.clarifications?.length
+    && answerParts(message.content?.en ?? '').some(part => part.kind === 'flowchart' && /^\s*(?:flowchart|graph)\s+(?:TB|TD|BT|RL|LR)\b/.test(part.source))
+}
+
 function unknownText(scopeKey: string | null) {
   const key = (scopeKey ?? 'fullset') as 'fullset' | 'tender' | 'contract'
   return t(`advice.unknown.${key}`)
 }
 
-/** 把命中切片按当前问题的关键词做高亮 */
-const HIGHLIGHT_STOPWORDS = new Set(['的', '是', '在', '和', '与', 'what', 'is', 'the', 'in', 'of', 'under', 'a', 'an'])
-
-function highlightHtml(content: string): string {
-  const escaped = content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  const terms = questionTerms()
-  if (!terms.length) {
-    return escaped
-  }
-  let result = escaped
-  for (const term of terms) {
-    const pattern = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-    result = result.replace(pattern, '<mark>$1</mark>')
-  }
-  return result
-}
-
-let lastQuestionTerms: string[] = []
-
-function questionTerms(): string[] {
-  return lastQuestionTerms
-}
-
-function rebuildTerms(text: string) {
-  lastQuestionTerms = (text.match(/[A-Za-z0-9.\-]{3,}|[\u4e00-\u9fa5]{2,}/g) ?? [])
-    .filter((term) => !HIGHLIGHT_STOPWORDS.has(term.toLowerCase()))
-    .slice(0, 6)
-}
-
 async function submit() {
   const content = question.value.trim()
   if (!content) return
-  rebuildTerms(content)
   await ask(content)
 }
 
 async function askQuick(item: QuickQuestion) {
   clarificationReply.value = null
   const text = pick(item.text)
-  rebuildTerms(text)
   await ask(text)
 }
 
@@ -687,7 +693,6 @@ async function askQuick(item: QuickQuestion) {
 async function askPrecedence() {
   clarificationReply.value = null
   const content = 'What is the order of precedence of contract documents under SCC Clause 4.1?'
-  rebuildTerms(content)
   await ask(content)
 }
 </script>
@@ -728,7 +733,7 @@ async function askPrecedence() {
         <button class="btn danger" type="button" @click="clearChat">{{ streamCopy('Clear saved messages', '确认清空已保存消息', '確認清空已儲存訊息') }}</button>
       </template>
     </AppModal>
-    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="advisory" />
+    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="advisory" @scope-change="referenceDraftScope = $event" />
     <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ t('advice.sourceScope.includedCount', { count: scopeDocuments.filter(item => item.included).length }) }}</summary>
       <p class="muted small">{{ pick(evidenceCopy.project) }} ID: {{ projectId }} · {{ pick(evidenceCopy.session) }} ID: {{ sessionId || '—' }}</p>
@@ -827,7 +832,8 @@ async function askPrecedence() {
                 <p v-if="!message.deliveryState || message.deliveryState === 'complete'" class="muted small">{{ message.modelIdentity?.model || message.model ? `${t('llm.recordedModel')}: ${message.modelIdentity?.model || message.model}` : t('llm.identityUnknown') }}</p>
                 <strong v-if="!message.deliveryState || message.deliveryState === 'complete'">{{ message.content ? pick(message.title) : t('advice.unknown.title') }}</strong>
                 <p v-if="message.basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
-                <p v-if="message.basisScope === 'insufficient'" class="warning-note">{{ streamCopy('Evidence is insufficient for the complete requested conclusion. The following analysis is limited.', '现有依据不足以支持所请求的完整结论，以下为有限分析。', '現有依據不足以支持所請求的完整結論，以下為有限分析。') }}</p>
+                <p v-if="draftFlowchartReady(message)" class="muted small" role="status">{{ pick(evidenceCopy.draftReady) }}</p>
+                <p v-else-if="message.basisScope === 'insufficient'" class="warning-note">{{ streamCopy('Evidence is insufficient for the complete requested conclusion. The following analysis is limited.', '现有依据不足以支持所请求的完整结论，以下为有限分析。', '現有依據不足以支持所請求的完整結論，以下為有限分析。') }}</p>
                 <AdviceAnswer v-if="message.content" :content="pick(message.content)" :citation-ids="message.citations" @citation="id => openMessageSources(message, id)" />
                 <p v-else-if="!message.deliveryState || message.deliveryState === 'complete'">{{ unknownText(message.unknownScope) }}</p>
                 <div v-if="message.clarifications?.length" class="clarifications">
@@ -905,13 +911,13 @@ async function askPrecedence() {
         <div class="surface-head">
           <div>
             <h4>{{ t('advice.citation.title') }}</h4>
-            <p>{{ t('advice.citation.subtitle') }}</p>
+            <p>{{ streamCopy('Select a citation to read the source passage.', '点击引用查看来源文件原文。', '點擊引用查看來源文件原文。') }}</p>
           </div>
           <span v-if="activeSources.length" class="tag info">{{ activeSources.length }}</span>
         </div>
         <div class="surface-body">
           <div v-if="!activeSources.length" class="empty-state">
-            {{ t('advice.citation.emptySource') }}
+            {{ streamCopy('The selected source passage appears here.', '右侧区域展示引用文件原文。', '右側區域展示引用文件原文。') }}
           </div>
 
           <div v-else class="citation-pane">
@@ -935,7 +941,7 @@ async function askPrecedence() {
               <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" :auto-load="false" />
               <section class="source-context"><h4>{{ streamCopy('Retrieved source passage', '检索到的原文', '檢索到的原文') }}</h4>
               <p v-if="longCitation && !showCompletePassage" class="muted small">{{ streamCopy('Showing the beginning of a long passage; the exact supporting sentences have not been identified.', '此处只显示较长原文的开头；系统尚未确定支持结论的准确句子。', '此處只顯示較長原文的開頭；系統尚未確定支持結論的準確句子。') }}</p>
-              <div class="sv-para" v-html="highlightHtml(displayedCitation)" />
+              <div class="sv-para">{{ displayedCitation }}</div>
               <button v-if="longCitation" class="btn" type="button" @click="showCompletePassage = !showCompletePassage">{{ showCompletePassage ? streamCopy('Show shorter preview', '收起完整原文', '收起完整原文') : streamCopy('Show complete passage', '显示完整原文', '顯示完整原文') }}</button>
               <button class="btn" type="button" @click="sourceDetails = !sourceDetails">{{ streamCopy('Show related original images / tables', '查看关联原图／整表', '查看關聯原圖／整表') }}</button>
               <template v-if="sourceDetails">

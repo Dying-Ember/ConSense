@@ -25,6 +25,7 @@ final class VettingPacketCoverage {
         packet.setAttempts(saved.getAttempts());
         packet.setParentPacketId(saved.getParentPacketId());packet.setRequestedEvidenceNeedId(saved.getRequestedEvidenceNeedId());packet.setEvidenceNeeds(saved.getEvidenceNeeds());
         packet.setChecklistAssessments(saved.getChecklistAssessments());
+        packet.setUnverifiedChecklistItemIds(saved.getUnverifiedChecklistItemIds()==null?new ArrayList<>():saved.getUnverifiedChecklistItemIds());
         call.setStatus(saved.getStatus());call.setFailureKind(saved.getFailureKind());call.setError(saved.getError());call.setModelResponseMetadata(saved.getModelResponseMetadata());call.setRawResponseSha256(saved.getRawResponseSha256());
         call.setReturnedAssessments(saved.getReturnedAssessments());call.setIssueAssessments(saved.getIssueAssessments());call.setConsistentAssessments(saved.getConsistentAssessments());call.setInsufficientContextAssessments(saved.getInsufficientContextAssessments());call.setAcceptedFindings(saved.getAcceptedFindings());call.setRejectedRecords(saved.getRejectedRecords());
         call.setVerifiedConsistentAssessments(saved.getVerifiedConsistentAssessments());call.setVerifiedInsufficientContextAssessments(saved.getVerifiedInsufficientContextAssessments());call.setVerifiedNotApplicableAssessments(saved.getVerifiedNotApplicableAssessments());packet.setVerifiedAssessments(saved.getVerifiedAssessments());packet.setActualGatewayCallStarted(saved.isActualGatewayCallStarted());callResult(call,packet);
@@ -37,6 +38,49 @@ final class VettingPacketCoverage {
         if(p.getVerifiedNotApplicableAssessments()>0&&p.getVerifiedNotApplicableAssessments()==p.getReturnedAssessments()&&p.getRejectedRecords()==0)return "not_applicable";
         if(p.getVerifiedConsistentAssessments()>0&&p.getRejectedRecords()==0)return "checked_pass";
         return "not_completed";
+    }
+    static List<String> unassessedIds(SemanticTopicVO audit) {
+        return unassessedIds(audit,VettingEvidenceNeedResolution.resolve(audit.getPacketAudits()));
+    }
+    private static List<String> unassessedIds(SemanticTopicVO audit,VettingEvidenceNeedResolution.Result resolution) {
+        if(!"checklist_direction".equals(audit.getReviewKind()))return Collections.emptyList();
+        Set<String> pending=new LinkedHashSet<>(audit.getReferenceIds());
+        Set<String> eligible=VettingChecklistCatalog.items().stream()
+                .filter(item->!"pricing_document_excluded".equals(item.getReviewScope())&&!VettingChecklistCatalog.annexItemIds().contains(item.getId()))
+                .map(VettingChecklistCatalog.Item::getId).collect(Collectors.toSet());
+        pending.retainAll(eligible);
+        for(SemanticPacketVO packet:audit.getPacketAudits()){
+            com.fasterxml.jackson.databind.node.ObjectNode envelope=JsonUtils.mapper().createObjectNode();
+            envelope.put("packetId",packet.getPacketId()).put("sourceSnapshotSha256",packet.getSourceSnapshotSha256())
+                    .put("actualGatewayCallStarted",packet.isActualGatewayCallStarted()).put("status",packet.getStatus());
+            envelope.set("submittedChunkIds",JsonUtils.mapper().valueToTree(packet.getSubmittedChunkIds()));
+            for(ChecklistAssessmentVO row:packet.getChecklistAssessments()){
+                if(!pending.contains(row.getItemId()))continue;
+                if("insufficient_evidence".equals(row.getStatus())&&resolution.supersedesChecklist(packet.getPacketId(),row.getItemId(),row.getReason(),row.getEvidenceChunkIds()))continue;
+                if(VettingChecklistAutomaticResults.valid(envelope,JsonUtils.mapper().valueToTree(row),VettingPromptPolicy.sha256()))pending.remove(row.getItemId());
+            }
+        }
+        for(SemanticPacketVO packet:audit.getPacketAudits())if(packet.isActualGatewayCallStarted()&&"completed_with_rejections".equals(packet.getStatus())&&packet.getUnverifiedChecklistItemIds()!=null)
+            for(String id:packet.getUnverifiedChecklistItemIds())if(audit.getReferenceIds().contains(id)&&eligible.contains(id)&&!directVerifiedCoverageRecheck(audit,packet,id))pending.add(id);
+        return new ArrayList<>(pending);
+    }
+    private static boolean directVerifiedCoverageRecheck(SemanticTopicVO audit,SemanticPacketVO parent,String id) {
+        if(JsonUtils.isBlankText(parent.getPacketId()))return false;
+        for(SemanticPacketVO child:audit.getPacketAudits()) {
+            if(!"checklist_coverage_followup".equals(child.getKind())||!Objects.equals(parent.getPacketId(),child.getParentPacketId())
+                    ||!Objects.equals(parent.getSourceSnapshotSha256(),child.getSourceSnapshotSha256())
+                    ||!Objects.equals(parent.getSubmittedChunkIds(),child.getSubmittedChunkIds())
+                    ||child.getUnverifiedChecklistItemIds()!=null&&child.getUnverifiedChecklistItemIds().contains(id))continue;
+            com.fasterxml.jackson.databind.node.ObjectNode envelope=JsonUtils.mapper().createObjectNode();
+            envelope.put("packetId",child.getPacketId()).put("sourceSnapshotSha256",child.getSourceSnapshotSha256())
+                    .put("actualGatewayCallStarted",child.isActualGatewayCallStarted()).put("status",child.getStatus());
+            envelope.set("submittedChunkIds",JsonUtils.mapper().valueToTree(child.getSubmittedChunkIds()));
+            for(ChecklistAssessmentVO row:child.getChecklistAssessments())if(id.equals(row.getItemId())
+                    &&!"insufficient_evidence".equals(row.getStatus())
+                    &&VettingChecklistRequirementRelations.automaticEligible(id,row.getStatus())
+                    &&VettingChecklistAutomaticResults.valid(envelope,JsonUtils.mapper().valueToTree(row),VettingPromptPolicy.sha256()))return true;
+        }
+        return false;
     }
     static void finish(SemanticTopicVO audit,VettingSourceRequestPacks.Result plan) {
         audit.setGlobalCallStatus(audit.getStatus());audit.setExtraPacketCount(Math.max(0,audit.getPacketAudits().size()-1));
@@ -60,9 +104,12 @@ final class VettingPacketCoverage {
         else if(audit.getPendingSourceRequestCount()>0||audit.getFailedPacketCount()>0||audit.getNotSubmittedPacketCount()>0||audit.getPacketAudits().stream().anyMatch(p->p.getRejectedRecords()>0||!"observed_tokens".equals(p.getInputBudgetStatus())))audit.setAggregateReviewStatus("partial");
         else audit.setAggregateReviewStatus("observed_requests_decoded_scope_unknown");
         VettingEvidenceNeedResolution.Result resolution=VettingEvidenceNeedResolution.resolve(audit.getPacketAudits());
+        List<String> unassessed=unassessedIds(audit,resolution);
+        if(!unassessed.isEmpty()&&audit.getPacketAudits().stream().anyMatch(SemanticPacketVO::isActualGatewayCallStarted))audit.setAggregateReviewStatus("partial");
         List<String> effective=audit.getPacketAudits().stream().map(resolution::effectiveCheckState).filter(state->!"superseded".equals(state)).collect(Collectors.toList());
         if(effective.contains("issue"))audit.setCheckState("issue");
         else if(effective.contains("insufficient_evidence"))audit.setCheckState("insufficient_evidence");
+        else if(!unassessed.isEmpty())audit.setCheckState("not_completed");
         else if(!effective.isEmpty()&&effective.stream().allMatch("checked_pass"::equals)&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("checked_pass");
         else if(!effective.isEmpty()&&effective.stream().allMatch("not_applicable"::equals)&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("not_applicable");
         else audit.setCheckState("not_completed");

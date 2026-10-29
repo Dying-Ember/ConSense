@@ -95,7 +95,7 @@ final class ObservedSourceClauseLocators {
             Part p=c.getParts().get(0);return p!=null&&blockId.equals(p.getBlockId())&&text.equals(p.getText())&&p.getStartOffset()==0&&p.getEndOffset()==text.length()
                     &&(p.getSourcePosition()==null||position.equals(p.getSourcePosition()));
         }
-        Set<String> references(Chunk c,String quote){return matches(c)&&quote!=null&&quote.length()>=12&&text.indexOf(quote)>=0&&text.indexOf(quote)==text.lastIndexOf(quote)?Collections.singleton(reference):Collections.emptySet();}
+        Set<String> references(Chunk c,String quote){return matches(c)&&quote!=null&&!VettingCorpus.normalize(quote).isEmpty()&&text.indexOf(quote)>=0&&text.indexOf(quote)==text.lastIndexOf(quote)?Collections.singleton(reference):Collections.emptySet();}
         List<Map<String,Object>> model(Chunk c){return matches(c)?Collections.singletonList(VettingReviewProbe.map("version",VERSION,"reference",reference,"anchor",c.getAnchor(),"scope","selected_whole_native_paragraph_source_syntax_only","automaticEditEligible",false,"semanticApplicabilityVerified",false,"meaning","The exact selected paragraph belongs to this observed source clause range. Legal applicability, adoption and edit authority remain unknown.")):Collections.emptyList();}
     }
 }

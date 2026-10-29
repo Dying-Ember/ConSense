@@ -108,6 +108,37 @@ class CanonicalNativePdfEvidenceServiceTest {
         assertThrows(CanonicalEvidenceException.class,()->service.snapshot("pdf-test",42L,binding.getProjectionSha256(),"advisory"));
     }
 
+    @Test void nativeSourceIdentityDriftOrMissingPinsAreRejectedBeforeRegistryRead() {
+        CanonicalSourceBinding binding=register();int before=snapshotReads;
+        for(String field:Arrays.asList("original","sourceRevision","projectionRevision","sourceHash")) {
+            String original;
+            switch(field){
+                case "original":original=binding.getOriginalSourceSha256();break;
+                case "sourceRevision":original=binding.getSourceRevisionSha256();break;
+                case "projectionRevision":original=binding.getProjectionRevisionSha256();break;
+                default:original=binding.getCanonicalSourceHash();
+            }
+            for(String replacement:Arrays.asList("0".repeat(64),null)) {
+                switch(field){
+                    case "original":binding.setOriginalSourceSha256(replacement);break;
+                    case "sourceRevision":binding.setSourceRevisionSha256(replacement);break;
+                    case "projectionRevision":binding.setProjectionRevisionSha256(replacement);break;
+                    default:binding.setCanonicalSourceHash(replacement);
+                }
+                CanonicalEvidenceException rejected=assertThrows(CanonicalEvidenceException.class,()->service.currentBindings("pdf-test","advisory",Collections.singletonList(42L)),field);
+                assertEquals("CANONICAL_BINDING_TYPED_PINS_CHANGED",rejected.getMessage(),field);
+                assertEquals(before,snapshotReads,"A mismatched stored identity must not reach the registry");
+            }
+            switch(field){
+                case "original":binding.setOriginalSourceSha256(original);break;
+                case "sourceRevision":binding.setSourceRevisionSha256(original);break;
+                case "projectionRevision":binding.setProjectionRevisionSha256(original);break;
+                default:binding.setCanonicalSourceHash(original);
+            }
+        }
+        assertEquals(1,service.currentBindings("pdf-test","advisory",Collections.singletonList(42L)).size());
+    }
+
     @Test void changedOriginalAndChangedRegistryCannotReturnPersistedPdf() throws Exception {
         CanonicalSourceBinding binding=register();upstream=upstream.replace("Visible fi cafe","Visible fi CAFe");
         assertThrows(CanonicalEvidenceException.class,()->service.pointers("pdf-test",42L,binding.getProjectionSha256(),"vetting"));

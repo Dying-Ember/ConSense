@@ -147,7 +147,7 @@ public class AdviceService {
     private static void probeEvidence(String stage,List<VectorStore.SearchHit> hits,int retrieved,int omitted,int budgetBytes,int packetChars,String session,String action,String source,long started){
         try{
             if(!log.isInfoEnabled())return;Set<List<Object>> sources=new LinkedHashSet<>();long chars=0;int tender=0,standard=0,fact=0,manifest=0,other=0;
-            for(VectorStore.SearchHit hit:hits){Map<String,Object> payload=hit.getPayload();Object role=payload.get("sourceRole"),text=payload.get("content");
+            for(VectorStore.SearchHit hit:hits){Map<String,Object> payload=hit.getPayload();Object role=modelSourceRole(hit),text=payload.get("content");
                 if("tender".equals(role))tender++;else if("standard".equals(role))standard++;else if("project_fact".equals(role))fact++;else if("package_manifest".equals(role))manifest++;else other++;
                 if(text instanceof String)chars+=((String)text).length();Object document=probeScalar(payload.get("documentId")),revision=probeScalar(payload.get("originalSourceSha256"));
                 if(revision==null)revision=probeScalar(payload.get("sourceHash"));if(document!=null||revision!=null)sources.add(Arrays.asList(document,revision));}
@@ -406,6 +406,7 @@ public class AdviceService {
             throw new BizException(4204,"The clarification was issued against a different source version. Start a new question against the current evidence.");
         List<CitationVO> sources = new ArrayList<>();
         for(int i=0;i<hits.size();i++){CitationVO source=toCitation(hits.get(i));source.setEvidenceId("["+(i+1)+"]");sources.add(source);}
+        completeFixedApplicability(sources);
         final Set<String> textAliases=new LinkedHashSet<>();if(session!=null)for(CitationVO source:sources)
             if(source.getCanonicalEvidence()!=null&&source.getCanonicalEvidence().size()==1&&canonical.admitsAdviceText(session,source.getCanonicalEvidence().get(0),source.getContent(),source.getCanonicalSourceUnit()))textAliases.add(source.getEvidenceId());
 
@@ -425,6 +426,7 @@ public class AdviceService {
 
         progress.phase("context");
         String excerpts = qwenEvidence==null?renderExcerpts(hits,normalSources,session):qwenEvidence.text;
+        if(!fixedReferenceOnly)excerpts+=adoptionDependencyHint(sources);
         probeEvidence("prepared",hits,retrievedCount,retrievedCount-hits.size(),qwen==null?0:QWEN_EVIDENCE_BYTES,excerpts.length(),probeSession,probeAction,sourceSnapshot,retrievalStarted);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
                 fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
@@ -473,6 +475,7 @@ public class AdviceService {
                         List<VectorStore.SearchHit> admitted=supplement.subList(0,entries.size());
                         List<CitationVO> expanded=new ArrayList<>(sources);
                         for(int i=0;i<admitted.size();i++){CitationVO source=toCitation(admitted.get(i));source.setEvidenceId("["+(expanded.size()+1)+"]");expanded.add(source);}
+                        completeFixedApplicability(expanded);
                         String expandedSystem=compactFlowchart?AdviceFlowchartTool.system(expanded,questionContext.originalQuestion):AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE),expanded,questionContext.originalQuestion);
                         String expandedUser=userPrompt+"\n\nAdditional current-source text from the same selected document revision and role follows. Reconsider the source-text gap, answer the whole original question, and cite only the final public aliases. The earlier draft is not evidence.\n\n"+String.join("\n\n",entries);
                         Publication expandedPublication=new Publication(expanded,fixedReferenceOnly,progress,currentGuard,sourceBoundary,beforePaidBoundary,textAliases,questionContext);
@@ -756,11 +759,11 @@ public class AdviceService {
     }
     private String boundedEvidenceEntry(VectorStore.SearchHit hit,int alias) {
         StringBuilder entry=new StringBuilder("[").append(alias).append("] ").append(hit.fileLabel())
-                .append(" | role=").append(hit.getPayload().get("sourceRole"))
+                .append(" | role=").append(modelSourceRole(hit))
                 .append(" | page=").append(hit.pageNo().isEmpty()?"not available":hit.pageNo());
         if(!JsonUtils.isBlankText(hit.anchor()))entry.append(" | location=").append(hit.anchor());
         entry.append("\n");
-        if(fixedBaselineHit(hit))entry.append("Fixed development reference; project applicability is unconfirmed.\n");
+        if(fixedBaselineHit(hit))entry.append("Fixed standard reference. Assess its applicability from the supplied project adoption and amendment text; the library alone does not establish it.\n");
         entry.append("Source text:\n").append(nvl(hit.text()));
         return entry.toString();
     }
@@ -916,7 +919,7 @@ public class AdviceService {
             builder.append(alias).append(" ")
                     .append(hit.fileLabel())
                     .append(" | documentId=").append(hit.getPayload().get("documentId"))
-                    .append(" | role=").append(hit.getPayload().get("sourceRole"))
+                    .append(" | role=").append(modelSourceRole(hit))
                     .append(" | sourceRevision=").append(hit.getPayload().get("sourceHash"))
                     .append(" | physicalPage=").append(hit.pageNo().isEmpty()?"not available":hit.pageNo())
                     .append(" | location=").append(hit.anchor())
@@ -1118,6 +1121,7 @@ public class AdviceService {
             pointer.put("manifestSha256",identity.path("fixedBaselineManifestSha256").asText());
             pointer.put("baselineVersion",identity.path("fixedBaselineVersion").asText());
             pointer.put("sourceFamily",fixed.getSourceFamily());pointer.put("sourceRole","standard");
+            if(!fixed.getDocumentTitle().isEmpty())pointer.put("documentTitle",fixed.getDocumentTitle());
             pointer.put("originalSourceSha256",identity.path("originalSourceSha256").asText(identity.path("sourceHash").asText()));
             if(identity.has("originalPageNos"))pointer.set("originalPageNos",identity.get("originalPageNos").deepCopy());
             pointer.put("pageNo",fixed.getPageNo());pointer.put("fullObservedParentPreserved",true);
@@ -1381,6 +1385,7 @@ public class AdviceService {
                     throw new BizException(4205,"Advice "+budget.getStatus()+": "+budget.getReason()+". Paid preflight reservations remain recorded; no business answer was submitted.");
                 }
                 guard.run();publication.sourceBoundary.run();publication.beforePaidBoundary.run();
+                probeModelAdmission(request,turns,publication,probePhase,attempt);
                 publication.progress.phase("generating");probeStage("model_dispatch",probePhase,attempt,probeProvider,publication.probeSession,publication.probeAction,sourceIdentity,attemptStarted,0,0,0);
                 raw=qwen.generate(request,budget,(phasePrefix==null?"answer":phasePrefix+"-answer")+"-"+attempt,guard,attemptStreaming?onDelta:null,publication.progress::onCancel);
             } else if(responses!=null) {
@@ -1467,6 +1472,7 @@ public class AdviceService {
         private final List<String> errors=new ArrayList<>();
         private final List<AdvisoryHarness.Section> proposed=new ArrayList<>();
         private final List<Map<String,Object>> citationMetadataCompletions=new ArrayList<>();
+        private final Map<String,String> adoptionBasisFirstSection=new LinkedHashMap<>();
         private List<AdvisoryHarness.Section> repairPrefix=Collections.emptyList();
         private final List<Map<String,Object>> attempts=new ArrayList<>();
         private boolean live,opening;
@@ -1475,7 +1481,11 @@ public class AdviceService {
         Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this(sources,referenceOnly,progress,guard,()->{},question);}
         Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,Runnable sourceBoundary,QuestionContext question){this(sources,referenceOnly,progress,guard,sourceBoundary,()->{},Collections.emptySet(),question);}
         Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,Runnable sourceBoundary,Runnable beforePaidBoundary,Set<String> textAliases,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.sourceBoundary=sourceBoundary;this.beforePaidBoundary=beforePaidBoundary;this.textAliases=Collections.unmodifiableSet(new LinkedHashSet<>(textAliases));this.question=question;this.schema=AdvisoryHarness.schema(sources);}
-        String content(AdvisoryHarness.Section section){return AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);}
+        String content(AdvisoryHarness.Section section){
+            String rendered=AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);
+            List<String> basis=adoptionBasisFirstSection.entrySet().stream().filter(entry->Objects.equals(entry.getValue(),section.getId())).map(Map.Entry::getKey).collect(Collectors.toList());
+            return basis.isEmpty()?rendered:"Selected tender document basis: "+String.join(" ",basis)+". The supplied CoC identifies the matching standard edition; this document basis does not establish actual signing, compliance or case-specific entitlement.\n\n"+rendered;
+        }
         void publishValidated(){
             if(!progress.streaming())return;
             if(draftFlowchart!=null){guard.run();sourceBoundary.run();List<String> aliases=draftFlowchart.getCitations();progress.section(draftFlowchart.content(referenceOnly),aliases,sources.stream().filter(s->aliases.contains(s.getEvidenceId())).collect(Collectors.toList()));live=true;return;}
@@ -1485,7 +1495,7 @@ public class AdviceService {
         boolean rendersGap(String gap){return accepted.stream()
                 .filter(section->"limits".equals(section.getKind())||"uncertainty".equals(section.getKind()))
                 .anyMatch(section->AdvisoryHarness.gaps(section).contains(gap));}
-        void beginAttempt(boolean streaming,boolean repairing){live=streaming;if(!streaming)accepted.clear();repairPrefix=repairing?new ArrayList<>(accepted):Collections.emptyList();opening=!repairPrefix.isEmpty();errors.clear();proposed.clear();citationMetadataCompletions.clear();}
+        void beginAttempt(boolean streaming,boolean repairing){live=streaming;if(!streaming){accepted.clear();adoptionBasisFirstSection.clear();}repairPrefix=repairing?new ArrayList<>(accepted):Collections.emptyList();opening=!repairPrefix.isEmpty();errors.clear();proposed.clear();citationMetadataCompletions.clear();}
         String repairInstruction(){return repairInstruction(null);}
         String repairInstruction(String rejectedCandidate){return repairInstruction(rejectedCandidate,false);}
         String repairInstruction(String rejectedCandidate,boolean fullRegeneration){return "\n\nUse the one admitted repair. Application rejected: "+JsonUtils.write(errors)
@@ -1503,7 +1513,10 @@ public class AdviceService {
             List<String> declared;
             try{declared=AdvisoryHarness.refs(raw.getCitations(),sources);}catch(IllegalArgumentException invalid){return raw;}
             // A directory mention cannot create project adoption, and an empty/invalid array cannot be promoted.
-            if(declared.isEmpty()||!incorporationSupported(raw.getBasisScope(),declared,sources,textAliases))return raw;
+            if(declared.isEmpty())return raw;
+            List<String> dependencies="project_contract".equals(raw.getBasisScope())?adoptionDependencies(sources,declared):Collections.emptyList();
+            List<String> supported=new ArrayList<>(declared);for(String alias:dependencies)if(!supported.contains(alias))supported.add(alias);
+            if(!incorporationSupported(raw.getBasisScope(),supported,sources,textAliases))return raw;
             List<String> explicit=AdvisoryHarness.explicitBodyAliases(raw.getContent());
             Set<String> allowed=sources.stream().map(CitationVO::getEvidenceId).collect(Collectors.toSet());
             if(!allowed.containsAll(explicit))return raw;
@@ -1513,12 +1526,12 @@ public class AdviceService {
                 if(check==null)return raw;
                 for(String alias:AdvisoryHarness.refs(check.getCitations(),sources))if(!explicitCheckAliases.contains(alias))explicitCheckAliases.add(alias);
             }}catch(IllegalArgumentException invalid){return raw;}
-            List<String> normalized=new ArrayList<>(declared),added=new ArrayList<>();
+            List<String> normalized=new ArrayList<>(supported),added=new ArrayList<>(supported);added.removeAll(declared);
             for(String alias:explicit)if(!normalized.contains(alias)){normalized.add(alias);added.add(alias);}
             for(String alias:explicitCheckAliases)if(!normalized.contains(alias)){normalized.add(alias);added.add(alias);}
             if(added.isEmpty())return raw;
             AdvisoryHarness.Section candidate=JsonUtils.mapper().convertValue(JsonUtils.mapper().valueToTree(raw),AdvisoryHarness.Section.class);candidate.setCitations(normalized);
-            if(audit){Map<String,Object> change=new LinkedHashMap<>();change.put("sectionId",raw.getId());change.put("sectionIndex",proposed.size()-1);change.put("declaredCitations",declared);change.put("explicitBodyAliases",explicit);change.put("explicitCheckAliases",explicitCheckAliases);change.put("addedAliases",added);change.put("normalizedCitations",normalized);change.put("rawSerializedSectionSha256",VettingCorpus.hash(JsonUtils.write(raw)));change.put("normalizedSerializedSectionSha256",VettingCorpus.hash(JsonUtils.write(candidate)));change.put("hashScope","application_serialized_section_not_provider_bytes");citationMetadataCompletions.add(change);}
+            if(audit){for(String alias:dependencies)if(!declared.contains(alias))adoptionBasisFirstSection.putIfAbsent(alias,raw.getId());Map<String,Object> change=new LinkedHashMap<>();change.put("sectionId",raw.getId());change.put("sectionIndex",proposed.size()-1);change.put("declaredCitations",declared);change.put("explicitBodyAliases",explicit);change.put("explicitCheckAliases",explicitCheckAliases);change.put("verifiedAdoptionDependencies",dependencies);change.put("addedAliases",added);change.put("normalizedCitations",normalized);change.put("rawSerializedSectionSha256",VettingCorpus.hash(JsonUtils.write(raw)));change.put("normalizedSerializedSectionSha256",VettingCorpus.hash(JsonUtils.write(candidate)));change.put("hashScope","application_serialized_section_not_provider_bytes");citationMetadataCompletions.add(change);}
             return candidate;
         }
         void acceptNode(JsonNode node){
@@ -1546,7 +1559,7 @@ public class AdviceService {
                 accepted.add(candidate);language=candidate.getLanguage();
                 if(live){guard.run();sourceBoundary.run();List<CitationVO> refs=sources.stream().filter(s->candidate.getCitations().contains(s.getEvidenceId())).collect(Collectors.toList());
                     progress.section((accepted.size()==1?"":"\n\n")+content(candidate),candidate.getCitations(),refs);}
-            }catch(IllegalArgumentException rejected){errors.add((section==null?"unknown":section.getId())+": "+rejected.getMessage());}
+            }catch(IllegalArgumentException rejected){String id=section==null?null:section.getId();if(accepted.stream().noneMatch(existing->Objects.equals(existing.getId(),id)))adoptionBasisFirstSection.entrySet().removeIf(entry->Objects.equals(entry.getValue(),id));errors.add((id==null?"unknown":id)+": "+rejected.getMessage());probeRejection(probeSession,probeAction,id,rejected.getMessage());}
         }
         void finish(AnswerRecord answer,String question,boolean streamed){
             if(answer==null||answer.getQuestionType()==null||!answer.getQuestionType().matches("T[1-8]")||answer.getSections()==null)
@@ -1720,7 +1733,7 @@ public class AdviceService {
         }
     }
 
-    private String nvl(String value) {
+    private static String nvl(String value) {
         return value == null ? "" : value;
     }
 
@@ -1920,6 +1933,18 @@ public class AdviceService {
         boolean complete=!compositionIds.isEmpty()&&ordered.stream().filter(c->compositionIds.contains(String.valueOf(c.getDocumentId()))).map(this::chunkToHit).map(this::evidenceIdentity).allMatch(present::contains);
         List<VectorStore.SearchHit> annotated=new ArrayList<>();for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole")))payload.put("applicabilityContextComplete",complete);annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}return annotated;
     }
+    private void probeModelAdmission(com.consense.service.llm.QwenChatUsagePreflight.PreparedRequest request,List<LlmClient.ChatTurn> turns,Publication publication,String phase,int attempt){
+        try{if(!log.isInfoEnabled())return;
+            log.info("Advice admission stage=prepared_request threadId={} session={} action={} phase={} attempt={} inputSha256={} wireSha256={} sourceSha256={} aliases={}",Thread.currentThread().getId(),publication.probeSession,publication.probeAction,probeCode(phase,"draft","supplement","answer"),attempt,request.getPreparedInputSha256(),request.getGenerationWireSha256(),request.getSourceSnapshotSha256(),publication.sources.size());
+            for(int i=0;i<Math.min(64,publication.sources.size());i++){
+                CitationVO source=publication.sources.get(i);String original=source.getOriginalSourceSha256();String unit="none";JsonNode order=null;
+                if(source.getCanonicalEvidence()!=null&&!source.getCanonicalEvidence().isEmpty()){com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=source.getCanonicalEvidence().get(0);if(original==null)original=pointer.getOriginalSourceSha256();unit=pointer.getCanonicalChunkId();order=pointer.getSourceOrder();}
+                if(source.getFixedBaselineEvidence()!=null){JsonNode fixed=source.getFixedBaselineEvidence();original=fixed.path("originalSourceSha256").asText();unit=fixed.path("parentId").asText();}
+                String body=nvl(source.getContent());boolean included=!body.isEmpty()&&turns.stream().anyMatch(turn->nvl(turn.getContent()).contains(body));
+                log.info("Advice admission stage=model_unit threadId={} session={} action={} phase={} attempt={} inputSha256={} alias={} document={} role={} originalSha256={} unit={} sourceOrder={} textChars={} textSha256={} literalInPreparedTurns={} applicabilityContextComplete={} verifiedTextAlias={}",Thread.currentThread().getId(),publication.probeSession,publication.probeAction,probeCode(phase,"draft","supplement","answer"),attempt,request.getPreparedInputSha256(),source.getEvidenceId(),source.getDocumentId()!=null&&source.getDocumentId().matches("[0-9]+")?source.getDocumentId():"fixed_or_unknown",probeCode(source.getSourceRole(),"tender","standard","project_fact","package_manifest"),original!=null&&original.matches("[a-f0-9]{64}")?original:"unavailable",probeIdentifier(unit),order!=null&&order.isIntegralNumber()?order.asLong():-1,body.length(),VettingCorpus.hash(body),included,Boolean.TRUE.equals(source.getApplicabilityContextComplete()),publication.textAliases.contains(source.getEvidenceId()));
+            }
+        }catch(Throwable ignored){ }
+    }
     private boolean incorporationSupported(String basisScope,List<String> citations,List<CitationVO> sources) {
         return incorporationSupported(basisScope,citations,sources,Collections.emptySet());
     }
@@ -1931,10 +1956,60 @@ public class AdviceService {
                     &&s.getCanonicalEvidence()!=null&&s.getCanonicalEvidence().size()==1);}))return false;
         if("reference_only".equals(basisScope))return cited.stream().anyMatch(s->"standard".equals(s.getSourceRole()));
         if(cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())))return false;
-        for(CitationVO reference:cited)if("standard".equals(reference.getSourceRole())
-                &&(!Boolean.TRUE.equals(reference.getApplicabilityContextComplete())||cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())&&referenceMention(s.getContent(),reference.getFileLabel()))))return false;
+        for(CitationVO reference:cited)if("standard".equals(reference.getSourceRole())){
+            if(reference.getFixedBaselineEvidence()!=null){if(!fixedAdoptionSupported(reference,cited))return false;}
+            else if(!Boolean.TRUE.equals(reference.getApplicabilityContextComplete())||cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())&&referenceMention(s.getContent(),reference.getFileLabel())))return false;
+        }
         return true;
     }
+    private static boolean fixedAdoptionSupported(CitationVO reference,List<CitationVO> sources){
+        JsonNode identity=reference.getFixedBaselineEvidence();if(identity==null||!"fixed_development_baseline".equals(identity.path("evidenceBackend").asText())
+                ||!identity.path("originalSourceSha256").asText().matches("[a-f0-9]{64}"))return false;
+        String title=identity.path("documentTitle").asText();
+        return sources.stream().anyMatch(source->verifiedAdoptionSource(source,title));
+    }
+    private static boolean verifiedAdoptionSource(CitationVO source,String title){
+        if(!"tender".equals(source.getSourceRole())||!FixedReferenceEvidence.adoptionMatches(source.getFileLabel(),source.getContent(),title))return false;
+        JsonNode unit=source.getCanonicalSourceUnit();List<com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> pointers=source.getCanonicalEvidence();
+        if(unit==null||!"complete_observed_unit".equals(unit.path("status").asText())||!unit.path("requiredMemberIds").isArray()||!unit.path("members").isArray()||pointers==null||pointers.isEmpty())return false;
+        Set<String> required=new LinkedHashSet<>();for(JsonNode id:unit.path("requiredMemberIds"))if(!id.isTextual()||id.asText().isEmpty()||!required.add(id.asText()))return false;
+        Set<String> actual=new LinkedHashSet<>();for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:pointers){
+            if(pointer==null||pointer.getCanonicalChunkId()==null||!actual.add(pointer.getCanonicalChunkId())||pointer.getParts()==null||!pointer.getParts().isArray()||pointer.getParts().isEmpty()
+                    ||pointer.getOriginalSourceSha256()==null||!pointer.getOriginalSourceSha256().matches("[a-f0-9]{64}")
+                    ||!Objects.equals(source.getDocumentId(),String.valueOf(pointer.getDocumentId()))||!Objects.equals(source.getSourceHash(),pointer.getJavaParsedSourceHash()))return false;
+            int matches=0;for(JsonNode member:unit.path("members"))if(Objects.equals(pointer.getCanonicalChunkId(),member.path("id").asText())
+                    &&Objects.equals(pointer.getUnitId(),member.path("unitId").asText())&&Objects.equals(source.getDocumentId(),member.path("documentId").asText())
+                    &&Objects.equals(source.getSourceRole(),member.path("role").asText())&&Objects.equals(pointer.getCanonicalSourceHash(),member.path("sourceHash").asText())
+                    &&Objects.equals(pointer.getSourceRevisionSha256(),member.path("sourceRevisionSha256").asText())&&pointer.getParts().equals(member.path("parts")))matches++;
+            if(matches!=1)return false;
+        }
+        return !required.isEmpty()&&required.equals(actual);
+    }
+    private static void completeFixedApplicability(List<CitationVO> sources){
+        for(CitationVO source:sources)if(source.getFixedBaselineEvidence()!=null)source.setApplicabilityContextComplete(fixedAdoptionSupported(source,sources));
+    }
+    private static List<String> adoptionDependencies(List<CitationVO> sources,List<String> citations){
+        Set<String> dependencies=new LinkedHashSet<>();
+        for(CitationVO reference:sources)if(citations.contains(reference.getEvidenceId())&&"standard".equals(reference.getSourceRole())&&reference.getFixedBaselineEvidence()!=null){
+            String title=reference.getFixedBaselineEvidence().path("documentTitle").asText();
+            sources.stream().filter(source->verifiedAdoptionSource(source,title))
+                    .min(java.util.Comparator.comparingInt(source->nvl(source.getContent()).length())).ifPresent(source->dependencies.add(source.getEvidenceId()));
+        }return new ArrayList<>(dependencies);
+    }
+    private static String adoptionDependencyHint(List<CitationVO> sources){
+        List<String> lines=new ArrayList<>();for(CitationVO reference:sources)if(reference.getFixedBaselineEvidence()!=null){List<String> dependency=adoptionDependencies(sources,Collections.singletonList(reference.getEvidenceId()));
+            if(!dependency.isEmpty()&&lines.size()<4)lines.add(reference.getEvidenceId()+" uses the standard edition identified by the supplied CoC "+String.join(" ",dependency)+".");}
+        return lines.isEmpty()?"":"\n\nVerified selected-text dependencies: "+String.join(" ",lines)+" Cite the substantive rule; the application preserves and cites this project-document basis once. This proves the supplied tender document set, not actual signing, compliance or entitlement. Do not request an already supplied CoC again.\n";
+    }
+    static String rejectionCode(String message){String value=nvl(message);
+        if(value.contains("adoption or requested basis"))return "adoption_or_basis";
+        if(value.contains("derived_precedence"))return "precedence_scope";
+        if(value.contains("citation")||value.contains("alias"))return "citation_contract";
+        if(value.toLowerCase(java.util.Locale.ROOT).contains("language"))return "language_contract";
+        if(value.contains("missing evidence")||value.contains("unresolved gaps"))return "unresolved_evidence";
+        return "section_contract";
+    }
+    private static void probeRejection(String session,String action,String section,String message){try{log.info("Advice rejection stage=section_rejected threadId={} session={} action={} section={} reasonCode={}",Thread.currentThread().getId(),session,action,probeIdentifier(section),rejectionCode(message));}catch(Throwable ignored){}}
     private boolean referenceMention(String passage,String referenceLabel) {
         return OerBusinessEvidence.referenceMention(passage,referenceLabel);
     }
@@ -1967,8 +2042,15 @@ public class AdviceService {
             List<VectorStore.SearchHit> hits=fixedBaseline.searchForProject(projectId,"advisory",question,10);
             if(hits==null)throw new IllegalStateException("fixed_reference_result_missing");
             for(VectorStore.SearchHit hit:hits)if(!fixedBaselineHit(hit))throw new IllegalStateException("fixed_reference_identity_missing");
-            return hits;
+            return focusedFixedReferenceHits(hits,question);
         }catch(RuntimeException unavailable){throw new BizException(4204,"The selected fixed standard-reference baseline is unavailable or changed. No project or legacy evidence fallback was used.");}
+    }
+    static Object modelSourceRole(VectorStore.SearchHit hit){
+        Object role=hit.getPayload().get("sourceRole");
+        return role==null&&Boolean.TRUE.equals(hit.getPayload().get("fixedDevelopmentBaseline"))&&"standard".equals(hit.getPayload().get("role"))?"standard":role;
+    }
+    static List<VectorStore.SearchHit> focusedFixedReferenceHits(List<VectorStore.SearchHit> hits,String question){
+        return FixedReferenceEvidence.focusRequestedClauses(hits,question);
     }
     private String fixedSourceIdentity(List<VectorStore.SearchHit> hits,JsonNode manifest){
         try {

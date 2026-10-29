@@ -97,7 +97,7 @@ class StructuredJsonValidatorTest {
         evidence(item).put("quote",repeat("q",1200));
         ArrayNode quotes=(ArrayNode)item.get("evidence");
         for(int i=1;i<4;i++)quotes.add(quotes.get(0).deepCopy());
-        ((ObjectNode)quotes.get(1)).put("quote",repeat("q",12));
+        ((ObjectNode)quotes.get(1)).put("quote","q");
         ArrayNode rows=JsonUtils.mapper().createArrayNode();for(int i=0;i<3;i++)rows.add(item.deepCopy());
         assertEquals(3,decode(rows.toString()).size());
     }
@@ -133,12 +133,12 @@ class StructuredJsonValidatorTest {
             ObjectNode item=issue();if("quote".equals(field))evidence(item).put(field,repeat("x",max+1));
             else item.put(field,repeat("x",max+1));cases.add(Arguments.of("max_length_"+field,array(item)));
         }
-        ObjectNode shortQuote=issue();evidence(shortQuote).put("quote",repeat("q",11));cases.add(Arguments.of("quote_min_length",array(shortQuote)));
+        ObjectNode shortQuote=issue();evidence(shortQuote).put("quote","");cases.add(Arguments.of("quote_min_length",array(shortQuote)));
         ObjectNode extra=issue();extra.put("unknown","synthetic_private_fragment");cases.add(Arguments.of("additional_property",array(extra)));
         ObjectNode extraQuote=issue();evidence(extraQuote).put("unknown","synthetic_private_fragment");cases.add(Arguments.of("nested_additional_property",array(extraQuote)));
         ObjectNode noQuotes=issue();noQuotes.putArray("evidence");cases.add(Arguments.of("min_items_evidence",array(noQuotes)));
-        ObjectNode fiveQuotes=issue();ArrayNode quotes=(ArrayNode)fiveQuotes.get("evidence");for(int i=1;i<5;i++)quotes.add(quotes.get(0).deepCopy());
-        cases.add(Arguments.of("max_items_evidence",array(fiveQuotes)));
+        ObjectNode excessiveQuotes=issue();ArrayNode quotes=(ArrayNode)excessiveQuotes.get("evidence");for(int i=1;i<17;i++)quotes.add(quotes.get(0).deepCopy());
+        cases.add(Arguments.of("max_items_evidence",array(excessiveQuotes)));
         ObjectNode wrongType=issue();wrongType.put("title",123);cases.add(Arguments.of("number_in_string",array(wrongType)));
         ObjectNode objectEvidence=issue();objectEvidence.set("evidence",evidence(objectEvidence).deepCopy());cases.add(Arguments.of("object_in_array",array(objectEvidence)));
         ObjectNode stringQuote=issue();((ArrayNode)stringQuote.get("evidence")).removeAll().add("quote");cases.add(Arguments.of("string_in_object_array",array(stringQuote)));
@@ -266,9 +266,9 @@ class StructuredJsonValidatorTest {
         assertEquals(1,decode(array(item)).size());
         item.put("title",repeat(supplementary,161));
         assertEquals(SCHEMA_MISMATCH,assertThrows(StructuredOutputValidationException.class,()->decode(array(item))).getReason());
-        item.put("title","title");evidence(item).put("quote",repeat(supplementary,6));
-        assertEquals(12,evidence(item).get("quote").textValue().length());
-        assertThrows(StructuredOutputValidationException.class,()->decode(array(item)));
+        item.put("title","title");evidence(item).put("quote",supplementary);
+        assertEquals(2,evidence(item).get("quote").textValue().length());
+        assertEquals(1,decode(array(item)).size());
         evidence(item).put("quote",repeat("e\u0301",6));assertEquals(1,decode(array(item)).size());
         evidence(item).put("quote",repeat(supplementary,1200));assertEquals(1,decode(array(item)).size());
         evidence(item).put("quote",repeat(supplementary,1201));assertThrows(StructuredOutputValidationException.class,()->decode(array(item)));

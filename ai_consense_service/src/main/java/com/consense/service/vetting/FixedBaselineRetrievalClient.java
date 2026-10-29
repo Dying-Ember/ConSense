@@ -25,15 +25,35 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FixedBaselineRetrievalClient {
     private static final ObjectMapper JSON = new ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     private static final ObjectReader READER = JSON.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    private static final List<String> LOCAL_FIELDS = Arrays.asList("fixedBaselineManifestSha256", "fixedBaselineVersion", "fixedReferenceSourceUnit", "fixedReferenceOrigin", "fixedBaselineEditionId", "fileLabel");
+    private static final List<String> LOCAL_FIELDS = Arrays.asList("fixedBaselineManifestSha256", "fixedBaselineVersion", "fixedReferenceSourceUnit", "fixedReferenceOrigin", "fixedBaselineEditionId", "fixedReferenceDocumentTitle", "fileLabel", "fixedReferenceRetrievalMethod");
+    private static final int MAX_EXPLICIT_PARENTS=64;
+    private static final String EXPLICIT_REFINEMENT="explicit_observed_clause_refinement";
     private final HttpSupport http;
     private final FixedBaselineProperties properties;
     @Autowired(required=false) private ProjectRepository projectRepository;
     private volatile Catalog catalog;
     private final Set<String> verifiedSourceUnits = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
+    private final Set<String> explicitRefinements = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
     private static final class Row {
         final long offset; final int length; final String rawSha, normalizedSha;
-        Row(long offset,int length,String rawSha,String normalizedSha) { this.offset=offset;this.length=length;this.rawSha=rawSha;this.normalizedSha=normalizedSha; }
+        final String family,original,document,clause,scope;final boolean operative;final Set<String> blocks=new LinkedHashSet<>();
+        Row(long offset,int length,String rawSha,String normalizedSha,JsonNode parent) {
+            this.offset=offset;this.length=length;this.rawSha=rawSha;this.normalizedSha=normalizedSha;
+            family=parent.path("sourceQuality").path("family").asText();original=parent.path("originalSourceSha256").asText();document=parent.path("documentId").asText();clause=parent.path("clauseId").asText();
+            scope=original+"\u0000"+write(OerCanonicalSourceUnits.scopeIdentity(parent));operative=!clause.isEmpty()&&"clause".equals(parent.path("observedNodeKind").asText())&&"body".equals(parent.path("observedSourceRole").asText())&&family.equals(parent.path("fileKey").asText());
+            for(JsonNode part:parent.path("parts"))blocks.add(part.path("blockId").asText());
+        }
+        boolean requested(String query){Map<String,Object> metadata=new HashMap<>();metadata.put("fileKey",family);metadata.put("clauseId",clause);metadata.put("observedNodeKind","clause");metadata.put("observedSourceRole","body");return operative&&FixedReferenceEvidence.matchesRequestedClause(new VectorStore.SearchHit("scope-only",0,metadata),query);}
+    }
+    /** Source metadata only; bodies stay in the already pinned random-access corpus. */
+    private static final class ExactIndex {
+        final Map<String,List<String>> labels=new HashMap<>();final Map<String,Map<String,Set<String>>> clauses=new HashMap<>(),blocks=new HashMap<>();final Map<String,Set<String>> documents=new HashMap<>();
+        void add(String id,Row row){
+            documents.computeIfAbsent(row.original+"\u0000"+row.document,k->new HashSet<>()).add(row.scope);
+            if(!row.clause.isEmpty())clauses.computeIfAbsent(row.scope,k->new HashMap<>()).computeIfAbsent(row.clause,k->new TreeSet<>()).add(id);
+            for(String block:row.blocks)blocks.computeIfAbsent(row.scope,k->new HashMap<>()).computeIfAbsent(block,k->new HashSet<>()).add(id);
+            if(row.operative)labels.computeIfAbsent(row.clause,k->new ArrayList<>()).add(id);
+        }
     }
     private static final class Pin {
         final Path path; final long bytes; final FileTime modified; final Object fileKey;
@@ -46,7 +66,9 @@ public class FixedBaselineRetrievalClient {
     private static final class Catalog {
         final JsonNode manifest, plan; final Pin manifestPin, corpusPin; final Map<String,Row> rows;
         final String configIdentity;
-        Catalog(JsonNode m,JsonNode p,Pin mp,Pin cp,Map<String,Row> r,String ci) { manifest=m;plan=p;manifestPin=mp;corpusPin=cp;rows=r;configIdentity=ci; }
+        final Map<String,String> documentTitles;
+        final ExactIndex exact;
+        Catalog(JsonNode m,JsonNode p,Pin mp,Pin cp,Map<String,Row> r,String ci,Map<String,String> titles,ExactIndex exact) { manifest=m;plan=p;manifestPin=mp;corpusPin=cp;rows=r;configIdentity=ci;documentTitles=titles;this.exact=exact; }
     }
     public FixedBaselineRetrievalClient(HttpSupport http,FixedBaselineProperties properties) { this.http=http;this.properties=properties; }
     public boolean enabled() { return properties.isEnabled(); }
@@ -177,9 +199,47 @@ public class FixedBaselineRetrievalClient {
             verifiedSourceUnits.add(normalizedDigest(compact));
         }
         require(origins.equals(seedPayload.keySet()),"source_unit_seeds_not_complete");
+        all=refineExplicitClauses(c,query,selected,all);
         List<JsonNode> selectedParents=new ArrayList<>();for(FixedReferenceEvidence item:all.values())selectedParents.add(item.getPayload());
         assertOriginals(c,selectedParents);checkCurrent(c);
         return new ArrayList<>(all.values());
+    }
+    private Map<String,FixedReferenceEvidence> refineExplicitClauses(Catalog c,String query,Set<String> selected,Map<String,FixedReferenceEvidence> ranked){
+        Set<String> labels=FixedReferenceEvidence.requestedClauseLabels(query);if(labels.isEmpty())return ranked;
+        require(labels.size()<=4,"fixed_explicit_reference_limit");Map<String,FixedReferenceEvidence> added=new LinkedHashMap<>();Set<String> inspected=new HashSet<>();long bytes=0;int parents=0;
+        for(String label:labels){
+            Set<String> operativeScopes=new HashSet<>();for(FixedReferenceEvidence item:ranked.values()){
+                Row row=c.rows.get(item.getId());if(label.equals(row.clause)&&row.requested(query))operativeScopes.add(row.scope);
+            }
+            Map<String,String> owners=new LinkedHashMap<>();
+            for(String id:c.exact.labels.getOrDefault(label,Collections.emptyList())){Row row=c.rows.get(id);
+                if(selected.contains(row.original)&&row.requested(query))owners.putIfAbsent(row.scope+"\u0000"+row.clause,id);
+            }
+            boolean eligible=!owners.isEmpty();
+            require(owners.values().stream().map(id->c.rows.get(id).family).distinct().count()<=1,"fixed_explicit_clause_ambiguous_family");
+            if(owners.size()>1)owners.entrySet().removeIf(entry->!operativeScopes.contains(c.rows.get(entry.getValue()).scope));
+            require(!eligible||owners.size()==1,"fixed_explicit_clause_ambiguous_source");
+            if(owners.isEmpty())continue;String id=owners.values().iterator().next();if(!inspected.add(id))continue;
+            Row seed=c.rows.get(id);Set<String> ids=c.exact.clauses.get(seed.scope).get(seed.clause);
+            if(ranked.containsKey(id)){JsonNode prior=ranked.get(id).getSourceUnit();
+                if(prior!=null&&"complete_observed_unit".equals(prior.path("status").asText())&&stringSet(prior.path("requiredMemberIds")).containsAll(ids))continue;
+            }
+            require(c.exact.documents.get(seed.original+"\u0000"+seed.document).size()==1,"fixed_explicit_clause_incomplete_ambiguous_scope");
+            require(parents+ids.size()<=MAX_EXPLICIT_PARENTS,"fixed_explicit_clause_parent_limit");
+            for(String member:ids){Row row=c.rows.get(member);require(seed.original.equals(row.original)&&selected.contains(row.original),"fixed_explicit_clause_incomplete_source");bytes+=row.length;
+                require(bytes<=properties.getMaxResponseBytes(),"fixed_explicit_clause_byte_limit");
+                for(String block:row.blocks)require(ids.containsAll(c.exact.blocks.get(row.scope).get(block)),"fixed_explicit_clause_incomplete_cross_clause_block");
+            }
+            Map<String,JsonNode> group=new LinkedHashMap<>();for(String member:ids)group.put(member,readParent(c,member));
+            ObjectNode unit=OerCanonicalSourceUnits.resolveObserved(group,group.get(id));
+            require("complete_observed_unit".equals(unit.path("status").asText())&&stringSet(unit.path("requiredMemberIds")).equals(ids),"fixed_explicit_clause_incomplete:"+unit.path("reason").asText());
+            unit.remove(Arrays.asList("members","observedRanges","blockIds","memberScores"));unit.put("retrievalMethod",EXPLICIT_REFINEMENT);String unitSha=normalizedDigest(unit);verifiedSourceUnits.add(unitSha);
+            Set<String> ordered=new LinkedHashSet<>();ordered.add(id);ordered.addAll(ids);
+            for(String member:ordered){explicitRefinements.add(member+"|"+unitSha);added.putIfAbsent(member,makeEvidence(c,member,0,group.get(member),unit,false));}
+            parents+=ids.size();
+        }
+        if(added.isEmpty())return ranked;
+        for(Map.Entry<String,FixedReferenceEvidence> entry:ranked.entrySet())added.putIfAbsent(entry.getKey(),entry.getValue());return added;
     }
     public FixedReferenceEvidence evidence(VectorStore.SearchHit hit) {
         require(hit!=null&&hit.getPayload()!=null,"fixed_reference_hit_missing");Catalog c=ready();checkCurrent(c);
@@ -195,6 +255,7 @@ public class FixedBaselineRetrievalClient {
         if(unit!=null) require(unit.path("requiredMemberIds").isArray()&&(stringSet(unit.path("requiredMemberIds")).contains(hit.getId())
                 ||"unknown".equals(unit.path("status").asText())&&unit.path("requiredMemberIds").size()==0&&stringSet(unit.path("originIds")).contains(hit.getId()))
                 &&verifiedSourceUnits.contains(normalizedDigest(unit)),"fixed_reference_group_missing_or_changed");
+        if(p.has("fixedReferenceRetrievalMethod"))require(EXPLICIT_REFINEMENT.equals(p.path("fixedReferenceRetrievalMethod").asText())&&unit!=null&&explicitRefinements.contains(hit.getId()+"|"+normalizedDigest(unit)),"fixed_reference_literal_provenance_changed");
         return makeEvidence(c,hit.getId(),hit.getScore(),original,unit,p.path("fixedReferenceOrigin").asBoolean());
     }
     public void assertCurrent(List<VectorStore.SearchHit> hits) {
@@ -239,10 +300,12 @@ public class FixedBaselineRetrievalClient {
         return makeEvidence(c,id,0,p,null,false).asHit();
     }
     private FixedReferenceEvidence makeEvidence(Catalog c,String id,double score,JsonNode original,JsonNode unit,boolean origin) {
+        boolean literal=unit!=null&&explicitRefinements.contains(id+"|"+normalizedDigest(unit));
         ObjectNode p=((ObjectNode)original).deepCopy();
         p.put("fixedBaselineManifestSha256",properties.getManifestSha256());p.put("fixedBaselineVersion",c.manifest.path("version").asText());
         if("SL".equals(original.path("sourceQuality").path("family").asText()))for(JsonNode source:slSources(c.manifest))if(source.path("sha256").equals(original.path("originalSourceSha256")))p.put("fixedBaselineEditionId",source.path("editionId").asText());
-        p.put("fixedReferenceOrigin",origin);p.put("fileLabel",original.path("fileKey").asText());if(unit!=null)p.set("fixedReferenceSourceUnit",unit);
+        p.put("fixedReferenceOrigin",!literal&&origin);p.put("fileLabel",original.path("fileKey").asText());if(unit!=null)p.set("fixedReferenceSourceUnit",unit);
+        String title=c.documentTitles.get(original.path("originalSourceSha256").asText());if(title!=null&&!title.isEmpty())p.put("fixedReferenceDocumentTitle",title);
         JsonNode artifact=null;
         if(original.has("tableArtifact")) {
             artifact=readDescriptor(original.get("tableArtifact"),properties.getMaxRecordBytes());
@@ -250,7 +313,8 @@ public class FixedBaselineRetrievalClient {
             require(artifact.path("observedCells").isArray()||artifact.path("table").path("extractedMatrix").isArray(),"table_artifact_incomplete");
             require(!artifact.path("sourceQualityAccepted").asBoolean(true),"table_artifact_quality_claim_changed");
         }
-        return new FixedReferenceEvidence(id,score,p,artifact,unit);
+        if(literal)p.put("fixedReferenceRetrievalMethod",EXPLICIT_REFINEMENT);
+        return new FixedReferenceEvidence(id,literal?0:score,p,artifact,unit);
     }
     private synchronized Catalog ready() {
         require(enabled(),"fixed_reference_disabled");if(catalog!=null)return catalog;
@@ -268,25 +332,27 @@ public class FixedBaselineRetrievalClient {
             require(properties.getProjectId().equals(plan.path("projectId").asText())&&properties.getIndexSignature().equals(plan.path("indexSignatureSha256").asText()),"runtime_plan_identity_mismatch");
             JsonNode desc=manifest.path("corpus");Path cp=Paths.get(desc.path("path").asText()).toAbsolutePath().normalize();Pin corpusPin=new Pin(cp);
             require(desc.path("bytes").isIntegralNumber()&&desc.path("bytes").asLong()==corpusPin.bytes&&shaText(desc.path("sha256").asText()),"frozen_corpus_descriptor_invalid");
-            Map<String,Row> rows=new HashMap<>();MessageDigest digest=sha();long offset=0;ByteArrayOutputStream line=new ByteArrayOutputStream();
+            Map<String,Row> rows=new HashMap<>();Map<String,String> titles=new HashMap<>();ExactIndex exact=new ExactIndex();MessageDigest digest=sha();long offset=0;ByteArrayOutputStream line=new ByteArrayOutputStream();
             try(InputStream input=new BufferedInputStream(Files.newInputStream(cp))) {
                 byte[] buffer=new byte[65536];int n;
                 while((n=input.read(buffer))!=-1) {digest.update(buffer,0,n);
                     for(int i=0;i<n;i++) {
-                        byte b=buffer[i];if(b=='\n') {byte[] bytes=line.toByteArray();addRow(manifest,rows,offset,bytes);offset+=bytes.length+1;line.reset();}
+                        byte b=buffer[i];if(b=='\n') {byte[] bytes=line.toByteArray();addRow(manifest,rows,offset,bytes,titles,exact);offset+=bytes.length+1;line.reset();}
                         else {line.write(b);require(line.size()<=properties.getMaxRecordBytes(),"frozen_parent_too_large");}
                     }
                 }
-                if(line.size()>0)addRow(manifest,rows,offset,line.toByteArray());
+                if(line.size()>0)addRow(manifest,rows,offset,line.toByteArray(),titles,exact);
             }
             require(hex(digest.digest()).equals(desc.path("sha256").asText()),"frozen_corpus_sha_mismatch");
             require(rows.size()==manifest.path("coverage").path("totalParents").asInt(-1),"frozen_corpus_parent_count_mismatch");
-            manifestPin.current();corpusPin.current();catalog=new Catalog(manifest,plan,manifestPin,corpusPin,Collections.unmodifiableMap(rows),configIdentity());return catalog;
+            manifestPin.current();corpusPin.current();catalog=new Catalog(manifest,plan,manifestPin,corpusPin,Collections.unmodifiableMap(rows),configIdentity(),Collections.unmodifiableMap(titles),exact);return catalog;
         }catch(IOException e){throw new IllegalStateException("fixed_reference_initialization_failed",e);}
     }
-    private void addRow(JsonNode manifest,Map<String,Row> rows,long offset,byte[] bytes) {
+    private void addRow(JsonNode manifest,Map<String,Row> rows,long offset,byte[] bytes,Map<String,String> titles,ExactIndex exact) {
         require(bytes.length>0,"frozen_corpus_empty_record");JsonNode p=normalizeParent(parse(bytes));validateSource(manifest,p);
-        String id=p.path("id").asText();require(!rows.containsKey(id),"frozen_corpus_duplicate_parent");rows.put(id,new Row(offset,bytes.length,hash(bytes),normalizedDigest(p)));
+        String id=p.path("id").asText();require(!rows.containsKey(id),"frozen_corpus_duplicate_parent");Row row=new Row(offset,bytes.length,hash(bytes),normalizedDigest(p),p);rows.put(id,row);exact.add(id,row);
+        String family=p.path("sourceQuality").path("family").asText();String title=Arrays.asList("GCC","GCT").contains(family)?FixedReferenceEvidence.observedDocumentTitle(p.path("content").asText(),family):"";
+        if(!title.isEmpty()){String source=p.path("originalSourceSha256").asText();titles.merge(source,title,(oldTitle,newTitle)->oldTitle.equalsIgnoreCase(newTitle)?oldTitle:"");}
     }
     private void validateParent(Catalog c,String id,JsonNode p) {
         Row row=c.rows.get(id);require(row!=null&&id.equals(p.path("id").asText()),"retrieval_unknown_or_mismatched_parent");

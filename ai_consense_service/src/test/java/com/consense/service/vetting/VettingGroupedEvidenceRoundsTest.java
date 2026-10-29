@@ -47,14 +47,45 @@ class VettingGroupedEvidenceRoundsTest {
             System.out.println("AUTHORED_GROUPED_SCHEDULE mode="+mode+" initials="+run.initials.get()+" supplementalGenerations="+run.supplementPrompts.size()+" generations="+run.generations.get()+" elapsedSeconds="+TimeUnit.NANOSECONDS.toSeconds(run.nanos.get()));
         }
     }
+    @ParameterizedTest @ValueSource(strings={"scope_single","scope_multi","scope_general"})
+    void supplementalRoundAssignsOnlyItsBoundChecklistRows(String mode)throws Exception {
+        try(Exercise run=new Exercise(mode)){
+            VettingSemanticReview.Result result=run.execute();
+            VettingReviewDirections.Direction direction=VettingReviewDirections.plan(new String[0]).get(1);
+            List<String> all=direction.itemIds();assertTrue(all.size()>=3);
+            String prompt=run.supplementPrompts.stream().filter(p->p.contains("Assigned review direction: CHECKLIST-2. ")).findFirst().orElseThrow();
+            List<String> rows=new ArrayList<>();java.util.regex.Matcher found=java.util.regex.Pattern.compile("(?m)^(APP-I-\\d+) \\| ").matcher(prompt);while(found.find())rows.add(found.group(1));
+            List<String> expected="scope_general".equals(mode)?all:all.subList(0,"scope_single".equals(mode)?1:2);
+            assertEquals(expected,rows,"The actual supplemental request must retain only bound rows or the original scope for an unbound need");
+            assertTrue(prompt.contains(run.tender.getContent()));assertTrue(prompt.contains(run.method.getContent()));
+            SemanticTopicVO topic=result.getTopicAudits().get(1);SemanticPacketVO first=topic.getPacketAudits().get(0);
+            assertEquals(expected.equals(all)?Collections.emptyList():expected,first.getEvidenceNeeds().get(0).getChecklistItemIds());
+            for(int packetIndex=1;packetIndex<=2;packetIndex++){
+                SemanticPacketVO packet=topic.getPacketAudits().get(packetIndex);
+                JsonNode permitted=packet.getAttempts().get(0).getInput().path("schema").path("items").path("properties").path("checklistAssessments").path("items").path("properties").path("itemId").path("enum");
+                List<String> ids=new ArrayList<>();for(JsonNode id:permitted)ids.add(id.asText());
+                assertEquals(expected,ids,"Each supplemental generation including its child must use the same assigned-row schema");
+            }
+            if(!"scope_general".equals(mode))for(String unassigned:all.subList(expected.size(),all.size()))
+                assertTrue(topic.getPacketAudits().get(1).getChecklistAssessments().stream().filter(a->unassigned.equals(a.getItemId())).noneMatch(a->"fulfilled".equals(a.getStatus())),"Unassigned rows must not be marked fulfilled");
+        }
+    }
     @ParameterizedTest @ValueSource(strings={"slow","no_new_evidence","model_failure","repeated_target","round_limit","deadline"})
     void actualCallerKeepsFairExecutionAndTruthfulFiniteTermination(String mode)throws Exception {
         try(Exercise run=new Exercise(mode)){
             VettingSemanticReview.Result result=run.execute();assertEquals(27,result.getTopicAudits().size());
             SemanticTopicVO direction=result.getTopicAudits().get(0);SemanticPacketVO parent=direction.getPacketAudits().get(0);
             if("slow".equals(mode)){
-                assertTrue(run.supplementInitialCounts.size()>=2,"Slow initial passes must not starve all follow-ups after the first one");
-                assertTrue(run.supplementInitialCounts.get(0)<27);assertTrue(run.supplementInitialCounts.get(1)<27);
+                List<SemanticTopicVO> pendingInitials=new ArrayList<>();
+                for(SemanticTopicVO audit:result.getTopicAudits())if(audit.getPacketAudits().stream().noneMatch(SemanticPacketVO::isActualGatewayCallStarted))pendingInitials.add(audit);
+                int pendingNeeds=VettingEvidenceNeedResolution.resolve(direction.getPacketAudits()).unresolvedNeeds();
+                System.out.println("AUTHORED_INITIAL_PRIORITY mode="+mode+" retrievedInitials="+run.initials.get()+" submittedInitials="+(result.getTopicAudits().size()-pendingInitials.size())+" pendingInitials="+pendingInitials.size()+" pendingGroupNeeds="+pendingNeeds+" supplementalGenerations="+run.supplementInitialCounts.size()+" elapsedSeconds="+TimeUnit.NANOSECONDS.toSeconds(run.nanos.get()));
+                assertFalse(pendingInitials.isEmpty(),"This slow fixture must retain initial directions that did not reach the model before the deadline");
+                assertTrue(run.supplementInitialCounts.isEmpty(),"When pending initials exhaust this slow fixture's time allowance, early follow-ups must remain pending");
+                for(SemanticTopicVO audit:pendingInitials){assertEquals("not_submitted",audit.getAggregateReviewStatus());assertEquals("not_completed",audit.getCheckState());}
+                assertTrue(pendingNeeds>0);assertFalse(VettingEvidenceNeedResolution.resolve(direction.getPacketAudits()).supersedesVerified(parent.getPacketId(),0));
+                assertFalse(parent.getEvidenceNeeds().isEmpty());
+                assertTrue(parent.getEvidenceNeeds().stream().allMatch(need->"unresolved".equals(need.getProcessingStatus())&&"run_time_budget".equals(need.getTerminalReason())),"Unprocessed grouped needs must retain their truthful deadline reason");
             }else{
                 assertFalse(VettingEvidenceNeedResolution.resolve(direction.getPacketAudits()).supersedesVerified(parent.getPacketId(),0));
                 String expected="no_new_evidence".equals(mode)?"no_new_evidence_within_text_budget":"model_failure".equals(mode)?"model_or_evidence_failure":"repeated_target".equals(mode)?"same_target_without_new_evidence":"round_limit".equals(mode)?"round_limit":"run_time_budget";
@@ -127,20 +158,22 @@ class VettingGroupedEvidenceRoundsTest {
             }
         }
         private String response(String prompt,boolean supplement){
-            boolean first=prompt.contains("Assigned review direction: CHECKLIST-1. "),fourth=prompt.contains("Assigned review direction: CHECKLIST-4. ");
+            boolean first=prompt.contains("Assigned review direction: "+(mode.startsWith("scope_")?"CHECKLIST-2. ":"CHECKLIST-1. ")),fourth=prompt.contains("Assigned review direction: CHECKLIST-4. ");
             boolean pending=first&&(!supplement||!prompt.contains(period.getContent())&&!("split".equals(mode)&&prompt.contains(secondPeriod.getContent()))||"round_limit".equals(mode))||fourth&&!supplement;
             String need="Need "+periodTarget()+("round_limit".equals(mode)&&prompt.contains(period.getContent())?".2":".1")+" to confirm the submission period.";
             Map<String,Object> record=new LinkedHashMap<>();VettingCompetitionFixture.details(record);record.put("assessment",pending?"insufficient_context":"consistent");record.put("type","requirement");record.put("severity","low");record.put("title","Authored submission requirement");
             record.put("comment",pending?first&&!supplement?"Missing "+methodTarget()+" text is required to confirm the method.":fourth?"Need SCT 7 to confirm the tender submission copy.":"repeated_target".equals(mode)?"Need SCT 5(4) to confirm the same submission method.":need:"The supplied passages state the submission method and period.");
             record.put("impact","Review only");record.put("suggestion","Retain the source-supported result");
             if(pending){List<String> facts=first&&!supplement?Arrays.asList("Retrieve "+methodTarget()+" to confirm the submission method.","Need "+periodTarget()+" to confirm the submission period."):Collections.singletonList(fourth?"Need SCT 7 to confirm the tender submission copy.":"repeated_target".equals(mode)?"Need SCT 5(4) to confirm the same submission method.":need);record.put("pendingFacts",facts);}
-            List<Map<String,Object>> quotes=new ArrayList<>();quotes.add(quote("R1","source",tender.getContent()));
-            if(supplement&&prompt.contains(method.getContent()))quotes.add(quote("R2","reference",method.getContent()));
-            if(supplement&&prompt.contains(period.getContent()))quotes.add(quote("R4","reference",period.getContent()));
-            if(supplement&&prompt.contains(secondPeriod.getContent()))quotes.add(quote("R4","reference",secondPeriod.getContent()));
-            if(supplement&&fourth)quotes.add(quote("R2","reference",other.getContent()));
+            List<Map<String,Object>> quotes=new ArrayList<>();quotes.add(quote(reference(prompt,tender),"source",tender.getContent()));
+            if(supplement&&prompt.contains(method.getContent()))quotes.add(quote(reference(prompt,method),"reference",method.getContent()));
+            if(supplement&&prompt.contains(period.getContent()))quotes.add(quote(reference(prompt,period),"reference",period.getContent()));
+            if(supplement&&prompt.contains(secondPeriod.getContent()))quotes.add(quote(reference(prompt,secondPeriod),"reference",secondPeriod.getContent()));
+            if(supplement&&fourth)quotes.add(quote(reference(prompt,other),"reference",other.getContent()));
             record.put("evidence",quotes);
-            if("split".equals(mode)&&first&&supplement&&pending){Map<String,Object> another=new LinkedHashMap<>(record);String gap="Need PRE clause 2.2 to confirm the signed-copy submission period.";another.put("title","Authored signed-copy submission requirement");another.put("comment",gap);another.put("pendingFacts",Collections.singletonList(gap));return "{\"records\":"+JsonUtils.write(Arrays.asList(record,another))+"}";}
+            List<Map<String,Object>> checks=new ArrayList<>();java.util.regex.Matcher rows=java.util.regex.Pattern.compile("(?m)^(APP-I-\\d+) \\| ").matcher(prompt);
+            int rowOrdinal=0;while(rows.find()){rowOrdinal++;if(mode.startsWith("scope_")&&first&&!supplement&&(mode.equals("scope_general")||rowOrdinal>(mode.equals("scope_single")?1:2)))continue;Map<String,Object> check=new LinkedHashMap<>();check.put("itemId",rows.group(1));check.put("status",pending?"insufficient_evidence":"fulfilled");check.put("reason",record.get("comment"));check.put("support",null);checks.add(check);}record.put("checklistAssessments",checks);
+            if("split".equals(mode)&&first&&supplement&&pending){Map<String,Object> another=new LinkedHashMap<>(record);String gap="Need PRE clause 2.2 to confirm the signed-copy submission period.";another.put("title","Authored signed-copy submission requirement");another.put("comment",gap);another.put("pendingFacts",Collections.singletonList(gap));List<Map<String,Object>> otherChecks=new ArrayList<>();for(Map<String,Object> check:checks){Map<String,Object> otherCheck=new LinkedHashMap<>(check);otherCheck.put("reason",gap);otherChecks.add(otherCheck);}another.put("checklistAssessments",otherChecks);return "{\"records\":"+JsonUtils.write(Arrays.asList(record,another))+"}";}
             return "{\"records\":"+JsonUtils.write(Collections.singletonList(record))+"}";
         }
         private String methodTarget(){return "standard_editions".equals(mode)?"SL2022 clause 6.3":"standard".equals(mode)?"SL 5(4)":"SCT 5(4)";}
@@ -149,6 +182,10 @@ class VettingGroupedEvidenceRoundsTest {
         @Override public void close(){}
     }
     private static Map<String,Object> quote(String id,String side,String text){Map<String,Object> quote=new LinkedHashMap<>();quote.put("chunkId",id);quote.put("side",side);quote.put("quote",text);return quote;}
+    private static String reference(String prompt,Chunk source){
+        int literal=prompt.indexOf("\n"+source.getContent());assertTrue(literal>=0,"The source must exist in the actual authored wire");
+        int header=prompt.lastIndexOf("\n\nR",literal);assertTrue(header>=0);return prompt.substring(header+2,prompt.indexOf(" | ",header));
+    }
     private static Chunk chunk(String id,String text){
         Chunk c=VettingContextBudgetTest.chunk(id,"SCT1",text,text.length());c.setDocumentId("1");c.setFileName("Authored tender.docx");
         c.setSourceHash(VettingCorpus.hash("AUTHORED parsed source"));c.setOriginalSourceSha256(VettingCorpus.hash("AUTHORED original source"));

@@ -1181,6 +1181,8 @@ class OerCanonicalRetrievalClientTest {
     @Test void finalHealthWaitUsesRealFrameFreshBindingGuardBeforeReturningAnyAcceptedResult() throws Exception {
         for(String kind:Arrays.asList("index","status","query","policy"))for(boolean changed:Arrays.asList(false,true)){
             Wire w=new Wire(true);CanonicalEvidenceBackend backend=mock(CanonicalEvidenceBackend.class);
+            w.binding.setSourceRevisionSha256(w.snapshot.path("source").path("sourceRevisionSha256").asText());
+            w.binding.setProjectionRevisionSha256(w.snapshot.path("projectionRevisionSha256").asText());
             w.binding.setDeclaredModule("vetting");
             when(backend.snapshot(eq(w.binding.getProjectionSha256()),eq("vetting"))).thenAnswer(call->w.binding.getSnapshotJson());
             com.consense.repository.CanonicalSourceBindingRepository repository=mock(com.consense.repository.CanonicalSourceBindingRepository.class);

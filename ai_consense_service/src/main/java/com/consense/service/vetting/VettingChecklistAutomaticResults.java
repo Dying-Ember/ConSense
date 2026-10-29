@@ -22,11 +22,13 @@ public final class VettingChecklistAutomaticResults {
         String policy=result==null?"":result.path("promptPolicy").path("sha256").asText();
         boolean partial="FAILED".equals(runStatus)&&result!=null&&result.path("partialResults").isBoolean()&&result.path("partialResults").booleanValue();
         boolean published="COMPLETED".equals(runStatus)||partial;
-        Map<String,List<JsonNode>> accepted=new LinkedHashMap<>(),history=new LinkedHashMap<>();Set<String> rejected=new HashSet<>(),unclosedPositive=new HashSet<>();
+        Map<String,List<JsonNode>> accepted=new LinkedHashMap<>(),history=new LinkedHashMap<>();Set<String> rejected=new HashSet<>(),unclosedPositive=new HashSet<>(),unverifiedItems=new HashSet<>();
         if(published&&sha(policy)&&coverage!=null) {
             for(JsonNode topic:coverage.path("semanticTopics")) {
                 VettingEvidenceNeedResolution.Result resolution=VettingEvidenceNeedResolution.resolve(topic.path("packetAudits"),policy);
-                for(JsonNode packet:topic.path("packetAudits"))
+                for(JsonNode packet:topic.path("packetAudits")) {
+                if(packet.path("actualGatewayCallStarted").asBoolean()&&"completed_with_rejections".equals(packet.path("status").asText()))
+                    for(JsonNode id:packet.path("unverifiedChecklistItemIds"))if(id.isTextual()&&assigned(topic,id.asText()))unverifiedItems.add(id.asText());
                 for(JsonNode record:packet.path("checklistAssessments")) {
                     String id=record.path("itemId").asText();
                     if(assigned(topic,id)&&valid(packet,record,policy)) {
@@ -37,6 +39,7 @@ public final class VettingChecklistAutomaticResults {
                         if(Arrays.asList("fulfilled","not_applicable").contains(record.path("status").asText())&&!positiveScopeClosed(coverage,packet,record))unclosedPositive.add(id);
                     }
                     else rejected.add(id);
+                }
                 }
             }
         }
@@ -59,6 +62,10 @@ public final class VettingChecklistAutomaticResults {
                 reason="The model recorded "+status+", but the requirement's independent source field roles, same-object relation or complete scope remain unverified.\n"+reason;
                 status="insufficient_evidence";
             }
+            if(unverifiedItems.contains(item.getId())) {
+                if(Arrays.asList("fulfilled","not_applicable").contains(status))status="insufficient_evidence";
+                reason+="\nAnother model record referring to this checklist item failed structural validation and remains unverified. "+(records.isEmpty()?"Review the unresolved record.":"Review it alongside the retained assessment.");
+            }
             if(partial)reason+="\nThe review run failed. This records only accepted source packets; unfinished requirements remain unreviewed.";
             if("pricing_document_excluded".equals(item.getReviewScope())) {status="out_of_scope";reason=item.getScopeNote();}
             else if("mixed_contract_pricing".equals(item.getReviewScope())) {
@@ -71,7 +78,7 @@ public final class VettingChecklistAutomaticResults {
         for(VettingChecklistCatalog.LogicalGroup group:VettingChecklistCatalog.logicalGroups()) {
             List<AutomaticItemVO> members=group.getSourceItemIds().stream().map(rows::get).collect(Collectors.toList());
             List<AutomaticItemVO> inScope=members.stream().filter(r->!"out_of_scope".equals(r.getStatus())).collect(Collectors.toList());
-            boolean complete=members.stream().allMatch(r->Arrays.asList("fulfilled","not_fulfilled","not_applicable").contains(r.getStatus()));
+            boolean complete=members.stream().noneMatch(r->unverifiedItems.contains(r.getItemId()))&&members.stream().allMatch(r->Arrays.asList("fulfilled","not_fulfilled","not_applicable").contains(r.getStatus()));
             String state=members.stream().anyMatch(r->"not_fulfilled".equals(r.getStatus()))?"not_fulfilled"
                     :members.stream().allMatch(r->"out_of_scope".equals(r.getStatus()))?"out_of_scope"
                     :complete?(members.stream().allMatch(r->"not_applicable".equals(r.getStatus()))?"not_applicable":"fulfilled")

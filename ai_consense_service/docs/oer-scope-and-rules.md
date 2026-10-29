@@ -1,3 +1,6 @@
+<!-- external-app-deployment-20261029 -->
+**部署拆分入口（2026-10-29）：** 业务源码及发布文件放持久盘，容器承载运行环境，模型与数据库等状态另行持久化。已实现的 App 外置第一步、五容器计数条件、验证及未完成项见[部署检查点](testing/external-app-deployment-20261029.md)；Python 外置、固定 GPU worker 与目标环境验收仍未完成。此条不改变 OER 原件范围、质量门或已选模型。
+
 <!-- drafting-project-scc-authority-20261029 -->
 **Drafting 项目版次决定（2026-10-29）：** 用户已决定，本次项目以当前上传的 Word SCC 为准逐项对照冲突，NSC 通信事实继续保留；这不代表条号、适用性或付款主体冲突已解决。此决定仅适用于本项目，不推广为其他项目的选版规则。source 25 身份、决定回执及未决事项见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)。
 

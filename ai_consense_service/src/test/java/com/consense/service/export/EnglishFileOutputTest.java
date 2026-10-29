@@ -33,6 +33,61 @@ class EnglishFileOutputTest {
     final Map<Integer,String> rawResponses=new HashMap<>();
     boolean reverseFirstResponse;
     final AtomicInteger calls=new AtomicInteger();
+    @Test void invalidTranslationAfterLanguageRecheckCanBeRetriedWithoutResendingValidatedPeers(){
+        String english="The English finding remains unchanged.", french="Paiement dans 14 jours.";
+        translated.put(french,"Payment within 14 days.");languages.put(french,"fr");
+        rawResponses.put(1,"[{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"},{\"id\":\"T1\",\"sourceLanguage\":\"und\",\"translated\":0,\"text\":\"\"}]");
+        rawResponses.put(2,"[{\"id\":\"T0\",\"sourceLanguage\":\"fr\",\"translated\":1,\"text\":\"Payment within 21 days.\"}]");
+        JsonNode input=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(english).add(french));
+        JsonNode result=output().json(input,"authored-uncertain-recheck",()->{});
+        assertEquals(english,result.path("notes").get(0).asText());
+        assertEquals("English translation: Payment within 14 days.",result.path("notes").get(1).asText());
+        assertEquals(List.of(2,1,1),batchSizes);
+    }
+    @Test void repeatedInvalidLanguageRecheckDoesNotPublishOrWriteCache()throws Exception{
+        String french="Paiement dans 14 jours.";
+        rawResponses.put(1,"[{\"id\":\"T0\",\"sourceLanguage\":\"und\",\"translated\":0,\"text\":\"\"}]");
+        rawResponses.put(2,"[{\"id\":\"T0\",\"sourceLanguage\":\"fr\",\"translated\":1,\"text\":\"Payment within 21 days.\"}]");
+        rawResponses.put(3,rawResponses.get(2));
+        assertThrows(BizException.class,()->output().text(french,"authored-uncertain-persistent",()->{}));
+        assertEquals(3,calls.get());assertEquals(0,Files.walk(root).filter(path->path.getFileName().toString().endsWith(".json")).count());
+    }
+    @Test void duplicateRecheckIdentitiesCannotBeRetriedOrPublished(){
+        String a="First authored sentence",b="Second authored sentence";
+        rawResponses.put(1,"[{\"id\":\"T0\",\"sourceLanguage\":\"und\",\"translated\":0,\"text\":\"\"},{\"id\":\"T1\",\"sourceLanguage\":\"und\",\"translated\":0,\"text\":\"\"}]");
+        rawResponses.put(2,"[{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"},{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"}]");
+        JsonNode input=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(a).add(b));
+        assertThrows(BizException.class,()->output().json(input,"authored-uncertain-duplicate",()->{}));
+        assertEquals(2,calls.get());
+    }
+    @Test void staleSourceIsCheckedBeforeTargetedRetry(){
+        String french="Paiement dans 14 jours.";
+        rawResponses.put(1,"[{\"id\":\"T0\",\"sourceLanguage\":\"und\",\"translated\":0,\"text\":\"\"}]");
+        rawResponses.put(2,"[{\"id\":\"T0\",\"sourceLanguage\":\"fr\",\"translated\":1,\"text\":\"Payment within 21 days.\"}]");
+        assertThrows(BizException.class,()->output().text(french,"authored-stale-uncertain",()->{if(calls.get()>=2)throw new IllegalStateException("source changed");}));
+        assertEquals(2,calls.get());
+    }
+    @Test void invalidTranslationIsRecheckedAloneAndRetainsOtherValidatedSegments(){
+        String english="This English finding has number 7.", chinese="\u8bf7\u572814\u5929\u5185\u4ed8\u6b3e\u3002";
+        translated.put(chinese,"Please pay within 14 days.");
+        rawResponses.put(1,"[{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"},{\"id\":\"T1\",\"sourceLanguage\":\"zh\",\"translated\":1,\"text\":\"Please pay within 21 days.\"}]");
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(english).add(chinese));
+        JsonNode result=output().json(source,"authored-targeted-recheck",()->{});
+        assertEquals(english,result.path("notes").get(0).asText());
+        assertEquals("English translation: Please pay within 14 days.",result.path("notes").get(1).asText());
+        assertEquals(List.of(2,1),batchSizes);assertEquals(List.of(chinese),submittedTexts);
+    }
+    @Test void rejectionProbeReportsReasonWithoutSourceOrTranslatedText(){
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(EnglishFileOutput.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> trace=new ch.qos.logback.core.read.ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            String source="\u8bf7\u572814\u5929\u5185\u4ed8\u6b3e\u3002",bad="PRIVATE WRONG 21",good="Please pay within 14 days.";
+            translated.put(source,good);rawResponses.put(1,"[{\"id\":\"T0\",\"sourceLanguage\":\"zh\",\"translated\":1,\"text\":\""+bad+"\"}]");
+            assertEquals("English translation: "+good,output().text(source,"PRIVATE SOURCE",()->{}));
+            String logs=trace.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).collect(java.util.stream.Collectors.joining("\n"));
+            assertTrue(logs.contains("reason=numeric_mismatch"));assertFalse(logs.contains(source));assertFalse(logs.contains(bad));assertFalse(logs.contains(good));assertFalse(logs.contains("PRIVATE SOURCE"));
+        }finally{logger.detachAppender(trace);}
+    }
     @Test void lightweightCountsExposeTrustedCacheAndBatchLimitWithoutText(){
         ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(EnglishFileOutput.class);
         ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> trace=new ch.qos.logback.core.read.ListAppender<>();trace.start();logger.addAppender(trace);
@@ -89,7 +144,7 @@ class EnglishFileOutputTest {
         assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().put("note",french),"snapshot:trusted-foreign-latin",()->{},Set.of("Known English label")));
         assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().put("anchor","\u672a\u77e5\u5b9a\u4f4d"),"snapshot:trusted-mechanical",()->{},Set.of("Known English label")));
         assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().put("note","Known English label"),"snapshot:invalid-provenance",()->{},Set.of("\u672a\u77e5\u6587\u5b57")));
-        assertEquals(1,calls.get(),"Only the dynamic French reader text reaches the model; no invalid provenance or mechanical field is admitted");
+        assertEquals(2,calls.get(),"Only the dynamic French reader text reaches the bounded recheck; no invalid provenance or mechanical field is admitted");
     }
     @Test void foreignLatinNoOpDecisionCannotProduceOrCacheAnEnglishFile()throws Exception{
         String french="Bonjour, paiement dans 14 jours.";languages.put(french,"fr");
@@ -111,10 +166,10 @@ class EnglishFileOutputTest {
         assertEquals(2,calls.get());assertEquals(headings,submittedTexts.subList(23,submittedTexts.size()));
         assertEquals(result,exporter.json(source,"snapshot:uncertain-headings",()->{}));assertEquals(2,calls.get(),"a validated result is reused");
     }
-    @Test void undecidedForeignWordsStillFailClosedAfterOneLanguageRecheck() throws Exception {
+    @Test void undecidedForeignWordsStillFailClosedAfterTargetedValidationRecheck() throws Exception {
         String source="Bonjour, paiement dans 14 jours.";languages.put(source,"und");recheckedLanguages.put(source,"fr");
         assertThrows(BizException.class,()->output().text(source,"snapshot:undecided-french",()->{}));
-        assertEquals(2,calls.get());assertEquals(List.of(source,source),submittedTexts);
+        assertEquals(3,calls.get());assertEquals(List.of(source,source,source),submittedTexts);
         assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
     }
     @Test void readableFileTitlesRequireADecidedLanguageOnTheExistingRecheckWithoutRewritingThem(){
@@ -129,10 +184,10 @@ class EnglishFileOutputTest {
         Set<String> codes=new HashSet<>();allowed.forEach(value->codes.add(value.asText()));assertTrue(codes.containsAll(List.of("en","eng","fr","fra","zh","zho","mul")));assertFalse(codes.contains("und"));
         assertEquals(source,exporter.json(source,"snapshot:actual-eight-und-file-titles",()->{}));assertEquals(2,calls.get(),"Only the validated complete delivery can be reused");
     }
-    @Test void undecidedFileTitlesCannotBeTrustedOrCachedAfterTheSingleRecheck()throws Exception{
+    @Test void undecidedFileTitlesCannotBeTrustedOrCachedAfterTheBoundedRecheck()throws Exception{
         String title="05.1(2) - Marking Scheme (assessment std).docx";languages.put(title,"und");
-        assertThrows(BizException.class,()->output().text(title,"snapshot:persistent-und-file-title",()->{}));assertEquals(2,calls.get());
-        assertEquals(List.of(title,title),submittedTexts);assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
+        assertThrows(BizException.class,()->output().text(title,"snapshot:persistent-und-file-title",()->{}));assertEquals(3,calls.get());
+        assertEquals(List.of(title,title,title),submittedTexts);assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
     }
     @Test void numberedDocumentCodeFilenamesRemainLiteralWithPersistentUnd() {
         List<String> filenames=List.of("03 - NTT.docx","05 - SCT.docx","10 - SCC.docx","04 - GCT.pdf");
@@ -169,7 +224,7 @@ class EnglishFileOutputTest {
         String clause="11. PRE.B6.APPEND5",foreign="1. Bonjour, paiement dans 14 jours.";
         languages.put(clause,"und");languages.put(foreign,"und");EnglishFileOutput exporter=output();
         assertEquals(clause,exporter.text(clause,"snapshot:numbered-clause",()->{}));assertEquals(1,calls.get());
-        assertThrows(BizException.class,()->exporter.text(foreign,"snapshot:numbered-foreign-prose",()->{}));assertEquals(3,calls.get());
+        assertThrows(BizException.class,()->exporter.text(foreign,"snapshot:numbered-foreign-prose",()->{}));assertEquals(4,calls.get());
     }
     @Test void numberedSubclauseReferencesStayLiteralWithoutAdmittingForeignProse(){
         List<String> references=List.of(
@@ -200,7 +255,7 @@ class EnglishFileOutputTest {
         assertEquals(references.size(),calls.get(),"mechanical references need no uncertain-language retry");
         for(String prose:List.of(foreign,foreignRange,foreignTail,englishTail))
             assertThrows(BizException.class,()->exporter.text(prose,"snapshot:"+prose,()->{}));
-        assertEquals(references.size()+8,calls.get(),"prose remains subject to the language retry and strict gate");
+        assertEquals(references.size()+12,calls.get(),"prose remains subject to the bounded language retry and strict gate");
     }
     @Test void oneEmptyBatchGetsOneClassificationRepairAndAllReportSegmentsRemainChecked() throws Exception {
         emptyCalls.add(2);ArrayNode notes=JsonUtils.mapper().createArrayNode();
@@ -230,7 +285,7 @@ class EnglishFileOutputTest {
     }
     @Test void clarificationDoesNotPermitDuplicateOrForeignUntranslatedRecords(){
         emptyCalls.add(1);String source="Bonjour, paiement dans 14 jours.";languages.put(source,"fr");
-        assertThrows(BizException.class,()->output().text(source,"snapshot:foreign-after-empty",()->{}));assertEquals(2,calls.get());
+        assertThrows(BizException.class,()->output().text(source,"snapshot:foreign-after-empty",()->{}));assertEquals(3,calls.get());
     }
     @Test void classificationRepairStillRejectsDuplicateIds(){
         emptyCalls.add(1);rawResponses.put(2,"[{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"},{\"id\":\"T0\",\"sourceLanguage\":\"en\",\"translated\":0,\"text\":\"\"}]");
@@ -259,7 +314,7 @@ class EnglishFileOutputTest {
         String sourceSha=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(english.getBytes(StandardCharsets.UTF_8)));
         Path old=root.resolve("english-file-output/english-delivery-copy-v6");Files.createDirectories(old);
         Files.writeString(old.resolve(key+".json"),JsonUtils.write(Map.of("policy","english-delivery-copy-v6","key",key,"segments",List.of(Map.of("id","T0","sourceTextSha256",sourceSha,"sourceLanguage","en","translated",1,"text",paraphrase)))));
-        translated.put(english,paraphrase);languages.put(english,"en");assertThrows(BizException.class,()->output().text(english,reference,()->{}));assertEquals(1,calls.get());
+        translated.put(english,paraphrase);languages.put(english,"en");assertThrows(BizException.class,()->output().text(english,reference,()->{}));assertEquals(2,calls.get());
     }
     @Test void jsonIsAnIndependentPresentationWithEnglishTranslationLabelsAndUnchangedTypes() {
         translated.put("待核对","Requires review");translated.put("认证后 14 天付款。","Payment is due 14 days after certification.");

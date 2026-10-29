@@ -58,7 +58,7 @@ final class FixedVettingReferences {
                 return client.searchForProject(projectId,"vetting",part,limit);
             }))selected.putIfAbsent(hit.getId(),hit);
         }
-        FixedVettingReferences result=new FixedVettingReferences(client,new ArrayList<>(selected.values()));
+        FixedVettingReferences result=new FixedVettingReferences(client,FixedReferenceEvidence.focusRequestedClauses(new ArrayList<>(selected.values()),String.join("\n",queries)));
         result.projectId=projectId;result.selectionIdentity=identity;result.assertSelectionCurrent();return result;
     }
     private void assertSelectionCurrent() {
@@ -70,6 +70,23 @@ final class FixedVettingReferences {
 
     List<Chunk> chunks() {
         return views.values().stream().map(json -> JsonUtils.read(json, Chunk.class)).collect(Collectors.toList());
+    }
+    List<Chunk> requestedGroups(String request) {
+        List<Chunk> exact=new ArrayList<>();
+        for(SearchHit hit:hits.values())if(FixedReferenceEvidence.matchesRequestedClause(hit,request))exact.add(JsonUtils.read(views.get(hit.getId()),Chunk.class));
+        return completeGroups(exact);
+    }
+    List<Chunk> completeGroups(List<Chunk> selected) {
+        Set<String> required=new LinkedHashSet<>();
+        for(Chunk chunk:selected)if(isFixed(chunk)){
+            SearchHit hit=hits.get(chunk.getId());if(hit==null)throw new IllegalArgumentException("Fixed source is outside this packet catalog");
+            JsonNode unit=client.evidence(hit).getSourceUnit();List<String> members=new ArrayList<>();
+            if(unit!=null)for(JsonNode id:unit.path("requiredMemberIds"))members.add(id.asText());
+            if(members.isEmpty())members.add(hit.getId());
+            if(!hits.keySet().containsAll(members))throw new IllegalArgumentException("Fixed retrieved group is incomplete");
+            required.addAll(members);
+        }
+        return required.stream().map(id->JsonUtils.read(views.get(id),Chunk.class)).collect(Collectors.toList());
     }
     /** Only the verified source family can establish that a retrieved reference belongs to SL. */
     List<Chunk> slChunks() {
@@ -86,8 +103,12 @@ final class FixedVettingReferences {
     }
     /** Preserve complete observed groups without conferring an adopted-clause or literal-origin status. */
     void admit(VettingContextBuilder.Selection selection, int maximumCharacters) {
+        admit(selection,maximumCharacters,null);
+    }
+    void admit(VettingContextBuilder.Selection selection, int maximumCharacters,Set<String> activeIds) {
         Map<String,List<String>> groups = new LinkedHashMap<>();
         for (SearchHit hit : hits.values()) {
+            if(activeIds!=null&&!activeIds.contains(hit.getId()))continue;
             JsonNode unit = client.evidence(hit).getSourceUnit();
             List<String> required = new ArrayList<>();
             if (unit != null) for (JsonNode id : unit.path("requiredMemberIds")) required.add(id.asText());

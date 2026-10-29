@@ -18,6 +18,160 @@ import static org.mockito.Mockito.*;
 
 /** Faithful v1/signature-3 wire shapes with authored source text; no model/network/DB calls. */
 class FixedBaselineRetrievalClientTest {
+    @Test void explicitFrozenClauseMissingFromVectorHeadersReachesTheActualDirectionWire()throws Exception {
+        Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));
+        com.consense.domain.Project project=new com.consense.domain.Project();project.setId("authored");
+        com.consense.repository.ProjectRepository projects=mock(com.consense.repository.ProjectRepository.class);when(projects.findById("authored")).thenReturn(Optional.of(project));
+        org.springframework.test.util.ReflectionTestUtils.setField(f.client,"projectRepository",projects);
+        Class<?> type=Class.forName("com.consense.service.vetting.VettingNamedReferenceAdmissionTest$Exercise");
+        java.lang.reflect.Constructor<?> create=type.getDeclaredConstructor(String.class);create.setAccessible(true);Object run=create.newInstance("initial");
+        VettingSemanticReview review=(VettingSemanticReview)org.springframework.test.util.ReflectionTestUtils.getField(run,"review");review.setFixedBaselineRetrievalClient(f.client);
+        java.lang.reflect.Method execute=type.getDeclaredMethod("execute");execute.setAccessible(true);execute.invoke(run);
+        @SuppressWarnings("unchecked") List<String> wires=(List<String>)org.springframework.test.util.ReflectionTestUtils.getField(run,"wires");
+        assertEquals(2,wires.size(),"The empty checklist response receives one bounded coverage replay");
+        for(String wire:wires){
+            assertTrue(wire.contains(f.second.path("content").asText()),"A real frozen 13,387-character body must reach both prepared wires even when vector RAG returns only a 76-character header");
+            assertFalse(wire.contains(f.first.path("content").asText()));
+        }
+        verify(f.http,times(2)).postJson(endsWith("/retrieve"),anyString(),anyLong());
+    }
+    @Test void exactRefinementIsCompleteUnrankedAndDoesNotAddAnotherVectorRequest()throws Exception {
+        Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));List<VectorStore.SearchHit> hits=f.client.search("vetting","GCC 1.1",10);
+        assertEquals("parent-b",hits.get(0).getId());assertEquals(0,hits.get(0).getScore());assertFalse((Boolean)hits.get(0).getPayload().get("fixedReferenceOrigin"));
+        assertEquals("explicit_observed_clause_refinement",hits.get(0).getPayload().get("fixedReferenceRetrievalMethod"));
+        FixedReferenceEvidence body=f.client.evidence(hits.get(0));assertEquals("complete_observed_unit",body.getSourceUnit().path("status").asText());
+        assertEquals(Collections.singleton("parent-b"),new HashSet<>(Collections.singletonList(body.getSourceUnit().path("requiredMemberIds").get(0).asText())));
+        assertTrue(f.client.toModelMaterial(hits,20000).contains("Authored definitions"));verify(f.http,times(1)).postJson(endsWith("/retrieve"),anyString(),anyLong());
+    }
+    @Test void rawQuestionsAndVersionDecimalsDoNotTriggerLiteralClauseRefinement()throws Exception {
+        for(String query:Arrays.asList("Authored definitions","GCC version 1.1","GCC revision 1.1")){
+            Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));List<VectorStore.SearchHit> hits=f.client.search("vetting",query,10);
+            assertEquals(1,hits.size());assertEquals("parent-a",hits.get(0).getId());
+        }
+    }
+    @Test void literalProvenanceCannotBeRelabelledAsAnIndependentVectorRank()throws Exception {
+        Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));VectorStore.SearchHit hit=f.client.search("vetting","GCC 1.1",10).get(0);
+        Map<String,Object> changed=new LinkedHashMap<>(hit.getPayload());changed.put("fixedReferenceOrigin",true);
+        FixedReferenceEvidence checked=f.client.evidence(new VectorStore.SearchHit(hit.getId(),.99,changed));
+        assertEquals(0,checked.getScore());assertFalse(checked.getPayload().path("fixedReferenceOrigin").asBoolean(true));
+        changed.put("fixedReferenceRetrievalMethod","vector_ranked");assertThrows(IllegalStateException.class,()->f.client.evidence(new VectorStore.SearchHit(hit.getId(),.99,changed)));
+    }
+    @Test void exactRefinementHasFiniteParentAndByteLimitsBeforeMaterializingGroups()throws Exception {
+        for(String bound:Arrays.asList("parents","bytes")){
+            Fixture f=headerOnly();List<ObjectNode> rows=new ArrayList<>(Arrays.asList(f.first,f.second));
+            if("parents".equals(bound))for(int i=0;i<64;i++){ObjectNode row=parent("extra-"+i,"AUTHORED required fragment "+i,i+3);observed(row,"1.1");row.put("clauseHeadingLocation",f.second.path("anchor").asText());rows.add(row);}
+            if("bytes".equals(bound))f.p.setMaxResponseBytes(5000);snapshot(f,rows);
+            IllegalStateException failure=assertThrows(IllegalStateException.class,()->f.client.search("vetting","GCC 1.1",10));
+            assertTrue(failure.getMessage().contains("limit"),bound);
+        }
+    }
+    @Test void sameClauseInAnotherVerifiedFamilyCannotSatisfyTheRequestedGcc()throws Exception {
+        Fixture f=headerOnly();Path gct=temp.resolve("gct.pdf");Files.write(gct,"AUTHORED GCT source".getBytes(StandardCharsets.UTF_8));
+        f.second.put("fileKey","GCT").put("documentId","GCT:GCT").put("originalSourceSha256",sha(Files.readAllBytes(gct)));((ObjectNode)f.second.path("sourceQuality")).put("family","GCT");
+        ObjectNode manifest=manifest(f);((ObjectNode)manifest.path("originalSources")).set("gctSource",descriptor(gct));writeManifest(f,manifest);snapshot(f,Arrays.asList(f.first,f.second));
+        assertEquals(1,f.client.search("vetting","GCC 1.1",10).size());
+    }
+    @Test void selectedSlEditionIsExactAndAnUnselectedSameNumberDoesNotLeak()throws Exception {
+        Fixture f=headerOnly();Path one=slOriginal("one"),two=slOriginal("two");
+        ObjectNode selected=slBody("selected","SL:one",one),unselected=slBody("unselected","SL:two",two);
+        configureSl(f,one,two);snapshot(f,Arrays.asList(f.first,selected,unselected));JsonNode selection=slSelection(f,one,"one");
+        f.response.putArray("selectedSourceSha256").add(ORIGINAL).add(sha(Files.readAllBytes(one)));
+        List<FixedReferenceEvidence> hits=f.client.searchEvidence("vetting","SL 1.1",10,selection);
+        assertEquals("selected",hits.get(0).getId());assertTrue(hits.stream().noneMatch(hit->"unselected".equals(hit.getId())));
+    }
+    @Test void sameEditionSlNumberWithSeveralWorksectionOwnersIsRefused()throws Exception {
+        Fixture f=headerOnly();Path source=slOriginal("one");configureSl(f,source,null);
+        snapshot(f,Arrays.asList(f.first,slBody("section-a","SL:section-a",source),slBody("section-b","SL:section-b",source)));
+        f.response.putArray("selectedSourceSha256").add(ORIGINAL).add(sha(Files.readAllBytes(source)));
+        IllegalStateException failure=assertThrows(IllegalStateException.class,()->f.client.searchEvidence("vetting","SL 1.1",10,slSelection(f,source,"one")));
+        assertTrue(failure.getMessage().contains("ambiguous"));
+    }
+    @Test void selectedEditionRemainsIsolatedWhenDocumentAndParserIdentitiesAreReused()throws Exception {
+        for(boolean sameParsedHash:new boolean[]{true,false}){
+            Fixture f=headerOnly();Path one=slOriginal("one"),two=slOriginal("two");configureSl(f,one,two);
+            ObjectNode selected=slBody("selected-shared-doc","SL:shared-document",one),unselected=slBody("unselected-shared-doc","SL:shared-document",two);
+            if(!sameParsedHash)unselected.put("sourceHash",sha("AUTHORED other parsed snapshot"));
+            snapshot(f,Arrays.asList(f.first,selected,unselected));f.response.putArray("selectedSourceSha256").add(ORIGINAL).add(sha(Files.readAllBytes(one)));
+            List<FixedReferenceEvidence> hits=f.client.searchEvidence("vetting","SL 1.1",10,slSelection(f,one,"one"));
+            assertEquals("selected-shared-doc",hits.get(0).getId());assertTrue(hits.stream().noneMatch(hit->"unselected-shared-doc".equals(hit.getId())));
+        }
+    }
+    @Test void requestedClauseRagSourceContextCanDisambiguateTheSelectedSlWorksection()throws Exception {
+        Fixture f=headerOnly();Path source=slOriginal("one");configureSl(f,source,null);
+        ObjectNode a=slBody("section-a","SL:section-a",source),b=slBody("section-b","SL:section-b",source),context=slBody("section-context","SL:section-a",source);
+        context.put("clauseHeadingLocation",a.path("anchor").asText());f.response.withArray("hits").removeAll();f.response.withArray("hits").addObject().put("id",context.path("id").asText()).put("score",.8).set("payload",context);
+        headerUnit(f,context);snapshot(f,Arrays.asList(f.first,a,b,context));f.response.putArray("selectedSourceSha256").add(ORIGINAL).add(sha(Files.readAllBytes(source)));
+        List<FixedReferenceEvidence> hits=f.client.searchEvidence("vetting","SL 1.1",10,slSelection(f,source,"one"));
+        assertEquals("section-a",hits.get(0).getId());assertTrue(hits.stream().noneMatch(hit->"section-b".equals(hit.getId())));
+    }
+    @Test void unrelatedOperativeRagTextCannotChooseOneOfSeveralSameNumberSlOwners()throws Exception {
+        Fixture f=headerOnly();Path source=slOriginal("one");configureSl(f,source,null);
+        ObjectNode a=slBody("section-a","SL:section-a",source),b=slBody("section-b","SL:section-b",source),context=slBody("unrelated-context","SL:section-a",source);
+        context.put("clauseId","9.9").put("observedLabelRaw","9.9");f.response.withArray("hits").removeAll();f.response.withArray("hits").addObject().put("id",context.path("id").asText()).put("score",.8).set("payload",context);
+        headerUnit(f,context);snapshot(f,Arrays.asList(f.first,a,b,context));f.response.putArray("selectedSourceSha256").add(ORIGINAL).add(sha(Files.readAllBytes(source)));
+        assertThrows(IllegalStateException.class,()->f.client.searchEvidence("vetting","SL 1.1",10,slSelection(f,source,"one")));
+    }
+    @Test void aSharedNumberAcrossRequestedFamiliesCannotBeChosenByOneFamilyRankedContext()throws Exception {
+        Fixture f=headerOnly();Path original=temp.resolve("gct-shared-number.pdf");Files.write(original,"AUTHORED other family".getBytes(StandardCharsets.UTF_8));
+        ObjectNode other=parent("gct-body","AUTHORED GCT same number",3);observed(other,"1.1");other.put("fileKey","GCT").put("documentId","GCT:GCT").put("originalSourceSha256",sha(Files.readAllBytes(original)));other.with("sourceQuality").put("family","GCT");
+        ObjectNode value=manifest(f);value.with("originalSources").set("gctSource",descriptor(original));writeManifest(f,value);
+        f.response.withArray("hits").removeAll();f.response.withArray("hits").addObject().put("id","parent-b").put("score",.8).set("payload",f.second);headerUnit(f,f.second);snapshot(f,Arrays.asList(f.first,f.second,other));
+        assertThrows(IllegalStateException.class,()->f.client.search("vetting","GCC 1.1 and GCT 1.1",10));
+    }
+    @Test void rankedUnknownRequestedSeedStillAcquiresItsCompleteFrozenContinuation()throws Exception {
+        Fixture f=headerOnly();ObjectNode tail=parent("continuation","AUTHORED required continuation",3);observed(tail,"1.1");tail.put("clauseHeadingLocation",f.second.path("anchor").asText());
+        ObjectNode part=(ObjectNode)tail.path("parts").get(0);int offset=f.second.path("content").asText().length();part.put("blockId",f.second.path("parts").get(0).path("blockId").asText()).put("startOffset",offset).put("endOffset",offset+part.path("text").asText().length()).put("anchor",f.second.path("anchor").asText()+" @"+offset);
+        f.response.withArray("hits").removeAll();f.response.withArray("hits").addObject().put("id","parent-b").put("score",.8).set("payload",f.second);headerUnit(f,f.second);snapshot(f,Arrays.asList(f.first,f.second,tail));
+        List<VectorStore.SearchHit> hits=f.client.search("vetting","GCC 1.1",10);assertEquals(2,hits.size());
+        for(VectorStore.SearchHit hit:hits){assertEquals("complete_observed_unit",f.client.evidence(hit).getSourceUnit().path("status").asText());assertEquals(2,f.client.evidence(hit).getSourceUnit().path("requiredMemberIds").size());}
+        assertTrue(hits.stream().anyMatch(hit->"continuation".equals(hit.getId())));
+    }
+    @Test void incompleteClauseRangeCannotBeInventedAsACompleteRefinementGroup()throws Exception {
+        Fixture f=headerOnly();ObjectNode continuation=parent("continuation","AUTHORED later fragment",3);observed(continuation,"1.1");continuation.put("clauseHeadingLocation",f.second.path("anchor").asText());
+        ObjectNode part=(ObjectNode)continuation.path("parts").get(0);part.put("blockId",f.second.path("parts").get(0).path("blockId").asText());int offset=f.second.path("content").asText().length()+1;
+        part.put("startOffset",offset).put("endOffset",offset+part.path("text").asText().length()).put("anchor",f.second.path("anchor").asText()+" @"+offset);
+        snapshot(f,Arrays.asList(f.first,f.second,continuation));IllegalStateException failure=assertThrows(IllegalStateException.class,()->f.client.search("vetting","GCC 1.1",10));
+        assertTrue(failure.getMessage().contains("incomplete"));
+    }
+    @Test void exactRefinementKeepsFrozenOriginalAndIndexSnapshotDriftGuards()throws Exception {
+        for(String defect:Arrays.asList("original","index","corpus")){
+            Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));f.client.frozenManifest();
+            if("original".equals(defect))Files.write(f.original,"CHANGED source".getBytes(StandardCharsets.UTF_8));
+            if("index".equals(defect))f.response.put("indexSignature",sha("changed index"));
+            if("corpus".equals(defect))Files.write(f.corpus,"CHANGED corpus".getBytes(StandardCharsets.UTF_8));
+            assertThrows(IllegalStateException.class,()->f.client.search("vetting","GCC 1.1",10),defect);
+        }
+    }
+    private Fixture headerOnly()throws Exception {
+        Fixture f=new Fixture(false);String header="General Conditions of Contract for Building Works 2013 Edition (version 1.1)";
+        f.first.put("content",header);((ObjectNode)f.first.path("parts").get(0)).put("text",header);observed(f.first,null);f.first.put("observedNodeKind","document").put("observedSourceRole","content");
+        String body="1.1 Authored definitions\n"+"x".repeat(13387-"1.1 Authored definitions\n".length());f.second.put("content",body);((ObjectNode)f.second.path("parts").get(0)).put("text",body);observed(f.second,"1.1");headerUnit(f,f.first);return f;
+    }
+    private static void observed(ObjectNode row,String clause){
+        for(String field:Arrays.asList("metadataVersion","segmentationVersion","nativeTableMetadataVersion","sourceQualityMetadataVersion"))row.put(field,"AUTHORED fixed version");
+        row.put("observedNodeKind","clause").put("observedSourceRole","body");if(clause!=null)row.put("clauseId",clause).put("observedLabelRaw",clause).put("clauseHeadingLocation",row.path("anchor").asText());
+        for(JsonNode value:row.path("parts")){ObjectNode part=(ObjectNode)value;part.put("anchor",row.path("anchor").asText()).put("startOffset",0).put("endOffset",part.path("text").asText().length());}
+    }
+    private static void headerUnit(Fixture f,ObjectNode seed){ObjectNode unit=JsonUtils.mapper().createObjectNode();unit.put("unitId",sha("AUTHORED unknown "+seed.path("id").asText())).put("kind","unknown").put("status","unknown").put("reason","AUTHORED no ranked closure");
+        unit.putArray("originIds").add(seed.path("id").asText());unit.putArray("requiredMemberIds");unit.putArray("members");ObjectNode identity=unit.putObject("sourceIdentity");for(String field:OerCanonicalSourceUnits.FIELDS)identity.set(field,seed.path(field));
+        unit.put("derivedMembersCanBecomeOrigins",false).put("qualifiersComplete","unknown").put("semanticScopeVerified",false);f.response.with("sourceUnits").withArray("units").removeAll().add(unit);}
+    private static ObjectNode manifest(Fixture f)throws Exception{return (ObjectNode)JsonUtils.parse(Files.readString(Paths.get(f.p.getManifestPath())));}
+    private static void writeManifest(Fixture f,ObjectNode value)throws Exception{Path path=Paths.get(f.p.getManifestPath());write(path,value);f.p.setManifestSha256(sha(Files.readAllBytes(path)));}
+    private static void snapshot(Fixture f,List<ObjectNode> rows)throws Exception {StringBuilder body=new StringBuilder();for(ObjectNode row:rows)body.append(JsonUtils.write(row)).append('\n');Files.write(f.corpus,body.toString().getBytes(StandardCharsets.UTF_8));
+        ObjectNode value=manifest(f);value.set("corpus",descriptor(f.corpus));value.with("coverage").put("totalParents",rows.size());writeManifest(f,value);}
+    private Path slOriginal(String edition)throws Exception{Path path=temp.resolve("sl-"+edition+".pdf");Files.write(path,("AUTHORED SL edition "+edition).getBytes(StandardCharsets.UTF_8));return path;}
+    private static ObjectNode slBody(String id,String document,Path original)throws Exception {ObjectNode row=parent(id,"AUTHORED SL body "+id,2);observed(row,"1.1");row.put("fileKey","SL").put("documentId",document).put("originalSourceSha256",sha(Files.readAllBytes(original)));row.with("sourceQuality").put("family","SL");return row;}
+    private static void configureSl(Fixture f,Path one,Path two)throws Exception{ObjectNode value=manifest(f);ArrayNode sources=value.with("originalSources").putArray("slSources");ObjectNode a=descriptor(one);a.put("editionId","one");sources.add(a);if(two!=null){ObjectNode b=descriptor(two);b.put("editionId","two");sources.add(b);}writeManifest(f,value);}
+    private static JsonNode slSelection(Fixture f,Path original,String edition)throws Exception {ObjectNode selection=JsonUtils.mapper().createObjectNode();selection.put("manifestSha256",f.p.getManifestSha256());selection.putArray("slSources").addObject().put("sha256",sha(Files.readAllBytes(original))).put("editionId",edition);return selection;}
+    @Test void observedEditionIdentityComesFromVerifiedSameSourceBytesAndCannotBeReplacedByHitMetadata()throws Exception {
+        Fixture f=new Fixture(false);String title="General Conditions of Contract for Building Works 2013 Edition (version 1.1)";
+        f.second.put("content",title);((ObjectNode)f.second.path("parts").get(0)).put("text",title);
+        Files.write(f.corpus,(JsonUtils.write(f.first)+"\n"+JsonUtils.write(f.second)+"\n").getBytes(StandardCharsets.UTF_8));
+        Path path=Paths.get(f.p.getManifestPath());ObjectNode manifest=(ObjectNode)JsonUtils.parse(Files.readString(path));manifest.set("corpus",descriptor(f.corpus));write(path,manifest);f.p.setManifestSha256(sha(Files.readAllBytes(path)));
+        VectorStore.SearchHit selected=f.client.search("advisory","authored payment",1).get(0);assertEquals(title,f.client.evidence(selected).getDocumentTitle());
+        Map<String,Object> changed=new LinkedHashMap<>(selected.getPayload());changed.put("fixedReferenceDocumentTitle",title.replace("2013","2020"));
+        assertEquals(title,f.client.evidence(new VectorStore.SearchHit(selected.getId(),selected.getScore(),changed)).getDocumentTitle(),"The mapper must regenerate identity from the pinned corpus rather than trust retrieval metadata");
+    }
     @TempDir Path temp;
     private static final String ORIGINAL=sha("authored source"), SOURCE=sha("authored parser snapshot"), SIGNATURE=sha("authored index");
     private final class Fixture {

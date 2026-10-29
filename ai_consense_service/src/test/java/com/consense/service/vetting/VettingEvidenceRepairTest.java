@@ -42,7 +42,7 @@ class VettingEvidenceRepairTest {
             for(String kind:Arrays.asList("relaxed","patch","merge")){
                 VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();JsonNode original=JsonUtils.parse(f.raw("amend",false,f.source.getContent()));ObjectNode first=(ObjectNode)original.get(0);first.remove("evidence");first.put("comment","PRIVATE_MODEL_VALUE_SENTINEL");
                 if("relaxed".equals(kind))first.remove("title");
-                String repaired="relaxed".equals(kind)?f.raw("amend",false,f.source.getContent()):patch(0,"R1","patch".equals(kind)?"short":"PRIVATE_QUOTE_SENTINEL is not supplied source text.");
+                String repaired="relaxed".equals(kind)?f.raw("amend",false,f.source.getContent()):patch(0,"R1","patch".equals(kind)?"":"PRIVATE_QUOTE_SENTINEL is not supplied source text.");
                 f.review(f.wire(JsonUtils.write(original),repaired));
             }
             String logs=trace.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).reduce("",(a,b)->a+"\n"+b);

@@ -457,6 +457,7 @@ public final class VettingDtos {
         private List<com.fasterxml.jackson.databind.JsonNode> fixedBaselineEvidence=new java.util.ArrayList<>();
         private List<VerifiedAssessmentVO> verifiedAssessments=new java.util.ArrayList<>();
         private List<ChecklistAssessmentVO> checklistAssessments=new java.util.ArrayList<>();
+        private List<String> unverifiedChecklistItemIds=new java.util.ArrayList<>();
         /** Durable consumption ledger; a started attempt may have an unknown outcome after restart. */
         private List<SemanticAttemptVO> attempts=new java.util.ArrayList<>();
         @com.fasterxml.jackson.annotation.JsonProperty(access=com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)

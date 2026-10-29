@@ -145,6 +145,20 @@ public class CanonicalVerificationReadJpaTest {
         assertEquals(beforeClobReads,snapshotClobReads(),"Changed stamp rejects from fresh scalar state without rereading the CLOB");
         System.out.println("STAMPED_FRAME_CLOB_READS repeatedGuards=6 snapshotClobReads=0 directSqlChange=rejected");
     }
+    @Test void currentBindingGuardRejectsScalarRevisionChangesAcrossAWait(){
+        CanonicalEvidenceService target=org.springframework.test.util.AopTestUtils.getTargetObject(service);
+        TransactionTemplate tx=new TransactionTemplate(transactions);tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        tx.execute(status->{
+            org.springframework.test.util.ReflectionTestUtils.invokeMethod(target,"assertCurrent",binding,"advisory",null);
+            for(String column:Arrays.asList("source_revision_sha256","projection_revision_sha256","canonical_source_hash")){
+                committed(()->jdbc.update("update canonical_source_binding set "+column+"=? where id=?",repeat('b'),binding.getId()));
+                CanonicalEvidenceException changed=assertThrows(CanonicalEvidenceException.class,()->org.springframework.test.util.ReflectionTestUtils.invokeMethod(target,"assertCurrent",binding,"advisory",null),column);
+                assertEquals("CANONICAL_ADOPTION_SUPERSEDED",changed.getMessage(),column);
+                committed(()->jdbc.update("update canonical_source_binding set "+column+"=? where id=?",repeat('a'),binding.getId()));
+            }
+            return null;
+        });
+    }
     @Test void compactPreparationDoesNotRehydrateTheAlreadyOwnedStampedBinding()throws Exception {
         CanonicalEvidenceService.VerifiedBindingFrame frame=capturedFrame();
         List<SourceDocument> captured=documents.findBusinessSourcesByProjectId(PROJECT);

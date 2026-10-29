@@ -8,6 +8,7 @@ import java.util.Collection;
 
 /** Decoding shape only: supplied IDs and verbatim source verification are checked separately. */
 final class VettingOutputSchema {
+    static final int MAX_EVIDENCE = 16;
     private VettingOutputSchema() { }
 
     static JsonNode forChunkIds(Collection<String> chunkIds) {
@@ -43,15 +44,15 @@ final class VettingOutputSchema {
         ObjectNode fact=facts.putObject("items");fact.put("type","object");fact.put("additionalProperties",false);
         ObjectNode factFields=fact.putObject("properties");factFields.set("slot",choice("selected_specification_clause","sl_guidance_criterion","project_contract_type_or_selection_fact",
                 "pre_work_condition","same_work_required_or_optional_intent","instruction_timing_or_location","clause_number","heading_appendix_reference","running_header_reference"));
-        factFields.set("evidenceIndex",integer(0,3));factFields.set("text",text(1,1200));
+        factFields.set("evidenceIndex",integer(0,MAX_EVIDENCE-1));factFields.set("text",text(1,1200));
         required(fact,"slot","evidenceIndex","text");
         required(relation,"kind","facts");required(check,"itemId","status","reason","support");
         ObjectNode evidence = fields.putObject("evidence");
-        evidence.put("type", "array"); evidence.put("minItems", 1); evidence.put("maxItems", 4);
+        evidence.put("type", "array"); evidence.put("minItems", 1); evidence.put("maxItems", MAX_EVIDENCE);
         ObjectNode quote = evidence.putObject("items"); quote.put("type", "object"); quote.put("additionalProperties", false);
         ObjectNode quoteFields = quote.putObject("properties");
         quoteFields.set("chunkId", choice(chunkIds.toArray(new String[0])));
-        quoteFields.set("side", choice("source", "reference")); quoteFields.set("quote", text(12, 1200));
+        quoteFields.set("side", choice("source", "reference")); quoteFields.set("quote", text(1, 1200));
         required(quote, "chunkId", "side", "quote");
         required(item, "assessment", "type", "severity", "title", "comment", "impact", "suggestion", "evidence","subDimension","factBasis","pendingFacts","suggestedAction","checklistAssessments");
         return root;

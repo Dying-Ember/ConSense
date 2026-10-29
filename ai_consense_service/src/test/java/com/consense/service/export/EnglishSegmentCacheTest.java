@@ -68,6 +68,33 @@ class EnglishSegmentCacheTest {
         assertEquals(5,calls.get());assertEquals(33,submitted.size());assertEquals("English report segment 32",submitted.get(0));
     }
 
+    @Test void validSegmentsSurviveTargetedRecheckFailureWithoutPublishingMixedOutput()throws Exception{
+        Fixture fixture=new Fixture();String english="English contract clause 7.",foreign="\u8bf7\u572814\u5929\u5185\u4ed8\u6b3e\u3002";
+        translations.put(foreign,"Please pay within 21 days.");languages.put(foreign,"zh");
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(english).add(foreign));
+        assertThrows(BizException.class,()->fixture.output.json(source,"authored-first",()->{}));
+        assertEquals(2,calls.get());assertEquals(List.of(english,foreign,foreign),submitted);
+        try(Stream<Path> files=Files.list(root.resolve("english-file-output").resolve(EnglishFileOutput.POLICY))){assertEquals(1,files.filter(path->path.getFileName().toString().startsWith("segment-")).count());}
+        translations.put(foreign,"Please pay within 14 days.");submitted.clear();
+        JsonNode result=fixture.output.json(source,"authored-second",()->{});
+        assertEquals(3,calls.get());assertEquals(List.of(foreign),submitted);
+        assertEquals(english,result.path("notes").get(0).asText());assertEquals("English translation: Please pay within 14 days.",result.path("notes").get(1).asText());
+    }
+
+    @Test void validPeersAreCachedWhenAnUncertainLanguageRecheckRemainsInvalid()throws Exception{
+        Fixture fixture=new Fixture();String english="An English finding.",french="Paiement dans 14 jours.";
+        languages.put(french,"und");
+        afterResponse=()->{if(calls.get()==1){languages.put(french,"fr");translations.put(french,"Payment within 21 days.");}};
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(english).add(french));
+        assertThrows(BizException.class,()->fixture.output.json(source,"authored-uncertain-first",()->{}));
+        assertEquals(3,calls.get());assertEquals(List.of(english,french,french,french),submitted);
+        try(Stream<Path> files=Files.list(root.resolve("english-file-output").resolve(EnglishFileOutput.POLICY))){assertEquals(1,files.filter(path->path.getFileName().toString().startsWith("segment-")).count());}
+        translations.put(french,"Payment within 14 days.");submitted.clear();
+        JsonNode result=fixture.output.json(source,"authored-uncertain-second",()->{});
+        assertEquals(List.of(french),submitted);assertEquals(4,calls.get());
+        assertEquals(english,result.path("notes").get(0).asText());assertEquals("English translation: Payment within 14 days.",result.path("notes").get(1).asText());
+    }
+
     @Test void changedListReusesEnglishAndTranslatedSegmentsButAssessesNewText(){
         String english="Payment is due within 14 days.",french="Bonjour, paiement dans 14 jours.",added="A new remark requires review.";
         translations.put(french,"Hello, payment is due within 14 days.");languages.put(french,"fr");Fixture fixture=new Fixture();
@@ -159,8 +186,8 @@ class EnglishSegmentCacheTest {
     @Test void invalidNewTextCannotProduceAPartialDeliveryOrInvalidateAValidatedPeer(){
         Fixture fixture=new Fixture();String english="Payment is due within 14 days.",foreign="Bonjour, paiement dans 14 jours.";languages.put(foreign,"fr");
         fixture.output.text(english,"report:valid",()->{});JsonNode invalid=JsonUtils.parse("{\"notes\":[]}");((ArrayNode)invalid.path("notes")).add(english).add(foreign);
-        assertThrows(BizException.class,()->fixture.output.json(invalid,"report:invalid-added-text",()->{}));assertEquals(2,calls.get());
-        assertEquals(english,fixture.output.text(english,"report:valid-peer",()->{}));assertEquals(2,calls.get());
+        assertThrows(BizException.class,()->fixture.output.json(invalid,"report:invalid-added-text",()->{}));assertEquals(3,calls.get());
+        assertEquals(english,fixture.output.text(english,"report:valid-peer",()->{}));assertEquals(3,calls.get());
     }
 
     private Path segmentFile()throws Exception{

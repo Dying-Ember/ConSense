@@ -54,7 +54,10 @@ class EnglishQwenRecordsHttpTest {
         try(Fixture f=new Fixture(mutation,true);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
             JsonNode before=f.input.deepCopy();assertThrows(BizException.class,()->f.exporter.json(f.input,"authored:invalid",()->{}));
             assertEquals(before,f.input);assertTrue(f.requests.size()<=4,"The existing one-repair ceiling is retained");
-            assertFalse(Files.exists(files.resolve("english-file-output").resolve(EnglishFileOutput.POLICY)),"Invalid classifications cannot seed reusable segments");
+            Path cache=files.resolve("english-file-output").resolve(EnglishFileOutput.POLICY);
+            if("changed-digits".equals(mutation)||"foreign-untranslated".equals(mutation)){
+                try(java.util.stream.Stream<Path> entries=Files.list(cache)){assertEquals("changed-digits".equals(mutation)?30:31,entries.filter(p->p.getFileName().toString().startsWith("segment-")).count(),"Only separately validated peer segments may be cached");}
+            }else assertFalse(Files.exists(cache),"Ambiguous or empty classifications cannot seed reusable segments");
             for(JsonNode request:f.requests)assertEquals("json_object",request.path("response_format").path("type").asText());
         }
     }
@@ -63,6 +66,51 @@ class EnglishQwenRecordsHttpTest {
         try(Fixture f=new Fixture("valid",true);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
             assertThrows(RuntimeException.class,()->f.exporter.json(f.input,"authored:stale",()->{if(f.requests.stream().anyMatch(n->n.path("max_tokens").asInt()>1))throw new IllegalStateException("Authored current source changed");}));
             assertEquals(2,f.requests.size());assertFalse(Files.exists(files.resolve("english-file-output").resolve(EnglishFileOutput.POLICY)));
+        }
+    }
+
+    @Test void qwenWireRechecksOnlyInvalidSegmentsAndKeepsStrictNumericValidation()throws Exception{
+        try(Fixture f=new Fixture("first-changed-digits",true);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
+            JsonNode result=f.exporter.json(f.input,"authored:targeted",()->{});
+            assertEquals(4,f.requests.size());JsonNode second=JsonUtils.parse(f.requests.get(3).path("messages").get(1).path("content").asText());
+            assertEquals(2,second.size());assertEquals(Set.of("Bonjour, paiement dans 14 jours.","\u8bf7\u5728 14 \u5929\u5185\u4ed8\u6b3e\u3002"),Set.of(second.get(0).path("text").asText(),second.get(1).path("text").asText()));
+            assertEquals("English translation: Payment is due within 14 days.",result.path("notes").get(30).asText());
+            assertEquals("English translation: Payment is due within 14 days.",result.path("notes").get(31).asText());
+            assertEquals(1,f.requests.get(2).path("max_tokens").asInt());assertEquals(16384,f.requests.get(3).path("max_tokens").asInt());
+        }
+    }
+
+    @Test void invalidLanguageCodeDuringOneSegmentRecheckIsReclassifiedOnce()throws Exception{
+        try(Fixture f=new Fixture("recheck-invalid-once",false);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
+            JsonNode result=f.exporter.json(f.input,"authored:language-enum",()->{});
+            assertEquals(f.input,result);assertEquals(6,f.requests.size());
+            JsonNode repair=JsonUtils.parse(f.requests.get(5).path("messages").get(1).path("content").asText());
+            assertEquals(1,repair.size());assertEquals(f.input.path("notes").get(0).asText(),repair.get(0).path("text").asText());
+            assertTrue(f.requests.get(5).path("messages").get(0).path("content").asText().contains("sourceLanguage"));
+        }
+    }
+    @Test void invalidLanguageCodeWithinLargerRecheckResubmitsOnlyThatSegment()throws Exception{
+        try(Fixture f=new Fixture("recheck-two-invalid-once",false);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
+            JsonNode result=f.exporter.json(f.input,"authored:language-enum-two",()->{});
+            assertEquals(f.input,result);assertEquals(6,f.requests.size());
+            JsonNode firstRecheck=JsonUtils.parse(f.requests.get(3).path("messages").get(1).path("content").asText());
+            JsonNode repair=JsonUtils.parse(f.requests.get(5).path("messages").get(1).path("content").asText());
+            assertEquals(2,firstRecheck.size());assertEquals(1,repair.size());
+            assertEquals(f.input.path("notes").get(1).asText(),repair.get(0).path("text").asText());
+        }
+    }
+    @Test void repeatedlyInvalidLanguageCodeStillReturnsNoFile()throws Exception{
+        try(Fixture f=new Fixture("recheck-invalid-always",false);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
+            assertThrows(BizException.class,()->f.exporter.json(f.input,"authored:language-enum-fails",()->{}));
+            assertEquals(6,f.requests.size());assertEquals(32,f.input.path("notes").size());
+            try(java.util.stream.Stream<Path> entries=Files.list(files.resolve("english-file-output").resolve(EnglishFileOutput.POLICY))){assertEquals(31,entries.filter(p->p.getFileName().toString().startsWith("segment-")).count(),"Only validated peers are retained when the language recheck fails");}
+        }
+    }
+    @ParameterizedTest @ValueSource(strings={"recheck-two-duplicate","recheck-two-unknown","recheck-two-extra"})
+    void languageEnumRepairRejectsAnyOtherStructuralDamage(String mutation)throws Exception{
+        try(Fixture f=new Fixture(mutation,false);LlmProfiles.Scope ignored=f.profiles.bind(f.profiles.resolve("qwen"))){
+            assertThrows(BizException.class,()->f.exporter.json(f.input,"authored:invalid-other-structure",()->{}));
+            assertEquals(4,f.requests.size(),"Other schema or identity failures cannot trigger an extra repair");
         }
     }
 
@@ -85,12 +133,18 @@ class EnglishQwenRecordsHttpTest {
                     JsonNode supplied=JsonUtils.parse(request.path("messages").get(1).path("content").asText());ArrayNode rows=JsonUtils.mapper().createArrayNode();
                     for(int i=supplied.size()-1;i>=0;i--){JsonNode slot=supplied.get(i);String source=slot.path("text").asText();boolean french=source.startsWith("Bonjour"),chinese=source.startsWith("\u8bf7");
                         ObjectNode row=rows.addObject().put("id",slot.path("id").asText()).put("sourceLanguage",french?"fr":chinese?"zh":"en").put("translated",french||chinese?1:0).put("text",french||chinese?"Payment is due within 14 days.":"");
-                        if("changed-digits".equals(mutation)&&(french||chinese))row.put("text","Payment is due within 21 days.");
+                        if(mutation.startsWith("recheck-")&&requests.size()==2&&(source.contains("clause 0 ")||mutation.startsWith("recheck-two-")&&source.contains("clause 1 ")))row.put("sourceLanguage","und");
+                        if(mutation.startsWith("recheck-")&&(requests.size()==4||mutation.equals("recheck-invalid-always")&&requests.size()==6)
+                                &&(mutation.startsWith("recheck-two-")?source.contains("clause 1 "):true))row.put("sourceLanguage","zzz");
+                        if(("changed-digits".equals(mutation)||"first-changed-digits".equals(mutation)&&requests.size()==2)&&(french||chinese))row.put("text","Payment is due within 21 days.");
                         if("foreign-untranslated".equals(mutation)&&french)row.put("translated",0).put("text","");
                     }
                     if("empty-records".equals(mutation))rows.removeAll();
                     if("missing-id".equals(mutation))((ObjectNode)rows.get(0)).put("id","T99");
                     if("duplicate-id".equals(mutation))((ObjectNode)rows.get(0)).put("id",rows.get(1).path("id").asText());
+                    if("recheck-two-duplicate".equals(mutation)&&requests.size()==4)((ObjectNode)rows.get(1)).put("id",rows.get(0).path("id").asText());
+                    if("recheck-two-unknown".equals(mutation)&&requests.size()==4)((ObjectNode)rows.get(1)).put("id","T99");
+                    if("recheck-two-extra".equals(mutation)&&requests.size()==4)((ObjectNode)rows.get(1)).put("extra","AUTHORED");
                     content="empty-array".equals(mutation)?"[]":JsonUtils.write(JsonUtils.mapper().createObjectNode().set("records",rows));
                 }
                 ObjectNode body=JsonUtils.mapper().createObjectNode().put("object","chat.completion").put("id","authored-http").put("model","qwen3.8-27b");

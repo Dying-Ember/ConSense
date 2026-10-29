@@ -7,6 +7,7 @@ import AppModal from './AppModal.vue'
 const FixedEvidencePanel = defineAsyncComponent(() => import('./FixedBaselineEvidencePanel.vue'))
 
 const props = withDefaults(defineProps<{ projectId: string; locale?: string; module?: 'vetting' | 'advisory' }>(), { locale: 'zh-Hans', module: 'vetting' })
+const emit = defineEmits<{ scopeChange: [scope: { projectId: string; key: string } | null] }>()
 const status = ref<FixedReferenceSelectionStatus | null>(null), library = ref<SlLibraryStatus | null>(null)
 const configured = ref(false), loading = ref(false), saving = ref(false), building = ref(false), open = ref(false)
 const error = ref(''), libraryError = ref(''), buildError = ref(''), selected = ref<string[]>([])
@@ -136,6 +137,13 @@ async function save() {
 }
 function clearSearch() { ++searchSequence; hits.value = []; selectedHit.value = null; searched.value = false; searching.value = false; searchError.value = ''; resultScope.value = '' }
 watch(scopeKey, clearSearch)
+watch(() => [scopeKey.value, loading.value, saving.value, configured.value, error.value], () => {
+  if (loading.value || saving.value) return
+  emit('scopeChange', !error.value && (status.value || !configured.value) ? {
+    projectId: props.projectId,
+    key: JSON.stringify([status.value?.manifestSha256, saved.value.map(source => [source.editionId, source.sha256]).sort()])
+  } : null)
+}, { immediate: true })
 watch(query, clearSearch)
 function evidencePointer(hit: FixedBaselineEvidence): FixedBaselineEvidenceAddress {
   const payload = hit?.payload, sha = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)

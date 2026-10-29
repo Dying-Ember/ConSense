@@ -282,6 +282,24 @@ class OerSemanticBusinessEvidenceTest {
         assertTrue(fixed.isLocated());assertNull(fixed.getCanonicalEvidence());assertEquals("authored-fixed-library",fixed.getFixedBaselineEvidence().path("authority").asText());
         assertTrue(quote.isLocated());assertEquals("unknown",quote.getCanonicalEvidence().getOriginalGeometryStatus());assertNull(quote.getBbox());verify(f.evidence).selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"));
     }
+    @Test void schemaDecodedNineCharacterQuoteRetainsOnlyItsCurrentCanonicalSourceBinding()throws Exception {
+        Fixture f=new Fixture(2);VettingCorpus.Chunk chunk=f.service.scan(f.session).get(0);String literal="obligatio";assertEquals(9,literal.length());
+        ObjectNode envelope=(ObjectNode)JsonUtils.parse(unknownRecord(chunk,"The quoted source is available; its application remains unknown."));
+        ((ObjectNode)envelope.path("records").get(0).path("evidence").get(0)).put("quote",literal);
+        VettingSemanticReview.Record decoded=com.consense.ai.AiGateway.decodeStructuredJson(JsonUtils.write(envelope),VettingSemanticReview.Record.class,
+                VettingOutputSchema.forChunkIds(Collections.singleton("R1")),true).get(0);
+        com.consense.web.dto.VettingDtos.FindingEvidence quote=VettingCorpus.evidence(chunk,decoded.getEvidence().get(0).getSide(),decoded.getEvidence().get(0).getQuote());
+        assertTrue(quote.isLocated());EvidencePointer original=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),EvidencePointer.class);
+        when(f.evidence.selectedPointers(eq("authored"),eq(42L),anyString(),eq(Collections.singletonList("source-unit-0")),eq("vetting"))).thenReturn(Collections.singletonMap("source-unit-0",original));
+        f.service.bindReviewEvidence(f.session,Collections.singletonList(quote));assertTrue(quote.isLocated());assertNotNull(quote.getCanonicalEvidence());
+        assertEquals(literal,quote.getQuote());assertEquals(original.getCanonicalChunkId(),quote.getCanonicalEvidence().getCanonicalChunkId());
+        assertEquals(original.getJavaParsedSourceHash(),quote.getSourceHash());assertEquals(original.getOriginalSourceSha256(),quote.getOriginalSourceSha256());
+        for(String unsupported:Arrays.asList("invented."," \u00a0\u2003")) {
+            com.consense.web.dto.VettingDtos.FindingEvidence rejected=VettingCorpus.evidence(chunk,"source",unsupported);
+            f.service.bindReviewEvidence(f.session,Collections.singletonList(rejected));assertFalse(rejected.isLocated());assertNull(rejected.getCanonicalEvidence());
+        }
+    }
+
     @Test void severalQuotesFromOneSourceReadOnlyTheirSelectedOriginalUnitsTogether()throws Exception {
         Fixture f=new Fixture(2);List<VettingCorpus.Chunk> chunks=f.service.scan(f.session);
         com.consense.web.dto.VettingDtos.FindingEvidence first=VettingCorpus.evidence(chunks.get(0),"tender",chunks.get(0).getContent());

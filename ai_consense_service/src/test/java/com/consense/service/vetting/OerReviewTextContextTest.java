@@ -12,6 +12,89 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored source-bound text fixtures; no source reads, retrieval models or LLM calls. */
 class OerReviewTextContextTest {
+    @Test void explicitlyRequestedLegalParentAndChildBothKeepTheirOriginalBodies() {
+        VettingCorpus.Chunk seed=chunk("canonical:"+sha("ranked-seed"),0,"GCC1.0 Other source clause",null,null);
+        VettingCorpus.Chunk parent=chunk("canonical:"+sha("parent"),10,"GCC1.1 Definitions",null,null);
+        VettingCorpus.Chunk parentBody=chunk("canonical:"+sha("parent-body"),11,"The authored parent definition and its qualification must be preserved.",null,null);
+        VettingCorpus.Chunk child=chunk("canonical:"+sha("child"),20,"GCC1.1.2 Additional definitions",null,null);
+        VettingCorpus.Chunk childBody=chunk("canonical:"+sha("child-body"),21,"The authored child provision applies with its own stated condition.",null,null);
+        VettingCorpus.Chunk next=chunk("canonical:"+sha("next"),30,"GCC1.2 Other provisions",null,null);
+        List<VettingCorpus.Chunk> selected=select(Arrays.asList(seed,parent,parentBody,child,childBody,next),Collections.singletonList(seed),unknown(seed),"Read GCC1.1 and GCC1.1.2 together.",10000);
+        assertTrue(ids(selected).containsAll(Arrays.asList(parent.getId(),parentBody.getId(),child.getId(),childBody.getId())),"A named legal parent is not an expendable worksection label");
+        assertEquals(JsonUtils.write(parentBody),JsonUtils.write(find(selected,parentBody.getId())));
+        assertEquals(JsonUtils.write(childBody),JsonUtils.write(find(selected,childBody.getId())));
+        assertFalse(ids(selected).contains(next.getId()));
+    }
+
+    @Test void explicitAppendixBeyondSixtyFourMembersFitsTheRequestedEvidenceBudget() {
+        List<VettingCorpus.Chunk> corpus=new ArrayList<>();
+        VettingCorpus.Chunk ranked=chunk("earlier",862,"PRE.B3.060.P EXISTING SERVICES",null,null);corpus.add(ranked);
+        for(int i=1;i<64;i++)corpus.add(chunk("earlier-"+i,862+i,sized(i+". Authored earlier service condition: ",220),null,null));
+        corpus.add(chunk("earlier-next",930,"PRE.B3.070.P NEXT SERVICE CLAUSE",null,null));
+        corpus.add(chunk("section",2957,"PRE.B8 CONTRACTOR'S OBLIGATIONS",null,null));
+        corpus.add(chunk("section-label",2958,"USE OF SITE",null,null));
+        for(String id:Arrays.asList("2710","2740","4030")){
+            int order=4000+Integer.parseInt(id);corpus.add(chunk("heading-"+id,order,"PRE.B8."+id+".P Authored specific work requirement",null,null));
+            corpus.add(chunk("body-"+id,order+1,"1. Retain the stated project condition.",null,null));
+        }
+        corpus.add(chunk("appendix12",8500,"PRE.B8.APPEND12.P Guidelines on Scope and Contents of Quality control system",null,null));
+        for(int i=1;i<=80;i++)corpus.add(chunk("appendix12-"+i,8500+i,sized(i+". Authored quality-control procedure: ",120),null,null));
+        VettingCorpus.Chunk heading=chunk("storage-heading",8581,"3.3. Storage",null,null);
+        VettingCorpus.Chunk storage=chunk("storage-body",8582,"a. Material storage location plan should be submitted to the CM for comment within three months from the notified commencement date. Retain the stated updating duties.",null,null);
+        corpus.add(heading);corpus.add(storage);corpus.add(chunk("appendix13",8600,"PRE.B8.APPEND13.P NEXT APPENDIX",null,null));
+        String query="PRE.B8; 4. PRE.B8.2710 to PRE.B8.2740; 5. PRE.B8.4030 sub-clause 2(c)(ii); 6. PRE.B8.APPEND12; Highways Department versus other maintained areas, excavation permit requirements PRE.B3.060(7) PRE.B6.810(2)(3); Government Entrusted Works and drawing reference; material storage location plan submission time";
+        assertEquals("b91fc89e29748291f6cd8f5e08c6fd6c675a3bf755094e293b444103a0ad93e6",sha(query));
+        List<VettingCorpus.Chunk> selected=select(corpus,Collections.singletonList(ranked),unknown(ranked),query,20000);
+        assertTrue(ids(selected).containsAll(Arrays.asList("appendix12","storage-heading","storage-body")),"The fourth specific requested window must reach the appendix's later Storage subsection within the existing expanded budget");
+        assertFalse(ids(selected).contains("appendix13"));assertTrue(selected.stream().mapToInt(c->c.getContent().length()).sum()<=20000);
+        assertEquals(JsonUtils.write(storage),JsonUtils.write(find(selected,"storage-body")));
+    }
+    @Test void explicitRequiredBodiesSurviveInterleaveAndTheFinalCounterpartBudget() throws Exception {
+        List<VettingCorpus.Chunk> rows=new ArrayList<>();Set<String> ranked=new LinkedHashSet<>();
+        for(int i=0;i<9;i++){VettingCorpus.Chunk noise=chunk("ranked-"+i,"41","tender","current",i,sized("Authored unrelated ranked source "+i+": ",1000),null,null);rows.add(noise);ranked.add(noise.getId());}
+        VettingCorpus.Chunk heading=chunk("required-heading",2308,"PRE.B6.810.P EXCAVATION PERMIT FOR WORKS",null,null);
+        VettingCorpus.Chunk body=chunk("required-body",2309,sized("1. Preserve the authored affected source duty: ",1247),null,null);rows.add(heading);rows.add(body);
+        List<VettingCorpus.Chunk> queryResult=new OerBusinessEvidence.ReviewTextChunks(rows,ranked);
+        java.lang.reflect.Method interleave=VettingSemanticReview.class.getDeclaredMethod("interleaveDirectionHits",List.class);interleave.setAccessible(true);
+        @SuppressWarnings("unchecked") List<VettingCorpus.Chunk> project=(List<VettingCorpus.Chunk>)interleave.invoke(null,Collections.singletonList(queryResult));
+        List<VettingCorpus.Chunk> required=new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(heading,body),Collections.emptySet());
+        VettingCorpus.Chunk counterpart=chunk("counterpart","42","standard","current",1,sized("Authored comparison candidate: ",3000),null,null);
+        List<VettingCorpus.Chunk> selected=VettingSemanticReview.directionSelection(VettingSemanticReview.directionEvidenceOrder(project,Collections.singletonList(counterpart),Collections.singletonList(counterpart),required,10000),Collections.emptyList(),10000).getChunks();
+        assertTrue(ids(selected).containsAll(ids(required)),"Explicit requested original bodies must remain ahead of bulk seeds and counterpart context at the final caller budget");
+        assertTrue(ids(selected).contains("ranked-0"));assertTrue(selected.stream().mapToInt(c->c.getContent().length()).sum()<=10000);
+        assertEquals(JsonUtils.write(body),JsonUtils.write(find(selected,"required-body")));
+    }
+
+    @Test void firstExplicitClauseBeatsAnEarlierCompetingDeclaredClauseBody() {
+        assertExplicitClauseBeforeCorpusOrder(true);
+    }
+    @Test void firstExplicitClauseBeatsAnEarlierCompetingUnownedClauseBody() {
+        assertExplicitClauseBeforeCorpusOrder(false);
+    }
+    private static void assertExplicitClauseBeforeCorpusOrder(boolean declared) {
+        List<VettingCorpus.Chunk> corpus=new ArrayList<>(),target=new ArrayList<>();
+        corpus.add(chunk("section",1138,"PRE.B6 INFORMATION REQUIRED BY CONDITIONS OF CONTRACT",null,null));
+        corpus.add(chunk("section-label",1139,"GENERAL CONDITIONS OF CONTRACT",null,null));
+        String design=declared?"PRE.B6.085.P":null,designOwner=declared?"heading:design":null;
+        VettingCorpus.Chunk ranked=chunk("design-heading",1850,"PRE.B6.085.P GCC 5.15 - DESIGN RESPONSIBILITY (BUILDING)",design,designOwner);corpus.add(ranked);
+        for(int i=1;i<64;i++)corpus.add(chunk("design-"+i,1850+i,sized(i+". Authored competing design requirement: ",220),design,designOwner));
+        corpus.add(chunk("design-next",1914,"PRE.B6.090.P NEXT DESIGN CLAUSE",null,null));
+        String permit=declared?"PRE.B6.810.P":null,permitOwner=declared?"heading:permit":null;
+        String[] body={"PRE.B6.810.P SCC22.303 - EXCAVATION PERMIT FOR WORKS","1. The following authored portions require the specified permit arrangements:","a. On-Site approach works.","b. Areas outside the Site boundary for associated road works.","c. Areas outside the Site boundary for perimeter works.","d. Areas outside the Site boundary for utility connections.","e. Areas outside the Site boundary for monitoring stations.","f. Areas outside the Site boundary for utility diversions.","g. Areas outside the Site boundary for public landscaping."};
+        int[] lengths={52,267,181,142,213,142,74,87,83};
+        for(int i=0;i<body.length;i++)target.add(chunk("permit-"+i,2308+i,sized(body[i],lengths[i]),permit,permitOwner));
+        corpus.addAll(target);corpus.add(chunk("permit-next",2320,"PRE.B6.820.P NEXT PERMIT CLAUSE",null,null));
+        corpus.add(chunk("appendix",2732,"PRE.B6.APPEND5.P CONTRACTOR DESIGN ITEMS",null,null));
+        corpus.add(chunk("appendix-body",2733,"UNDER PRE.B6.085(1)(d)",null,null));
+        String query="PRE.B6; 10. PRE.B6.810 sub-clause 1; 11. PRE.B6.APPEND5; Site portions SCC22.3(11), outside Site excavation permits; contractor design items PRE.B6.085(1)(e)(f), design intent and drawing number references Appendix B";
+        assertEquals("9e16e5bd1275fd7c57117bb8d90205113a811111726747c39f880e809e025893",sha(query));
+        List<VettingCorpus.Chunk> selected=select(corpus,Collections.singletonList(ranked),unknown(ranked),query,10000);
+        assertTrue(ids(selected).containsAll(ids(target)),"The first explicit clause body must survive when another requested clause occurs earlier in the source");
+        assertTrue(selected.stream().mapToInt(c->c.getContent().length()).sum()<=10000);
+        assertFalse(ids(selected).contains("permit-next"));
+        for(VettingCorpus.Chunk original:target)assertEquals(JsonUtils.write(original),JsonUtils.write(find(selected,original.getId())));
+    }
+
     @Test void namedAppendixProjectVariantRetainsItsUnownedStorageParagraph() {
         assertAppendixStorage(false);
     }

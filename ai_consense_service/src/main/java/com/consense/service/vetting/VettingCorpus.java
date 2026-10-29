@@ -420,7 +420,7 @@ public final class VettingCorpus {
     }
     public static FindingEvidence evidence(Chunk c, String side, String quote) {
         String normalizedQuote = normalize(quote);
-        boolean located = normalizedQuote.length() >= 12 && normalize(c.getContent()).contains(normalizedQuote);
+        boolean located = !normalizedQuote.isEmpty() && normalize(c.getContent()).contains(normalizedQuote);
         String anchor = c.getAnchor(), page = c.getPageNo(); List<Double> bbox = c.getBbox();
         Part occurrence=null;
         if (located && c.getParts() != null) {

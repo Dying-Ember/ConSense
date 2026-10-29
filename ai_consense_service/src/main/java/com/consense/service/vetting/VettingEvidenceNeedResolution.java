@@ -96,7 +96,8 @@ final class VettingEvidenceNeedResolution {
             if(!items.containsAll(strings(next.path("checklistItemIds")))||!resolved(child,next,packets,policy,path,depth+1))return false;
             List<JsonNode> finals=new ArrayList<>();for(JsonNode candidate:packets)if(child.path("packetId").asText().equals(candidate.path("parentPacketId").asText())&&next.path("needId").asText().equals(candidate.path("requestedEvidenceNeedId").asText()))finals.add(candidate);
             if(finals.size()!=1)return false;JsonNode terminal=finals.get(0);
-            if(!strings(terminal.path("submittedChunkIds")).containsAll(strings(child.path("submittedChunkIds")))||!retainsQuotedAuthority(child,terminal,affected,indexes(next.path("verifiedAssessmentIndexes"))))return false;
+            // Uncited background may be deferred; all earlier quoted authority must still be retained.
+            if(!retainsQuotedAuthority(child,terminal,affected,indexes(next.path("verifiedAssessmentIndexes"))))return false;
             continuations.add(terminal);
         }
         List<JsonNode> outcomes=continuations.isEmpty()?Collections.singletonList(child):continuations;

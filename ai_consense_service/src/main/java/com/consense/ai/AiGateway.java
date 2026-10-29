@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -198,6 +199,10 @@ public class AiGateway {
         StructuredJsonValidator.Schema validated=StructuredJsonValidator.compile(schema);
         return recordsObject?StructuredJsonValidator.decodeRecords(raw,elementType,validated)
                 :StructuredJsonValidator.decode(raw,elementType,validated);
+    }
+
+    public static <T> List<T> decodeValidStructuredRecords(String raw,Class<T> elementType,JsonNode schema,boolean recordsObject,List<Integer> rejectedOrdinals,Collection<String> allowedItems,List<String> unverifiedItems) {
+        return StructuredJsonValidator.decodeValidRecords(raw,elementType,StructuredJsonValidator.compile(schema),recordsObject,rejectedOrdinals,allowedItems,unverifiedItems);
     }
 
     private <T> List<T> completeStructuredJsonList(String systemPrompt, String userPrompt,

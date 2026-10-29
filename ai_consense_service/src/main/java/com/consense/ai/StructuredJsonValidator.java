@@ -54,6 +54,35 @@ final class StructuredJsonValidator {
         return decodeArray(root.get("records"),elementType,schema);
     }
 
+    static <T> List<T> decodeValidRecords(String raw, Class<T> elementType, Schema schema, boolean recordsObject, List<Integer> rejectedOrdinals, Collection<String> allowedItems, List<String> unverifiedItems) {
+        JsonNode root = strictJson(raw);
+        if (recordsObject) {
+            if (!root.isObject() || root.size()!=1 || !root.has("records")) throw mismatch("$","records_wrapper",null,root);
+            root=root.get("records");
+        }
+        if (root==null || !root.isArray()) throw mismatch("$","root_array",schema,root);
+        checkBounds(root.size(),schema,"$",root,"minItems","maxItems");
+        if (schema.items==null) throw failure(INVALID_SCHEMA);
+        List<T> accepted=new ArrayList<>(); List<Integer> rejected=new ArrayList<>(); Set<String> affected=new LinkedHashSet<>(),allowed=new HashSet<>(allowedItems); int ordinal=0;
+        for (JsonNode item:root) {
+            try {
+                if (item==null || item.isNull() || item.isArray()) throw mismatch("$["+ordinal+"]","flat_array_item",schema.items,item);
+                if (schema.items!=null) validate(item,schema.items,"$["+ordinal+"]");
+                accepted.add(STRICT_MAPPER.convertValue(item,elementType));
+            } catch (StructuredOutputValidationException | IllegalArgumentException invalid) {
+                rejected.add(ordinal);
+                JsonNode assessments=item==null?null:item.get("checklistAssessments");
+                if(item!=null&&item.isObject()&&assessments!=null&&assessments.isArray())for(JsonNode assessment:assessments) {
+                    JsonNode id=assessment.isObject()?assessment.get("itemId"):null;
+                    if(id!=null&&id.isTextual()&&allowed.contains(id.textValue()))affected.add(id.textValue());
+                }
+            }
+            ordinal++;
+        }
+        if (accepted.isEmpty() || rejected.isEmpty()) throw failure(SCHEMA_MISMATCH);
+        rejectedOrdinals.addAll(rejected);unverifiedItems.addAll(affected);return accepted;
+    }
+
     private static JsonNode strictJson(String raw) {
         if (raw == null || raw.trim().isEmpty()) throw jsonFailure(raw);
         try { return STRICT_MAPPER.readTree(raw); }

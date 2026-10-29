@@ -116,7 +116,7 @@ final class VettingSourceAttribution {
         return recovered;
     }
 
-    private static boolean exactUnique(String text,String quote){return text!=null&&quote!=null&&quote.length()>=12&&text.indexOf(quote)>=0&&text.indexOf(quote)==text.lastIndexOf(quote);}
+    private static boolean exactUnique(String text,String quote){return text!=null&&quote!=null&&!VettingCorpus.normalize(quote).isEmpty()&&text.indexOf(quote)>=0&&text.indexOf(quote)==text.lastIndexOf(quote);}
 
     private static boolean owned(String value,String namespace,String number) {
         Matcher m=OWNER.matcher(value);if(!m.matches())return namespace==null&&value.equals(number);

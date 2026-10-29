@@ -88,16 +88,16 @@ class StructuredJsonSourceReferenceSchemaTest {
         if (objectSupport) {
             ObjectNode support = check.putObject("support"); support.put("kind", "sl_clause_selection");
             ArrayNode facts = support.putArray("facts");
-            facts.add(fact("selected_specification_clause", 0, 0, 0, 12));
-            facts.add(fact("sl_guidance_criterion", 3, 4095, 2399, 2400));
-            facts.add(fact("project_contract_type_or_selection_fact", 0, 0, 0, 1));
+            facts.add(fact("selected_specification_clause", 0, "Synthetic selected specification clause"));
+            facts.add(fact("sl_guidance_criterion", 15, "Synthetic SL guidance criterion"));
+            facts.add(fact("project_contract_type_or_selection_fact", 0, "Synthetic project contract selection fact"));
         }
         return row;
     }
 
-    private static ObjectNode fact(String slot, int evidence, int position, int start, int end) {
+    private static ObjectNode fact(String slot, int evidence, String text) {
         ObjectNode fact = JsonUtils.mapper().createObjectNode();
-        fact.put("slot", slot).put("evidenceIndex", evidence).put("nativePositionIndex", position).put("startUtf16", start).put("endUtf16", end);
+        fact.put("slot", slot).put("evidenceIndex", evidence).put("text", text);
         return fact;
     }
 
@@ -117,24 +117,25 @@ class StructuredJsonSourceReferenceSchemaTest {
         verify(provider, times(1)).chatStructured(anyList(), any());
     }
 
-    @Test void productionSchemaMapsStrictTypedReferenceBoundariesWithoutSourceCertification() {
+    @Test void productionSchemaMapsStrictTypedTextReferencesWithoutSourceCertification() {
         ObjectNode row = productionRow(true);
         List<VettingSemanticReview.Record> decoded = new AiGateway(provider(rows(row)))
                 .completeStructuredJsonList("system", "source", VettingSemanticReview.Record.class, actualSchema());
         VettingSemanticReview.ChecklistSupport support = decoded.get(0).getChecklistAssessments().get(0).getSupport();
         assertEquals("sl_clause_selection", support.getKind()); assertEquals(3, support.getFacts().size());
-        assertEquals(Integer.valueOf(0), support.getFacts().get(0).getStartUtf16());
-        assertEquals(Integer.valueOf(3), support.getFacts().get(1).getEvidenceIndex());
-        assertEquals(Integer.valueOf(4095), support.getFacts().get(1).getNativePositionIndex());
-        assertEquals(Integer.valueOf(2399), support.getFacts().get(1).getStartUtf16());
-        assertEquals(Integer.valueOf(2400), support.getFacts().get(1).getEndUtf16());
-        assertEquals(Integer.valueOf(1), support.getFacts().get(2).getEndUtf16());
+        assertEquals("Synthetic selected specification clause", support.getFacts().get(0).getText());
+        assertEquals(Integer.valueOf(15), support.getFacts().get(1).getEvidenceIndex());
+        assertEquals("Synthetic SL guidance criterion", support.getFacts().get(1).getText());
+        assertEquals("Synthetic project contract selection fact", support.getFacts().get(2).getText());
+        for(VettingSemanticReview.ChecklistFactRef fact:support.getFacts()) {
+            assertNull(fact.getNativePositionIndex());assertNull(fact.getStartUtf16());assertNull(fact.getEndUtf16());
+        }
         assertEquals(row, decode(rows(row), actualSchema()).get(0));
     }
 
-    @Test void productionSchemaRejectsMalformedOrMissingNumericReferencesAtomically() {
+    @Test void productionSchemaRejectsMalformedIndexesLegacyNumericFieldsAndMissingTextAtomically() {
         Map<String, String[]> invalid = new LinkedHashMap<>();
-        invalid.put("evidenceIndex", new String[]{"-1", "4", "2147483648", "0.0", "0e0", "\"0\"", "true", "null"});
+        invalid.put("evidenceIndex", new String[]{"-1", "16", "2147483648", "0.0", "0e0", "\"0\"", "true", "null"});
         invalid.put("nativePositionIndex", new String[]{"-1", "4096", "2147483648", "0.0", "\"0\"", "null"});
         invalid.put("startUtf16", new String[]{"-1", "2401", "2147483648", "0.0", "\"0\"", "null"});
         invalid.put("endUtf16", new String[]{"0", "2401", "2147483648", "1.0", "\"1\"", "null"});
@@ -143,8 +144,14 @@ class StructuredJsonSourceReferenceSchemaTest {
                 ObjectNode bad = productionRow(true); firstFact(bad).set(field.getKey(), JsonUtils.parse(value));
                 rejected(rows(productionRow(false), bad), actualSchema(), SCHEMA_MISMATCH);
             }
-            ObjectNode bad = productionRow(true); firstFact(bad).remove(field.getKey());
-            rejected(rows(productionRow(false), bad), actualSchema(), SCHEMA_MISMATCH);
+            if("evidenceIndex".equals(field.getKey())) {
+                ObjectNode bad = productionRow(true); firstFact(bad).remove(field.getKey());
+                rejected(rows(productionRow(false), bad), actualSchema(), SCHEMA_MISMATCH);
+            }
+        }
+        ObjectNode missing=productionRow(true);firstFact(missing).remove("text");rejected(rows(missing),actualSchema(),SCHEMA_MISMATCH);
+        for(String value:Arrays.asList("\"\"","null","1","true")) {
+            ObjectNode bad=productionRow(true);firstFact(bad).set("text",JsonUtils.parse(value));rejected(rows(bad),actualSchema(),SCHEMA_MISMATCH);
         }
     }
 
