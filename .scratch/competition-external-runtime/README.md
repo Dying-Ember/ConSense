@@ -1,6 +1,6 @@
 # 比赛部署与业务文件外置：本地票据
 
-**状态：**14 张票已落地，均未实施、未验收；`ready-for-agent` 是可领取分类，只有阻塞票全部完成后才进入可执行前沿。
+**状态：**14 张票已落地；01 进行中，已有部分真实 Docker 环境检查但未关闭，02–14 按依赖等待，所有票均未完成验收。`ready-for-agent` 是可领取分类，只有阻塞票全部完成后才进入可执行前沿。
 
 **范围依据：**[实施说明](../../ai_consense_service/docs/specs/competition-container-external-runtime-20261029.md)，完整冻结提交为 `8a40dfcca04730ba7b40cdefb36b596a37bbcb53`。用户要求本机按比赛约束完成真实容器全栈试运行，不能将必需运行链留到赛场再排查。当前跟踪方式见[本次跟踪器](../../docs/agents/issue-tracker.md)。
 
