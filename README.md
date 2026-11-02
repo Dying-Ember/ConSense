@@ -18,7 +18,7 @@ Before working on competition source scope, OCR, embedding, rerank or their depl
 | `SOURCE-INTEGRATION.json` | Oct 9 integration sources, current checks and unresolved acceptance |
 | `docs/PRIVATE-REPOSITORY-SYNC.md` | Code synchronization procedure and source boundaries |
 
-The source snapshot has a separate Git history. The competition-assets directory contains the verified five frozen image archives and four default templates; its PDF graph files are historical candidates, not an approved graph. Other model weights, runtime dependencies and the pure SL database are inventoried separately and are not yet confirmed present in this branch. Credentials, live project databases and private correspondence are excluded. Authored synthetic fixtures remain test-only. Existing observations do not replace runtime or business acceptance of a fresh deployment.
+The source snapshot has a separate Git history. The competition-assets directory contains the verified five frozen image archives and four default templates; its PDF graph files are historical candidates, not an approved graph. The retrained MinerU R153 adapter is stored with Git LFS; the other model weights, runtime dependencies and pure SL database are inventoried separately and are not yet confirmed present in this branch. Credentials, live project databases and private correspondence are excluded. Authored synthetic fixtures remain test-only. Existing observations do not replace runtime or business acceptance of a fresh deployment.
 
 ## Start locally
 
