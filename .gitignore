@@ -53,3 +53,8 @@ Thumbs.db
 # Generated local progress evidence is archived separately from source.
 /outputs/oer-progress/index.html
 /outputs/oer-progress/progress-ledger.json
+
+# Locally reconstructed competition models; the verified LFS parts are versioned.
+/competition-assets/models/embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin
+/competition-assets/models/reranker/5472fbe9a055019957d811a8e28c2a76abd0043d0c8b8c06e997fe8cba8b5603/snapshot/model.safetensors
+/competition-assets/models/mineru-base/model.safetensors

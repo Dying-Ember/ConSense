@@ -22,13 +22,13 @@ ai_consense_service/src/test/resources/oer/native-pdf-table-condition/** -text
 ai_consense_service/src/test/resources/oer/canonical/shared-note-current-scope-negative.json -text
 
 # Competition model weights and large SL datasets (Git LFS).
-/competition-assets/models/embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin filter=lfs diff=lfs merge=lfs -text
-/competition-assets/models/mineru-base/model.safetensors filter=lfs diff=lfs merge=lfs -text
+/competition-assets/models/embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin.part-* filter=lfs diff=lfs merge=lfs -text
+/competition-assets/models/mineru-base/model.safetensors.part-* filter=lfs diff=lfs merge=lfs -text
 /competition-assets/models/mineru-onnx/Layout/PP-DocLayoutV2/inference.onnx filter=lfs diff=lfs merge=lfs -text
 /competition-assets/models/mineru-onnx/MFR/pp_formulanet_plus_m/PP-FormulaNet_plus-M.onnx filter=lfs diff=lfs merge=lfs -text
 /competition-assets/models/paddle-layout/inference.pdiparams filter=lfs diff=lfs merge=lfs -text
 /competition-assets/models/paddle-r76/model.safetensors filter=lfs diff=lfs merge=lfs -text
-/competition-assets/models/reranker/5472fbe9a055019957d811a8e28c2a76abd0043d0c8b8c06e997fe8cba8b5603/snapshot/model.safetensors filter=lfs diff=lfs merge=lfs -text
+/competition-assets/models/reranker/5472fbe9a055019957d811a8e28c2a76abd0043d0c8b8c06e997fe8cba8b5603/snapshot/model.safetensors.part-* filter=lfs diff=lfs merge=lfs -text
 /competition-assets/sl/competition/collection.snapshot filter=lfs diff=lfs merge=lfs -text
 /competition-assets/sl/competition/corpus.jsonl filter=lfs diff=lfs merge=lfs -text
 /competition-assets/sl/competition/metadata.json filter=lfs diff=lfs merge=lfs -text

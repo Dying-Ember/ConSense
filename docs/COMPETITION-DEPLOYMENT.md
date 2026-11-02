@@ -70,6 +70,18 @@ printf '%s\n' "$DEPLOY_ROOT"
 
 具体的本机来源、容器内目标和候选缺项见本地 `.local/container-rehearsal-20261029/ticket10-delivery-next-20261102-a1/MOUNT-MAPPING.md`、`README.md`；这些文件仅定位候选，不证明它们已进入仓库或交付包。固有的绝对路径（包括 SL catalog、索引和来源引用）需要按目标布局重写并验证，不等于复制目录后自动可用。保留文件模式、软链接与许可证；运行状态、凭据和历史项目数据不应混入预置资产。七版 SL 的纯数据可供不同项目选择，每个项目只选一版；项目资料及向量分别按项目和来源版本隔离。
 
+### Git LFS 权重下载与还原
+
+仓库中使用 Git LFS 保存大模型、SL 快照及大型索引数据。目标 Linux 安装 Git LFS 后，在仓库根目录运行以下命令。超过 GitHub 单文件上限的模型按顺序分片保存；还原程序校验每片和整份原始模型的 SHA-256，再写入约定的模型路径。目标目录若已有内容不同的模型，程序会停止而不会覆盖。请预留足够空间同时容纳分片和还原后的文件。
+
+```sh
+git lfs install
+git lfs pull
+python3 scripts/restore-competition-models.py
+```
+
+`competition-assets/models/split-models.json` 记录分片顺序、大小及 SHA-256；按原相对路径恢复后，还需将模型目录按第 2 节挂入 GPU。SL 来源清单包含与原哈希绑定的历史路径，须按目标挂载重新绑定并验证，不能直接修改后继续沿用旧哈希。LFS 指针、成功下载和文件校验均不等于目标机器已启动或业务验收通过。
+
 ## 3. 网络、端口和 Qwen
 
 本机五角色使用 host 网络/回环与共享 Unix socket，历史预演端口如下，部署时先核对实际配置和占用：
