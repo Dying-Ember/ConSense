@@ -11,7 +11,9 @@
 五个 tar 分别交付，其他资产逐文件交付，每个文件不得超过 50 GB。目标 Docker 离线导入前在交付目录核验发布者提供的 `SHA256SUMS`；再逐个导入，核对输出及镜像身份后再打标签。切勿因为 tar 小就认为全部程序或模型已包含在镜像中。现有 tar 及哈希在本机候选目录 `.local/container-rehearsal-20261029/ticket10-five-images-delivery-20261101-a1/`，尚未做独立目标导入实测。
 
 ```sh
-cd "$DEPLOY_ROOT/images"
+# 在克隆的仓库根目录执行；如果发布资产被单独移动，请调整此路径。
+REPO_ROOT="$(pwd -P)"
+cd "$REPO_ROOT/competition-assets/images"
 sha256sum -c SHA256SUMS
 for role in app h2 qdrant source gpu; do docker load -i "$role.tar"; done
 ```
@@ -29,6 +31,8 @@ for role in app h2 qdrant source gpu; do docker load -i "$role.tar"; done
 如确需重新从**指定 Docker daemon 的现有镜像**导出 tar，可以在导出机执行下列示意命令；替换 `DOCKER_HOST` 与角色身份，必须先核对 daemon 和镜像身份，不能对运行容器执行 `docker commit` 或修改镜像：
 
 ```sh
+# 在导出机上设置一个可写的独立交付目录，按实际情况更换路径。
+DEPLOY_ROOT="/path/to/consense-delivery"
 mkdir -p "$DEPLOY_ROOT/images"
 DOCKER_HOST=unix:///run/consense-docker/docker.sock docker image inspect sha256:7ef8a66d1ea612a044b60a4e89e16257b5dbefb349e0f55122e211ce23412395
 DOCKER_HOST=unix:///run/consense-docker/docker.sock docker image save -o "$DEPLOY_ROOT/images/app.tar" sha256:7ef8a66d1ea612a044b60a4e89e16257b5dbefb349e0f55122e211ce23412395
@@ -72,16 +76,61 @@ printf '%s\n' "$DEPLOY_ROOT"
 
 | 用途 | 本机 WSL 端口 / 通道 | 访问 |
 | --- | --- | --- |
-| App | TCP `28680` | 外部入口；本机浏览器曾使用 Windows 转发地址的 `28685`，它不是容器端口映射规则。目标应按现场提供访问入口。 |
+| App | TCP `28680` | 外部入口；本机浏览器曾使用 WSL 内网地址的临时诊断桥 28685 转至 App 回环 28680，这不是通用容器端口映射。目标应按现场提供访问入口。 |
 | Source Vetting / OCR | TCP `127.0.0.1:28681` | 内部服务，不向外公开。 |
 | H2 TCP | `127.0.0.1:28682` | 内部服务，凭据和可写持久数据由现场提供。 |
 | Qdrant HTTP | `127.0.0.1:28683` | 内部服务，按配置鉴权。 |
-| Source Advisory | TCP `127.0.0.1:28685` | 内部服务；与 Windows 侧转发端口处于不同网络环境，不能直接视为同一个监听。 |
+| Source Advisory | TCP `127.0.0.1:28685` | 内部服务；WSL 回环地址与历史诊断桥的内网地址是不同绑定，不能视为同一个监听。 |
 | GPU worker | Source/GPU 共享私有 Unix socket | 不要假设另有 GPU TCP 端口；socket 路径及双方身份按实际配置绑定。 |
 
 `--network host` 模式下 Docker 不使用 `-p` 端口映射，监听的是目标机网络命名空间中的端口。若现场要求容器 bridge 网络，当前 Source 监听回环与 H2 的本机访问限制不能只靠改 `-p` 接通，必须先适配监听/访问控制并真实复核，不能擅自放宽数据库暴露。反向代理/防火墙应只开放必须的 App 入口；端口号和地址以现场实际配置为准。
 
 本机复测使用官方 Qwen `qwen3.8-27b`；比赛通过外置配置切回同模型自部署 vLLM。启用 `competition` profile，设置 `CONSENSE_QWEN_BASE_URL` 为实际服务基址，**不要加 `/v1`**，客户端会追加 `/v1/models` 和 `/v1/chat/completions`；再按配置启用模型与鉴权并核对生效优先级。GPU 模型服务、请求头超时和实际输出均须实测。密钥通过目标安全渠道单独提供，不写进 README 或提交明文。
+
+### 配置键示例与相对路径（需现场填值）
+
+现有 [`ai_consense_service/.env.example`](../ai_consense_service/.env.example) 用于普通 H2/MiniMax relay，Spring Boot 不会自动读取它；[`app-rehearsal-source.env`](../ai_consense_service/tools/offline_delivery/app-rehearsal-source.env) 只含本机 OCR 三项，不是比赛完整配置。以下是需提供的**部分键名**，`<...>` 为占位符，不能原样启动；五角色的完整挂载、manifest、OCR、GPU 设备、cgroup 和权限仍须按上文配置。系统变量是容器环境变量或外置配置中的键值，配置文件需实际挂载并传入进程，创建前修改的值才会进入该容器。
+
+```dotenv
+# App: 按现场配置合并其他已需 profile，不要遗漏 competition。
+SPRING_PROFILES_ACTIVE=h2,competition
+CONSENSE_QWEN_ENABLED=true
+CONSENSE_QWEN_MODEL=qwen3.8-27b
+CONSENSE_QWEN_BASE_URL=http://<实际vllm地址及端口>
+# 从现场受限渠道注入实际值；不要将凭据放入版本控制。
+CONSENSE_QWEN_API_KEY=<现场单独提供>
+CONSENSE_H2_JDBC_URL=jdbc:h2:tcp://127.0.0.1:28682/<现场数据库路径>
+SPRING_DATASOURCE_PASSWORD=<现场单独提供>
+CONSENSE_VECTOR_BASE_URL=http://127.0.0.1:28683
+CONSENSE_VECTOR_API_KEY=<现场单独提供>
+CONSENSE_OCR_ENABLED=true
+CONSENSE_OCR_MODE=local
+CONSENSE_OCR_BASE_URL=http://127.0.0.1:28681
+APP_JAR=app.jar
+APP_WEB_DIRECTORY=web
+APP_RELEASE_DIRECTORY=.
+APP_RELEASE_FILES_SHA256=<此发布版release-files的可信SHA256>
+APP_CONTENT_MANIFEST_SHA256=<此发布版sha256sums的可信SHA256>
+```
+
+Qwen 客户端在基础地址后自行添加 `/v1/models` 和 `/v1/chat/completions`；即使现场 vLLM 不校验鉴权，当前 Qwen 配置选择仍要求 `CONSENSE_QWEN_API_KEY` 非空，并发送 Bearer 值，须按现场服务要求配置（`LlmProfiles.java`、`QwenChatClient.java`）。`APP_*` 两个 SHA 不能从其他 release 沿用；还需 Java `PATH`、heap、字体、日志、H2 TCP 与实际 Spring 额外配置，详见 `app-entrypoint.sh` 和五角色说明。
+
+```dotenv
+# Source: 绝对路径都是容器内路径；目录和文件必须在创建容器前准备并挂载。
+CONSENSE_WORKSPACE_ROOT=<容器内已存在的工作目录绝对路径>
+CONSENSE_SL_SCOPE_MANIFEST=/runtime/config/sl-scope.json
+CONSENSE_SOURCE_VETTING_STATE=/runtime/state/vetting
+CONSENSE_SOURCE_ADVISORY_STATE=/runtime/state/advisory
+CONSENSE_SOURCE_VETTING_PORT=28681
+CONSENSE_SOURCE_ADVISORY_PORT=28685
+CONSENSE_QDRANT_URL=http://127.0.0.1:28683
+CONSENSE_QDRANT_API_KEY_FILE=<容器内独立密钥文件绝对路径>
+```
+
+两个 Source 状态目录必须分别存在、可写且不能互为父目录，端口必须不同；Qdrant 凭据文件须非链接、由运行用户拥有、权限 `0600`，不得以 `CONSENSE_QDRANT_API_KEY` 环境变量直接传给 Source。Source 固定监听 `127.0.0.1`，以上地址只适用于共用网络命名空间的方案；依据 `source_service_entrypoint.py`。其他实际必需项包括 `CONSENSE_COMPLETE_OCR_CONFIG` / `CONSENSE_COMPLETE_OCR_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_URL` / `CONSENSE_FIXED_GPU_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_PROFILE_MANIFEST` / `CONSENSE_FIXED_GPU_PROFILE_MANIFEST_SHA256` 与模型路径；这些 SHA 必须针对**最终的目标配置内容**计算并经部署记录核对，不能照抄本机值。
+
+部署根路径在目标宿主机解析成绝对路径后用于 `docker --mount` 的 `src=`；示例 `"$DEPLOY_ROOT/release/app"` 不会自动生成发布目录。容器内部应用、配置和 manifest 使用上文的固定目标路径；改路径必须同步重绑配置和原件来源身份。密钥和目标 UUID、CID、socket、数据库位置使用现场独立注入的值。
+
 
 ## 4. 创建、启动与权限
 
