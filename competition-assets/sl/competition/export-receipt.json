@@ -1,0 +1,33 @@
+{
+  "collection": "sl_competition_20261101_a1",
+  "files": {
+    "copy-receipt.json": {
+      "bytes": 650,
+      "sha256": "921f6fef28a75b6e17e159320c2680ec3bb60d82841d0442763b9ba814fed026"
+    },
+    "corpus.jsonl": {
+      "bytes": 150417969,
+      "sha256": "f5fc869e62ad92f7c7c3134ba131040ce0499c52ef6f94b221bf522c0ed78155"
+    },
+    "frozen-manifest.json": {
+      "bytes": 3135,
+      "sha256": "f56e415cf86258ffe1e61b8ba9b085c7ec64c6335edbdadd1008c04d1342ec7f"
+    },
+    "metadata.json": {
+      "bytes": 213652673,
+      "sha256": "2321e667b90fd374c2839beab98d054e35c54354e549c092b2835755a071354a"
+    },
+    "runtime-plan.json": {
+      "bytes": 6168,
+      "sha256": "8a05fa01bdae7a17cb4334edb72a78fcdd91989a201777c73af0757ac15c40ec"
+    }
+  },
+  "indexSignature": "b5454454174d840aabfc61889269e17d3763fa1e6e56761bb5786c9ce6e34039",
+  "manifestSha256": "f56e415cf86258ffe1e61b8ba9b085c7ec64c6335edbdadd1008c04d1342ec7f",
+  "pointCount": 20320,
+  "snapshot": {
+    "bytes": 188523520,
+    "serverSnapshotName": "sl_competition_20261101_a1-3698861570748424-2026-11-01-14-23-52.snapshot",
+    "sha256": "f1d44e44d81902c2479d3659364ee3d2a916cfa797c2819763dd97fff6f38e61"
+  }
+}

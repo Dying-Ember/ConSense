@@ -1,0 +1,479 @@
+{
+  "id": "physical-table:bac7d960b817a64121d4a6102851c646d15d57e08c2be332cd05b953cbcf8d78",
+  "sectionId": "soft_landscape:SLW5",
+  "originalPage": 2795,
+  "localPage": 1,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      184.2542857142857,
+      732.520015,
+      534.4252523809524,
+      789.515985
+    ],
+    "cells": [
+      [
+        184.2542857142857,
+        732.520015,
+        344.494,
+        751.8960000000001
+      ],
+      [
+        184.2542857142857,
+        751.8960000000001,
+        344.494,
+        770.4959849999999
+      ],
+      [
+        184.2542857142857,
+        770.4959849999999,
+        344.494,
+        789.515985
+      ],
+      [
+        344.494,
+        732.520015,
+        534.4252523809524,
+        751.8960000000001
+      ],
+      [
+        344.494,
+        751.8960000000001,
+        534.4252523809524,
+        770.4959849999999
+      ],
+      [
+        344.494,
+        770.4959849999999,
+        534.4252523809524,
+        789.515985
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          184.2542857142857,
+          732.520015,
+          534.4252523809524,
+          751.8960000000001
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              184.2542857142857,
+              732.520015,
+              344.494,
+              751.8960000000001
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1452,
+              1453,
+              1454,
+              1455,
+              1456,
+              1457,
+              1458,
+              1459
+            ],
+            "extractedText": "Species"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              344.494,
+              732.520015,
+              534.4252523809524,
+              751.8960000000001
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1460,
+              1461,
+              1462,
+              1463,
+              1464,
+              1465,
+              1466,
+              1467,
+              1468,
+              1469,
+              1470,
+              1471,
+              1472,
+              1473,
+              1474
+            ],
+            "extractedText": "Pot dimensions"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          184.2542857142857,
+          751.8960000000001,
+          534.4252523809524,
+          770.4959849999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              184.2542857142857,
+              751.8960000000001,
+              344.494,
+              770.4959849999999
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              1475,
+              1476,
+              1477,
+              1478,
+              1479,
+              1480,
+              1481,
+              1482,
+              1483,
+              1484,
+              1485,
+              1486,
+              1487,
+              1488,
+              1489,
+              1490,
+              1491,
+              1492,
+              1493,
+              1494,
+              1495,
+              1496
+            ],
+            "extractedText": "Cyperus alternifolius"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              344.494,
+              751.8960000000001,
+              534.4252523809524,
+              770.4959849999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              1497,
+              1498,
+              1499,
+              1500,
+              1501,
+              1502,
+              1503,
+              1504,
+              1505,
+              1506,
+              1507,
+              1508,
+              1509,
+              1510,
+              1511,
+              1512,
+              1513,
+              1514,
+              1515,
+              1516,
+              1517,
+              1518,
+              1519,
+              1520,
+              1521,
+              1522,
+              1523,
+              1524,
+              1525,
+              1526,
+              1527,
+              1528,
+              1529,
+              1530,
+              1531
+            ],
+            "extractedText": "300 mm dia. x 350 mm minimum depth"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          184.2542857142857,
+          770.4959849999999,
+          534.4252523809524,
+          789.515985
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              184.2542857142857,
+              770.4959849999999,
+              344.494,
+              789.515985
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1532,
+              1533,
+              1534,
+              1535,
+              1536,
+              1537,
+              1538,
+              1539,
+              1540,
+              1541,
+              1542,
+              1543,
+              1544,
+              1545,
+              1546,
+              1547,
+              1548
+            ],
+            "extractedText": "Nelumbo nucifera"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              344.494,
+              770.4959849999999,
+              534.4252523809524,
+              789.515985
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1549,
+              1550,
+              1551,
+              1552,
+              1553,
+              1554,
+              1555,
+              1556,
+              1557,
+              1558,
+              1559,
+              1560,
+              1561,
+              1562,
+              1563,
+              1564,
+              1565,
+              1566,
+              1567,
+              1568,
+              1569,
+              1570,
+              1571,
+              1572,
+              1573,
+              1574,
+              1575,
+              1576,
+              1577,
+              1578,
+              1579,
+              1580,
+              1581,
+              1582,
+              1583
+            ],
+            "extractedText": "450 mm dia. x 500 mm minimum depth"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          184.2542857142857,
+          732.520015,
+          344.494,
+          789.515985
+        ],
+        "cells": [
+          [
+            184.2542857142857,
+            732.520015,
+            344.494,
+            751.8960000000001
+          ],
+          [
+            184.2542857142857,
+            751.8960000000001,
+            344.494,
+            770.4959849999999
+          ],
+          [
+            184.2542857142857,
+            770.4959849999999,
+            344.494,
+            789.515985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          344.494,
+          732.520015,
+          534.4252523809524,
+          789.515985
+        ],
+        "cells": [
+          [
+            344.494,
+            732.520015,
+            534.4252523809524,
+            751.8960000000001
+          ],
+          [
+            344.494,
+            751.8960000000001,
+            534.4252523809524,
+            770.4959849999999
+          ],
+          [
+            344.494,
+            770.4959849999999,
+            534.4252523809524,
+            789.515985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Species",
+        "Pot dimensions"
+      ],
+      [
+        "Cyperus alternifolius",
+        "300 mm dia. x 350 mm minimum depth"
+      ],
+      [
+        "Nelumbo nucifera",
+        "450 mm dia. x 500 mm minimum depth"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

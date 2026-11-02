@@ -1,0 +1,205 @@
+{
+  "id": "physical-table:192c904d7db7fedb9455ddabe1f0e2dc9fedfdf51d48f9961b702b5b5f51ae59",
+  "sectionId": "architectural:WAT6",
+  "originalPage": 1826,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      190.99181818181816,
+      73.28470588235285,
+      246.05,
+      99.74000000000001
+    ],
+    "cells": [
+      [
+        190.99181818181816,
+        73.28470588235285,
+        239.54,
+        87.53799999999995
+      ],
+      [
+        190.99181818181816,
+        87.53799999999995,
+        246.05,
+        99.74000000000001
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        9
+      ],
+      [
+        10
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          190.99181818181816,
+          73.28470588235285,
+          239.54,
+          87.53799999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              73.28470588235285,
+              239.54,
+              87.53799999999995
+            ],
+            "finderCellIndexes": [
+              9
+            ],
+            "rawCharIndexes": [
+              201,
+              202,
+              203,
+              204,
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211
+            ],
+            "extractedText": "Hydrostatic"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          190.99181818181816,
+          87.53799999999995,
+          246.05,
+          99.74000000000001
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              87.53799999999995,
+              246.05,
+              99.74000000000001
+            ],
+            "finderCellIndexes": [
+              10
+            ],
+            "rawCharIndexes": [
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225
+            ],
+            "extractedText": "Pressure test"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          190.99181818181816,
+          73.28470588235285,
+          246.05,
+          99.74000000000001
+        ],
+        "cells": [
+          [
+            190.99181818181816,
+            73.28470588235285,
+            239.54,
+            87.53799999999995
+          ],
+          [
+            190.99181818181816,
+            87.53799999999995,
+            246.05,
+            99.74000000000001
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            9
+          ],
+          [
+            10
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Hydrostatic"
+      ],
+      [
+        "Pressure test"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

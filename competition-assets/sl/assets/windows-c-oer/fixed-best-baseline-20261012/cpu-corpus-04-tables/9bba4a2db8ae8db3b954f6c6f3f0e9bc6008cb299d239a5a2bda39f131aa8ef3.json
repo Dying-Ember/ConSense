@@ -1,0 +1,3250 @@
+{
+  "id": "physical-table:9bba4a2db8ae8db3b954f6c6f3f0e9bc6008cb299d239a5a2bda39f131aa8ef3",
+  "sectionId": "building_services:ELE35",
+  "originalPage": 3416,
+  "localPage": 19,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      51.72,
+      225.8599999999999,
+      525.1,
+      267.19793103448274
+    ],
+    "cells": [
+      [
+        51.72,
+        225.8599999999999,
+        525.1,
+        244.25
+      ],
+      [
+        51.72,
+        244.25,
+        108.262,
+        267.19793103448274
+      ],
+      [
+        108.262,
+        244.25,
+        186.26,
+        267.19793103448274
+      ],
+      [
+        186.26,
+        244.25,
+        191.69,
+        267.19793103448274
+      ],
+      [
+        191.69,
+        244.25,
+        216.29,
+        256.1128571428571
+      ],
+      [
+        191.69,
+        256.1128571428571,
+        216.29,
+        267.19793103448274
+      ],
+      [
+        216.29,
+        244.25,
+        221.688,
+        267.19793103448274
+      ],
+      [
+        221.688,
+        244.25,
+        227.09,
+        256.1128571428571
+      ],
+      [
+        221.688,
+        256.1128571428571,
+        227.09,
+        267.19793103448274
+      ],
+      [
+        227.09,
+        244.25,
+        455.86,
+        256.1128571428571
+      ],
+      [
+        227.09,
+        256.1128571428571,
+        236.21,
+        267.19793103448274
+      ],
+      [
+        236.21,
+        256.1128571428571,
+        241.61,
+        267.19793103448274
+      ],
+      [
+        241.61,
+        256.1128571428571,
+        247.01,
+        267.19793103448274
+      ],
+      [
+        247.01,
+        256.1128571428571,
+        256.13,
+        267.19793103448274
+      ],
+      [
+        256.13,
+        256.1128571428571,
+        261.53,
+        267.19793103448274
+      ],
+      [
+        261.53,
+        256.1128571428571,
+        266.93,
+        267.19793103448274
+      ],
+      [
+        266.93,
+        256.1128571428571,
+        276.05,
+        267.19793103448274
+      ],
+      [
+        276.05,
+        256.1128571428571,
+        281.45,
+        267.19793103448274
+      ],
+      [
+        281.45,
+        256.1128571428571,
+        286.85,
+        267.19793103448274
+      ],
+      [
+        286.85,
+        256.1128571428571,
+        296.09000000000003,
+        267.19793103448274
+      ],
+      [
+        296.09000000000003,
+        256.1128571428571,
+        301.49,
+        267.19793103448274
+      ],
+      [
+        301.49,
+        256.1128571428571,
+        306.89,
+        267.19793103448274
+      ],
+      [
+        306.89,
+        256.1128571428571,
+        316.01,
+        267.19793103448274
+      ],
+      [
+        316.01,
+        256.1128571428571,
+        321.432,
+        267.19793103448274
+      ],
+      [
+        321.432,
+        256.1128571428571,
+        326.83,
+        267.19793103448274
+      ],
+      [
+        326.83,
+        256.1128571428571,
+        336.07,
+        267.19793103448274
+      ],
+      [
+        336.07,
+        256.1128571428571,
+        341.47,
+        267.19793103448274
+      ],
+      [
+        341.47,
+        256.1128571428571,
+        346.87,
+        267.19793103448274
+      ],
+      [
+        346.87,
+        256.1128571428571,
+        355.99,
+        267.19793103448274
+      ],
+      [
+        355.99,
+        256.1128571428571,
+        361.39,
+        267.19793103448274
+      ],
+      [
+        361.39,
+        256.1128571428571,
+        366.79,
+        267.19793103448274
+      ],
+      [
+        366.79,
+        256.1128571428571,
+        375.91,
+        267.19793103448274
+      ],
+      [
+        375.91,
+        256.1128571428571,
+        381.31,
+        267.19793103448274
+      ],
+      [
+        381.31,
+        256.1128571428571,
+        386.71,
+        267.19793103448274
+      ],
+      [
+        386.71,
+        256.1128571428571,
+        395.95,
+        267.19793103448274
+      ],
+      [
+        395.95,
+        256.1128571428571,
+        401.35,
+        267.19793103448274
+      ],
+      [
+        401.35,
+        256.1128571428571,
+        406.75,
+        267.19793103448274
+      ],
+      [
+        406.75,
+        256.1128571428571,
+        415.87,
+        267.19793103448274
+      ],
+      [
+        415.87,
+        256.1128571428571,
+        421.27,
+        267.19793103448274
+      ],
+      [
+        421.27,
+        256.1128571428571,
+        426.67,
+        267.19793103448274
+      ],
+      [
+        426.67,
+        256.1128571428571,
+        435.79,
+        267.19793103448274
+      ],
+      [
+        435.79,
+        256.1128571428571,
+        441.19,
+        267.19793103448274
+      ],
+      [
+        441.19,
+        256.1128571428571,
+        446.62,
+        267.19793103448274
+      ],
+      [
+        446.62,
+        256.1128571428571,
+        455.86,
+        267.19793103448274
+      ],
+      [
+        455.86,
+        244.25,
+        461.258,
+        256.1128571428571
+      ],
+      [
+        455.86,
+        256.1128571428571,
+        461.258,
+        267.19793103448274
+      ],
+      [
+        461.258,
+        244.25,
+        525.1,
+        267.19793103448274
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        16
+      ],
+      [
+        24
+      ],
+      [
+        28
+      ],
+      [
+        29
+      ],
+      [
+        36
+      ],
+      [
+        40
+      ],
+      [
+        41
+      ],
+      [
+        48
+      ],
+      [
+        49
+      ],
+      [
+        56
+      ],
+      [
+        60
+      ],
+      [
+        64
+      ],
+      [
+        68
+      ],
+      [
+        72
+      ],
+      [
+        76
+      ],
+      [
+        80
+      ],
+      [
+        84
+      ],
+      [
+        88
+      ],
+      [
+        92
+      ],
+      [
+        96
+      ],
+      [
+        100
+      ],
+      [
+        104
+      ],
+      [
+        108
+      ],
+      [
+        112
+      ],
+      [
+        116
+      ],
+      [
+        120
+      ],
+      [
+        124
+      ],
+      [
+        128
+      ],
+      [
+        132
+      ],
+      [
+        136
+      ],
+      [
+        140
+      ],
+      [
+        144
+      ],
+      [
+        148
+      ],
+      [
+        152
+      ],
+      [
+        156
+      ],
+      [
+        160
+      ],
+      [
+        164
+      ],
+      [
+        168
+      ],
+      [
+        172
+      ],
+      [
+        176
+      ],
+      [
+        180
+      ],
+      [
+        184
+      ],
+      [
+        188
+      ],
+      [
+        189
+      ],
+      [
+        196
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          51.72,
+          225.8599999999999,
+          525.1,
+          244.25
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              51.72,
+              225.8599999999999,
+              525.1,
+              244.25
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              535,
+              536,
+              537,
+              538,
+              539,
+              540,
+              541,
+              542,
+              543,
+              544,
+              545,
+              546,
+              547,
+              548,
+              549,
+              550,
+              551,
+              552,
+              553,
+              554,
+              555,
+              556,
+              557,
+              558,
+              559,
+              560,
+              561,
+              562,
+              563,
+              564,
+              565,
+              566,
+              567,
+              568,
+              569,
+              570,
+              571
+            ],
+            "extractedText": "Electricity energy consumption (kWh)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 6,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 7,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 8,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 9,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 10,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 11,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 12,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 13,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 14,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 15,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 16,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 17,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 18,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 19,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 20,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 21,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 22,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 23,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 24,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 25,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 26,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 27,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 28,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 29,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 30,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 31,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 32,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 33,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 34,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 35,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 36,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 37,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 38,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 39,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 40,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 41,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          51.72,
+          244.25,
+          525.1,
+          267.19793103448274
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              51.72,
+              244.25,
+              108.262,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              572,
+              573,
+              574,
+              575,
+              576
+            ],
+            "extractedText": "Area"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              108.262,
+              244.25,
+              186.26,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              577,
+              578,
+              579,
+              580,
+              581
+            ],
+            "extractedText": "Unit"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              186.26,
+              244.25,
+              191.69,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              24
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 3,
+            "bbox": [
+              191.69,
+              244.25,
+              216.29,
+              256.1128571428571
+            ],
+            "finderCellIndexes": [
+              28
+            ],
+            "rawCharIndexes": [
+              582,
+              583,
+              584,
+              585,
+              586
+            ],
+            "extractedText": "Block"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 4,
+            "bbox": [
+              216.29,
+              244.25,
+              221.688,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              36
+            ],
+            "rawCharIndexes": [
+              587
+            ],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 5,
+            "bbox": [
+              221.688,
+              244.25,
+              227.09,
+              256.1128571428571
+            ],
+            "finderCellIndexes": [
+              40
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 6,
+            "bbox": [
+              227.09,
+              244.25,
+              455.86,
+              256.1128571428571
+            ],
+            "finderCellIndexes": [
+              48
+            ],
+            "rawCharIndexes": [
+              592,
+              593,
+              594,
+              595,
+              596,
+              597
+            ],
+            "extractedText": "Month"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 7,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 8,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 9,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 10,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 11,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 12,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 13,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 14,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 15,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 16,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 17,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 18,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 19,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 20,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 21,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 22,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 23,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 24,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 25,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 26,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 27,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 28,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 29,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 30,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 31,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 32,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 33,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 34,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 35,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 36,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 37,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 38,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 39,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 40,
+            "bbox": [
+              455.86,
+              244.25,
+              461.258,
+              256.1128571428571
+            ],
+            "finderCellIndexes": [
+              188
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 41,
+            "bbox": [
+              461.258,
+              244.25,
+              525.1,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              196
+            ],
+            "rawCharIndexes": [
+              598,
+              599,
+              600,
+              601,
+              602,
+              603,
+              604,
+              605,
+              606,
+              607,
+              608,
+              609,
+              610
+            ],
+            "extractedText": "Annual total"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          191.69,
+          256.1128571428571,
+          461.258,
+          267.19793103448274
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 3,
+            "bbox": [
+              191.69,
+              256.1128571428571,
+              216.29,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              29
+            ],
+            "rawCharIndexes": [
+              588,
+              589,
+              590,
+              591
+            ],
+            "extractedText": "no."
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 5,
+            "bbox": [
+              221.688,
+              256.1128571428571,
+              227.09,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              41
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 6,
+            "bbox": [
+              227.09,
+              256.1128571428571,
+              236.21,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              49
+            ],
+            "rawCharIndexes": [
+              611,
+              612
+            ],
+            "extractedText": "1"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 7,
+            "bbox": [
+              236.21,
+              256.1128571428571,
+              241.61,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              56
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 8,
+            "bbox": [
+              241.61,
+              256.1128571428571,
+              247.01,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              60
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 9,
+            "bbox": [
+              247.01,
+              256.1128571428571,
+              256.13,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              64
+            ],
+            "rawCharIndexes": [
+              613,
+              614
+            ],
+            "extractedText": "2"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 10,
+            "bbox": [
+              256.13,
+              256.1128571428571,
+              261.53,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              68
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 11,
+            "bbox": [
+              261.53,
+              256.1128571428571,
+              266.93,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              72
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 12,
+            "bbox": [
+              266.93,
+              256.1128571428571,
+              276.05,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              76
+            ],
+            "rawCharIndexes": [
+              615,
+              616
+            ],
+            "extractedText": "3"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 13,
+            "bbox": [
+              276.05,
+              256.1128571428571,
+              281.45,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              80
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 14,
+            "bbox": [
+              281.45,
+              256.1128571428571,
+              286.85,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              84
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 15,
+            "bbox": [
+              286.85,
+              256.1128571428571,
+              296.09000000000003,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              88
+            ],
+            "rawCharIndexes": [
+              617,
+              618
+            ],
+            "extractedText": "4"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 16,
+            "bbox": [
+              296.09000000000003,
+              256.1128571428571,
+              301.49,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              92
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 17,
+            "bbox": [
+              301.49,
+              256.1128571428571,
+              306.89,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              96
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 18,
+            "bbox": [
+              306.89,
+              256.1128571428571,
+              316.01,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              100
+            ],
+            "rawCharIndexes": [
+              619,
+              620
+            ],
+            "extractedText": "5"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 19,
+            "bbox": [
+              316.01,
+              256.1128571428571,
+              321.432,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              104
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 20,
+            "bbox": [
+              321.432,
+              256.1128571428571,
+              326.83,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              108
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 21,
+            "bbox": [
+              326.83,
+              256.1128571428571,
+              336.07,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              112
+            ],
+            "rawCharIndexes": [
+              621,
+              622
+            ],
+            "extractedText": "6"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 22,
+            "bbox": [
+              336.07,
+              256.1128571428571,
+              341.47,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              116
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 23,
+            "bbox": [
+              341.47,
+              256.1128571428571,
+              346.87,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              120
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 24,
+            "bbox": [
+              346.87,
+              256.1128571428571,
+              355.99,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              124
+            ],
+            "rawCharIndexes": [
+              623,
+              624
+            ],
+            "extractedText": "7"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 25,
+            "bbox": [
+              355.99,
+              256.1128571428571,
+              361.39,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              128
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 26,
+            "bbox": [
+              361.39,
+              256.1128571428571,
+              366.79,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              132
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 27,
+            "bbox": [
+              366.79,
+              256.1128571428571,
+              375.91,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              136
+            ],
+            "rawCharIndexes": [
+              625,
+              626
+            ],
+            "extractedText": "8"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 28,
+            "bbox": [
+              375.91,
+              256.1128571428571,
+              381.31,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              140
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 29,
+            "bbox": [
+              381.31,
+              256.1128571428571,
+              386.71,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              144
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 30,
+            "bbox": [
+              386.71,
+              256.1128571428571,
+              395.95,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              148
+            ],
+            "rawCharIndexes": [
+              627,
+              628
+            ],
+            "extractedText": "9"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 31,
+            "bbox": [
+              395.95,
+              256.1128571428571,
+              401.35,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              152
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 32,
+            "bbox": [
+              401.35,
+              256.1128571428571,
+              406.75,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              156
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 33,
+            "bbox": [
+              406.75,
+              256.1128571428571,
+              415.87,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              160
+            ],
+            "rawCharIndexes": [
+              629,
+              630
+            ],
+            "extractedText": "10"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 34,
+            "bbox": [
+              415.87,
+              256.1128571428571,
+              421.27,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              164
+            ],
+            "rawCharIndexes": [
+              631
+            ],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 35,
+            "bbox": [
+              421.27,
+              256.1128571428571,
+              426.67,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              168
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 36,
+            "bbox": [
+              426.67,
+              256.1128571428571,
+              435.79,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              172
+            ],
+            "rawCharIndexes": [
+              632,
+              633
+            ],
+            "extractedText": "11"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 37,
+            "bbox": [
+              435.79,
+              256.1128571428571,
+              441.19,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              176
+            ],
+            "rawCharIndexes": [
+              634
+            ],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 38,
+            "bbox": [
+              441.19,
+              256.1128571428571,
+              446.62,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              180
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 39,
+            "bbox": [
+              446.62,
+              256.1128571428571,
+              455.86,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              184
+            ],
+            "rawCharIndexes": [
+              635,
+              636
+            ],
+            "extractedText": "12"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 40,
+            "bbox": [
+              455.86,
+              256.1128571428571,
+              461.258,
+              267.19793103448274
+            ],
+            "finderCellIndexes": [
+              189
+            ],
+            "rawCharIndexes": [
+              637
+            ],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 41,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          51.72,
+          225.8599999999999,
+          525.1,
+          267.19793103448274
+        ],
+        "cells": [
+          [
+            51.72,
+            225.8599999999999,
+            525.1,
+            244.25
+          ],
+          [
+            51.72,
+            244.25,
+            108.262,
+            267.19793103448274
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          108.262,
+          244.25,
+          186.26,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            108.262,
+            244.25,
+            186.26,
+            267.19793103448274
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            16
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          186.26,
+          244.25,
+          191.69,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            186.26,
+            244.25,
+            191.69,
+            267.19793103448274
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            24
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          191.69,
+          244.25,
+          216.29,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            191.69,
+            244.25,
+            216.29,
+            256.1128571428571
+          ],
+          [
+            191.69,
+            256.1128571428571,
+            216.29,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            28
+          ],
+          [
+            29
+          ]
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          216.29,
+          244.25,
+          221.688,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            216.29,
+            244.25,
+            221.688,
+            267.19793103448274
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            36
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 5,
+        "bbox": [
+          221.688,
+          244.25,
+          227.09,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            221.688,
+            244.25,
+            227.09,
+            256.1128571428571
+          ],
+          [
+            221.688,
+            256.1128571428571,
+            227.09,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            40
+          ],
+          [
+            41
+          ]
+        ]
+      },
+      {
+        "columnIndex": 6,
+        "bbox": [
+          227.09,
+          244.25,
+          455.86,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            227.09,
+            244.25,
+            455.86,
+            256.1128571428571
+          ],
+          [
+            227.09,
+            256.1128571428571,
+            236.21,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            48
+          ],
+          [
+            49
+          ]
+        ]
+      },
+      {
+        "columnIndex": 7,
+        "bbox": [
+          236.21,
+          256.1128571428571,
+          241.61,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            236.21,
+            256.1128571428571,
+            241.61,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            56
+          ]
+        ]
+      },
+      {
+        "columnIndex": 8,
+        "bbox": [
+          241.61,
+          256.1128571428571,
+          247.01,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            241.61,
+            256.1128571428571,
+            247.01,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            60
+          ]
+        ]
+      },
+      {
+        "columnIndex": 9,
+        "bbox": [
+          247.01,
+          256.1128571428571,
+          256.13,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            247.01,
+            256.1128571428571,
+            256.13,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            64
+          ]
+        ]
+      },
+      {
+        "columnIndex": 10,
+        "bbox": [
+          256.13,
+          256.1128571428571,
+          261.53,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            256.13,
+            256.1128571428571,
+            261.53,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            68
+          ]
+        ]
+      },
+      {
+        "columnIndex": 11,
+        "bbox": [
+          261.53,
+          256.1128571428571,
+          266.93,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            261.53,
+            256.1128571428571,
+            266.93,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            72
+          ]
+        ]
+      },
+      {
+        "columnIndex": 12,
+        "bbox": [
+          266.93,
+          256.1128571428571,
+          276.05,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            266.93,
+            256.1128571428571,
+            276.05,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            76
+          ]
+        ]
+      },
+      {
+        "columnIndex": 13,
+        "bbox": [
+          276.05,
+          256.1128571428571,
+          281.45,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            276.05,
+            256.1128571428571,
+            281.45,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            80
+          ]
+        ]
+      },
+      {
+        "columnIndex": 14,
+        "bbox": [
+          281.45,
+          256.1128571428571,
+          286.85,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            281.45,
+            256.1128571428571,
+            286.85,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            84
+          ]
+        ]
+      },
+      {
+        "columnIndex": 15,
+        "bbox": [
+          286.85,
+          256.1128571428571,
+          296.09000000000003,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            286.85,
+            256.1128571428571,
+            296.09000000000003,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            88
+          ]
+        ]
+      },
+      {
+        "columnIndex": 16,
+        "bbox": [
+          296.09000000000003,
+          256.1128571428571,
+          301.49,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            296.09000000000003,
+            256.1128571428571,
+            301.49,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            92
+          ]
+        ]
+      },
+      {
+        "columnIndex": 17,
+        "bbox": [
+          301.49,
+          256.1128571428571,
+          306.89,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            301.49,
+            256.1128571428571,
+            306.89,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            96
+          ]
+        ]
+      },
+      {
+        "columnIndex": 18,
+        "bbox": [
+          306.89,
+          256.1128571428571,
+          316.01,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            306.89,
+            256.1128571428571,
+            316.01,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            100
+          ]
+        ]
+      },
+      {
+        "columnIndex": 19,
+        "bbox": [
+          316.01,
+          256.1128571428571,
+          321.432,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            316.01,
+            256.1128571428571,
+            321.432,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            104
+          ]
+        ]
+      },
+      {
+        "columnIndex": 20,
+        "bbox": [
+          321.432,
+          256.1128571428571,
+          326.83,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            321.432,
+            256.1128571428571,
+            326.83,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            108
+          ]
+        ]
+      },
+      {
+        "columnIndex": 21,
+        "bbox": [
+          326.83,
+          256.1128571428571,
+          336.07,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            326.83,
+            256.1128571428571,
+            336.07,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            112
+          ]
+        ]
+      },
+      {
+        "columnIndex": 22,
+        "bbox": [
+          336.07,
+          256.1128571428571,
+          341.47,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            336.07,
+            256.1128571428571,
+            341.47,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            116
+          ]
+        ]
+      },
+      {
+        "columnIndex": 23,
+        "bbox": [
+          341.47,
+          256.1128571428571,
+          346.87,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            341.47,
+            256.1128571428571,
+            346.87,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            120
+          ]
+        ]
+      },
+      {
+        "columnIndex": 24,
+        "bbox": [
+          346.87,
+          256.1128571428571,
+          355.99,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            346.87,
+            256.1128571428571,
+            355.99,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            124
+          ]
+        ]
+      },
+      {
+        "columnIndex": 25,
+        "bbox": [
+          355.99,
+          256.1128571428571,
+          361.39,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            355.99,
+            256.1128571428571,
+            361.39,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            128
+          ]
+        ]
+      },
+      {
+        "columnIndex": 26,
+        "bbox": [
+          361.39,
+          256.1128571428571,
+          366.79,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            361.39,
+            256.1128571428571,
+            366.79,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            132
+          ]
+        ]
+      },
+      {
+        "columnIndex": 27,
+        "bbox": [
+          366.79,
+          256.1128571428571,
+          375.91,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            366.79,
+            256.1128571428571,
+            375.91,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            136
+          ]
+        ]
+      },
+      {
+        "columnIndex": 28,
+        "bbox": [
+          375.91,
+          256.1128571428571,
+          381.31,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            375.91,
+            256.1128571428571,
+            381.31,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            140
+          ]
+        ]
+      },
+      {
+        "columnIndex": 29,
+        "bbox": [
+          381.31,
+          256.1128571428571,
+          386.71,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            381.31,
+            256.1128571428571,
+            386.71,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            144
+          ]
+        ]
+      },
+      {
+        "columnIndex": 30,
+        "bbox": [
+          386.71,
+          256.1128571428571,
+          395.95,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            386.71,
+            256.1128571428571,
+            395.95,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            148
+          ]
+        ]
+      },
+      {
+        "columnIndex": 31,
+        "bbox": [
+          395.95,
+          256.1128571428571,
+          401.35,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            395.95,
+            256.1128571428571,
+            401.35,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            152
+          ]
+        ]
+      },
+      {
+        "columnIndex": 32,
+        "bbox": [
+          401.35,
+          256.1128571428571,
+          406.75,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            401.35,
+            256.1128571428571,
+            406.75,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            156
+          ]
+        ]
+      },
+      {
+        "columnIndex": 33,
+        "bbox": [
+          406.75,
+          256.1128571428571,
+          415.87,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            406.75,
+            256.1128571428571,
+            415.87,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            160
+          ]
+        ]
+      },
+      {
+        "columnIndex": 34,
+        "bbox": [
+          415.87,
+          256.1128571428571,
+          421.27,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            415.87,
+            256.1128571428571,
+            421.27,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            164
+          ]
+        ]
+      },
+      {
+        "columnIndex": 35,
+        "bbox": [
+          421.27,
+          256.1128571428571,
+          426.67,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            421.27,
+            256.1128571428571,
+            426.67,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            168
+          ]
+        ]
+      },
+      {
+        "columnIndex": 36,
+        "bbox": [
+          426.67,
+          256.1128571428571,
+          435.79,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            426.67,
+            256.1128571428571,
+            435.79,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            172
+          ]
+        ]
+      },
+      {
+        "columnIndex": 37,
+        "bbox": [
+          435.79,
+          256.1128571428571,
+          441.19,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            435.79,
+            256.1128571428571,
+            441.19,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            176
+          ]
+        ]
+      },
+      {
+        "columnIndex": 38,
+        "bbox": [
+          441.19,
+          256.1128571428571,
+          446.62,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            441.19,
+            256.1128571428571,
+            446.62,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            180
+          ]
+        ]
+      },
+      {
+        "columnIndex": 39,
+        "bbox": [
+          446.62,
+          256.1128571428571,
+          455.86,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            446.62,
+            256.1128571428571,
+            455.86,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            184
+          ]
+        ]
+      },
+      {
+        "columnIndex": 40,
+        "bbox": [
+          455.86,
+          244.25,
+          461.258,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            455.86,
+            244.25,
+            461.258,
+            256.1128571428571
+          ],
+          [
+            455.86,
+            256.1128571428571,
+            461.258,
+            267.19793103448274
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            188
+          ],
+          [
+            189
+          ]
+        ]
+      },
+      {
+        "columnIndex": 41,
+        "bbox": [
+          461.258,
+          244.25,
+          525.1,
+          267.19793103448274
+        ],
+        "cells": [
+          null,
+          [
+            461.258,
+            244.25,
+            525.1,
+            267.19793103448274
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            196
+          ],
+          null
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Electricity energy consumption (kWh)",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        "Area",
+        "Unit",
+        "",
+        "Block",
+        "",
+        "",
+        "Month",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "",
+        "Annual total"
+      ],
+      [
+        null,
+        null,
+        null,
+        "no.",
+        null,
+        "",
+        "1",
+        "",
+        "",
+        "2",
+        "",
+        "",
+        "3",
+        "",
+        "",
+        "4",
+        "",
+        "",
+        "5",
+        "",
+        "",
+        "6",
+        "",
+        "",
+        "7",
+        "",
+        "",
+        "8",
+        "",
+        "",
+        "9",
+        "",
+        "",
+        "10",
+        "",
+        "",
+        "11",
+        "",
+        "",
+        "12",
+        "",
+        null
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

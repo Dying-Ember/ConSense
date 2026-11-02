@@ -1,0 +1,532 @@
+{
+  "id": "physical-table:1da8b1b776d4a7077d80900b47ed0ce230b9fa81fec3790e7b3dcae9737220e8",
+  "sectionId": "structural:CON7",
+  "originalPage": 2314,
+  "localPage": 5,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      180.65,
+      685.4799849999999,
+      528.7799883333332,
+      786.816
+    ],
+    "cells": [
+      [
+        180.65,
+        685.4799849999999,
+        301.0083333333334,
+        704.86
+      ],
+      [
+        180.65,
+        704.86,
+        301.0083333333334,
+        786.816
+      ],
+      [
+        301.0083333333334,
+        685.4799849999999,
+        528.7799883333332,
+        704.86
+      ],
+      [
+        301.0083333333334,
+        704.86,
+        528.7799883333332,
+        786.816
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          180.65,
+          685.4799849999999,
+          528.7799883333332,
+          704.86
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              180.65,
+              685.4799849999999,
+              301.0083333333334,
+              704.86
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              2263,
+              2264,
+              2265,
+              2266,
+              2267,
+              2268,
+              2269,
+              2270,
+              2271,
+              2272,
+              2273,
+              2274,
+              2275,
+              2276,
+              2277,
+              2278,
+              2279,
+              2280
+            ],
+            "extractedText": "PVC Conduit Boxes"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              301.0083333333334,
+              685.4799849999999,
+              528.7799883333332,
+              704.86
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              2281,
+              2282,
+              2283,
+              2284,
+              2285,
+              2286,
+              2287,
+              2288,
+              2289,
+              2290,
+              2291,
+              2292,
+              2293,
+              2294,
+              2295,
+              2296,
+              2297,
+              2298
+            ],
+            "extractedText": "British Standards"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          180.65,
+          704.86,
+          528.7799883333332,
+          786.816
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              180.65,
+              704.86,
+              301.0083333333334,
+              786.816
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              2299,
+              2300,
+              2301,
+              2302,
+              2303,
+              2304,
+              2305,
+              2306,
+              2307,
+              2308,
+              2309,
+              2310,
+              2311,
+              2312,
+              2313,
+              2314,
+              2315,
+              2316,
+              2317,
+              2318,
+              2319,
+              2320,
+              2321,
+              2322,
+              2323,
+              2324,
+              2325
+            ],
+            "extractedText": "PVC circular conduit\nboxes"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              301.0083333333334,
+              704.86,
+              528.7799883333332,
+              786.816
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              2326,
+              2327,
+              2328,
+              2329,
+              2330,
+              2331,
+              2332,
+              2333,
+              2334,
+              2335,
+              2336,
+              2337,
+              2338,
+              2339,
+              2340,
+              2341,
+              2342,
+              2343,
+              2344,
+              2345,
+              2346,
+              2347,
+              2348,
+              2349,
+              2350,
+              2351,
+              2352,
+              2353,
+              2354,
+              2355,
+              2356,
+              2357,
+              2358,
+              2359,
+              2360,
+              2361,
+              2362,
+              2363,
+              2364,
+              2365,
+              2366,
+              2367,
+              2368,
+              2369,
+              2370,
+              2371,
+              2372,
+              2373,
+              2374,
+              2375,
+              2376,
+              2377,
+              2378,
+              2379,
+              2380,
+              2381,
+              2382,
+              2383,
+              2384,
+              2385,
+              2386,
+              2387,
+              2388,
+              2389,
+              2390,
+              2391,
+              2392,
+              2393,
+              2394,
+              2395,
+              2396,
+              2397,
+              2398,
+              2399,
+              2400,
+              2401,
+              2402,
+              2403,
+              2404,
+              2405,
+              2406,
+              2407,
+              2408,
+              2409,
+              2410,
+              2411,
+              2412,
+              2413,
+              2414,
+              2415,
+              2416,
+              2417,
+              2418,
+              2419,
+              2420,
+              2421,
+              2422,
+              2423,
+              2424,
+              2425,
+              2426,
+              2427,
+              2428,
+              2429,
+              2430,
+              2431,
+              2432,
+              2433,
+              2434,
+              2435,
+              2436,
+              2437,
+              2438,
+              2439,
+              2440,
+              2441,
+              2442,
+              2443,
+              2444,
+              2445,
+              2446,
+              2447,
+              2448,
+              2449,
+              2450,
+              2451,
+              2452,
+              2453,
+              2454,
+              2455,
+              2456,
+              2457,
+              2458,
+              2459,
+              2460,
+              2461,
+              2462,
+              2463,
+              2464,
+              2465,
+              2466,
+              2467,
+              2468,
+              2469,
+              2470,
+              2471,
+              2472,
+              2473,
+              2474,
+              2475,
+              2476,
+              2477,
+              2478,
+              2479,
+              2480,
+              2481,
+              2482,
+              2483,
+              2484,
+              2485,
+              2486,
+              2487,
+              2488,
+              2489,
+              2490,
+              2491,
+              2492,
+              2493,
+              2494,
+              2495,
+              2496,
+              2497,
+              2498,
+              2499,
+              2500,
+              2501,
+              2502,
+              2503,
+              2504,
+              2505,
+              2506,
+              2507,
+              2508,
+              2509,
+              2510,
+              2511,
+              2512,
+              2513,
+              2514,
+              2515,
+              2516,
+              2517,
+              2518,
+              2519,
+              2520,
+              2521,
+              2522,
+              2523,
+              2524,
+              2525,
+              2526,
+              2527,
+              2528,
+              2529,
+              2530
+            ],
+            "extractedText": "BS 4607:Part 5:1982(1988) with the following\nconditions:\na. The marking of the PVC circular conduit\nboxes shall be 60/10 kg;\nb. The PVC circular conduit boxes shall be type-\ntested to 10 kg suspended load."
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          180.65,
+          685.4799849999999,
+          301.0083333333334,
+          786.816
+        ],
+        "cells": [
+          [
+            180.65,
+            685.4799849999999,
+            301.0083333333334,
+            704.86
+          ],
+          [
+            180.65,
+            704.86,
+            301.0083333333334,
+            786.816
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          301.0083333333334,
+          685.4799849999999,
+          528.7799883333332,
+          786.816
+        ],
+        "cells": [
+          [
+            301.0083333333334,
+            685.4799849999999,
+            528.7799883333332,
+            704.86
+          ],
+          [
+            301.0083333333334,
+            704.86,
+            528.7799883333332,
+            786.816
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "PVC Conduit Boxes",
+        "British Standards"
+      ],
+      [
+        "PVC circular conduit\nboxes",
+        "BS 4607:Part 5:1982(1988) with the following\nconditions:\na. The marking of the PVC circular conduit\nboxes shall be 60/10 kg;\nb. The PVC circular conduit boxes shall be type-\ntested to 10 kg suspended load."
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

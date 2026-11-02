@@ -1,0 +1,455 @@
+{
+  "id": "physical-table:61e015787416839509636e776b6ccf1204ebf6d4090a5d01b5efc5c8f5844e79",
+  "sectionId": "drainage_external:DRA2",
+  "originalPage": 1909,
+  "localPage": 5,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 2,
+    "bbox": [
+      177.547998,
+      658.8099849999999,
+      525.0516144,
+      733.360015
+    ],
+    "cells": [
+      [
+        177.547998,
+        658.8099849999999,
+        355.054,
+        695.7400000000001
+      ],
+      [
+        177.547998,
+        695.7400000000001,
+        355.054,
+        714.2200149999999
+      ],
+      [
+        177.547998,
+        714.2200149999999,
+        355.054,
+        733.360015
+      ],
+      [
+        355.054,
+        658.8099849999999,
+        525.0516144,
+        695.7400000000001
+      ],
+      [
+        355.054,
+        695.7400000000001,
+        525.0516144,
+        714.2200149999999
+      ],
+      [
+        355.054,
+        714.2200149999999,
+        525.0516144,
+        733.360015
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.547998,
+          658.8099849999999,
+          525.0516144,
+          695.7400000000001
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.547998,
+              658.8099849999999,
+              355.054,
+              695.7400000000001
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1390,
+              1391,
+              1392,
+              1393,
+              1394,
+              1395,
+              1396,
+              1397,
+              1398,
+              1399,
+              1400,
+              1401,
+              1402,
+              1403,
+              1404,
+              1405,
+              1406,
+              1407,
+              1408,
+              1409,
+              1410,
+              1411,
+              1412,
+              1413,
+              1414,
+              1415,
+              1416,
+              1417,
+              1418,
+              1419,
+              1420,
+              1421,
+              1422,
+              1423,
+              1424,
+              1425,
+              1426,
+              1427,
+              1428,
+              1429,
+              1430,
+              1431,
+              1432,
+              1433,
+              1434,
+              1435,
+              1436
+            ],
+            "extractedText": "Exposure condition\n(as stated in the Contract)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              355.054,
+              658.8099849999999,
+              525.0516144,
+              695.7400000000001
+            ],
+            "finderCellIndexes": [
+              15
+            ],
+            "rawCharIndexes": [
+              1437,
+              1438,
+              1439,
+              1440,
+              1441,
+              1442,
+              1443,
+              1444,
+              1445,
+              1446,
+              1447,
+              1448,
+              1449,
+              1450,
+              1451,
+              1452,
+              1453,
+              1454,
+              1455,
+              1456,
+              1457,
+              1458,
+              1459,
+              1460,
+              1461,
+              1462,
+              1463,
+              1464,
+              1465,
+              1466,
+              1467,
+              1468,
+              1469,
+              1470,
+              1471,
+              1472,
+              1473
+            ],
+            "extractedText": "Minimum cementitious content\n(kg/m³)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.547998,
+          695.7400000000001,
+          525.0516144,
+          714.2200149999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.547998,
+              695.7400000000001,
+              355.054,
+              714.2200149999999
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              1474,
+              1475,
+              1476,
+              1477,
+              1478,
+              1479,
+              1480,
+              1481,
+              1482
+            ],
+            "extractedText": "Moderate"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              355.054,
+              695.7400000000001,
+              525.0516144,
+              714.2200149999999
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              1483,
+              1484,
+              1485,
+              1486
+            ],
+            "extractedText": "280"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          177.547998,
+          714.2200149999999,
+          525.0516144,
+          733.360015
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              177.547998,
+              714.2200149999999,
+              355.054,
+              733.360015
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              1487,
+              1488,
+              1489,
+              1490,
+              1491,
+              1492,
+              1493
+            ],
+            "extractedText": "Severe"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              355.054,
+              714.2200149999999,
+              525.0516144,
+              733.360015
+            ],
+            "finderCellIndexes": [
+              17
+            ],
+            "rawCharIndexes": [
+              1494,
+              1495,
+              1496,
+              1497
+            ],
+            "extractedText": "330"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.547998,
+          658.8099849999999,
+          355.054,
+          733.360015
+        ],
+        "cells": [
+          [
+            177.547998,
+            658.8099849999999,
+            355.054,
+            695.7400000000001
+          ],
+          [
+            177.547998,
+            695.7400000000001,
+            355.054,
+            714.2200149999999
+          ],
+          [
+            177.547998,
+            714.2200149999999,
+            355.054,
+            733.360015
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          355.054,
+          658.8099849999999,
+          525.0516144,
+          733.360015
+        ],
+        "cells": [
+          [
+            355.054,
+            658.8099849999999,
+            525.0516144,
+            695.7400000000001
+          ],
+          [
+            355.054,
+            695.7400000000001,
+            525.0516144,
+            714.2200149999999
+          ],
+          [
+            355.054,
+            714.2200149999999,
+            525.0516144,
+            733.360015
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            15
+          ],
+          [
+            16
+          ],
+          [
+            17
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Exposure condition\n(as stated in the Contract)",
+        "Minimum cementitious content\n(kg/m³)"
+      ],
+      [
+        "Moderate",
+        "280"
+      ],
+      [
+        "Severe",
+        "330"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

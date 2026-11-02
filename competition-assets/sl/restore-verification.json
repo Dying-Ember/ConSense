@@ -1,0 +1,42 @@
+{
+  "businessAccepted": false,
+  "modelCalls": 0,
+  "qdrantVersion": "1.19.2",
+  "status": "restored_vector_seals_verified",
+  "subsets": {
+    "competition": {
+      "manifestSha256": "f56e415cf86258ffe1e61b8ba9b085c7ec64c6335edbdadd1008c04d1342ec7f",
+      "parentCount": 19071,
+      "realRetrievalTested": false,
+      "restoredCollection": "restore_sl_competition",
+      "restoredVectorIntegrity": {
+        "dimension": 1024,
+        "dtype": "float32-le",
+        "embeddingSignatureSha256": "b5454454174d840aabfc61889269e17d3763fa1e6e56761bb5786c9ce6e34039",
+        "pointCount": 20320,
+        "pointsSha256": "e7e87015d6a7c9cbb707ef27bbbcf8a5c6cb38a75fa64c162d6c03b6b365b3ab",
+        "schema": "consense.persisted-vector-index-integrity.v1"
+      },
+      "slOnly": true,
+      "slSourceCount": 1,
+      "snapshotSha256": "f1d44e44d81902c2479d3659364ee3d2a916cfa797c2819763dd97fff6f38e61"
+    },
+    "six": {
+      "manifestSha256": "e2141db3160b13566309f90d85f0520f202a8ce819f7eea16b18a854998252ad",
+      "parentCount": 56299,
+      "realRetrievalTested": false,
+      "restoredCollection": "restore_sl_six",
+      "restoredVectorIntegrity": {
+        "dimension": 1024,
+        "dtype": "float32-le",
+        "embeddingSignatureSha256": "dcc0df532f048abba7a0adb85358ea775f0de7f19259fb32d308873799dad2c5",
+        "pointCount": 64270,
+        "pointsSha256": "a3a17b5739696aceda2754abfcf92182214ee15c6d23bb828cf232434f35b14f",
+        "schema": "consense.persisted-vector-index-integrity.v1"
+      },
+      "slOnly": true,
+      "slSourceCount": 6,
+      "snapshotSha256": "4c1f296deda3ef157f93af76f72b6ad6cf25574473d9fd24b40245aabf1e5587"
+    }
+  }
+}

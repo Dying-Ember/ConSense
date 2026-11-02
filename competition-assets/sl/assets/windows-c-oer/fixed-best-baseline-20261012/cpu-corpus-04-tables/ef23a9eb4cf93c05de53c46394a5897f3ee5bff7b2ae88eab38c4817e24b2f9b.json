@@ -1,0 +1,771 @@
+{
+  "id": "physical-table:ef23a9eb4cf93c05de53c46394a5897f3ee5bff7b2ae88eab38c4817e24b2f9b",
+  "sectionId": "architectural:MET1",
+  "originalPage": 1629,
+  "localPage": 9,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      213.0390909090909,
+      474.06999999999994,
+      525.2491791666666,
+      626.71001
+    ],
+    "cells": [
+      [
+        213.0390909090909,
+        474.06999999999994,
+        309.3757142857143,
+        493.39
+      ],
+      [
+        213.0390909090909,
+        493.39,
+        309.3757142857143,
+        626.71001
+      ],
+      [
+        309.3757142857143,
+        474.06999999999994,
+        411.7557142857143,
+        493.39
+      ],
+      [
+        309.3757142857143,
+        493.39,
+        411.7557142857143,
+        626.71001
+      ],
+      [
+        411.7557142857143,
+        474.06999999999994,
+        525.2491791666666,
+        493.39
+      ],
+      [
+        411.7557142857143,
+        493.39,
+        525.2491791666666,
+        626.71001
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          213.0390909090909,
+          474.06999999999994,
+          525.2491791666666,
+          493.39
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              213.0390909090909,
+              474.06999999999994,
+              309.3757142857143,
+              493.39
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1434,
+              1435,
+              1436,
+              1437,
+              1438,
+              1439,
+              1440,
+              1441,
+              1442,
+              1443,
+              1444,
+              1445,
+              1446,
+              1447,
+              1448,
+              1449,
+              1450,
+              1451,
+              1452
+            ],
+            "extractedText": "Verification Items"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              309.3757142857143,
+              474.06999999999994,
+              411.7557142857143,
+              493.39
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1453,
+              1454,
+              1455,
+              1456,
+              1457,
+              1458,
+              1459
+            ],
+            "extractedText": "Method"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              411.7557142857143,
+              474.06999999999994,
+              525.2491791666666,
+              493.39
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              1460,
+              1461,
+              1462,
+              1463,
+              1464,
+              1465,
+              1466,
+              1467,
+              1468,
+              1469,
+              1470,
+              1471,
+              1472,
+              1473,
+              1474,
+              1475,
+              1476,
+              1477,
+              1478,
+              1479,
+              1480
+            ],
+            "extractedText": "Acceptance Standards"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          213.0390909090909,
+          493.39,
+          525.2491791666666,
+          626.71001
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              213.0390909090909,
+              493.39,
+              309.3757142857143,
+              626.71001
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              1481,
+              1482,
+              1483,
+              1484,
+              1485,
+              1486,
+              1487,
+              1488,
+              1489,
+              1490,
+              1491,
+              1492,
+              1493,
+              1494,
+              1495,
+              1496,
+              1497,
+              1498,
+              1499,
+              1500,
+              1501,
+              1502,
+              1503,
+              1504,
+              1505,
+              1506,
+              1507,
+              1508,
+              1509,
+              1510,
+              1511,
+              1512,
+              1513,
+              1514,
+              1515,
+              1516,
+              1517,
+              1518,
+              1519,
+              1520,
+              1521,
+              1522,
+              1523,
+              1524,
+              1525,
+              1526,
+              1527,
+              1528,
+              1529,
+              1530,
+              1531,
+              1532,
+              1533,
+              1534,
+              1535,
+              1536,
+              1537,
+              1538,
+              1539,
+              1540,
+              1541,
+              1542,
+              1543,
+              1544,
+              1545,
+              1546,
+              1547,
+              1548,
+              1549,
+              1550,
+              1551,
+              1552,
+              1553,
+              1554,
+              1555,
+              1556,
+              1557,
+              1558,
+              1559,
+              1560,
+              1561,
+              1562,
+              1563,
+              1564,
+              1565,
+              1566,
+              1567,
+              1568,
+              1569,
+              1570,
+              1571,
+              1572,
+              1573,
+              1574,
+              1575,
+              1576,
+              1577,
+              1578,
+              1579,
+              1580,
+              1581,
+              1582,
+              1583,
+              1584,
+              1585,
+              1586,
+              1587,
+              1588,
+              1589,
+              1590,
+              1591,
+              1592,
+              1593,
+              1594,
+              1595,
+              1596,
+              1597,
+              1598,
+              1599,
+              1600,
+              1601,
+              1602,
+              1603,
+              1604,
+              1605,
+              1606,
+              1607,
+              1608,
+              1609,
+              1610,
+              1611,
+              1612,
+              1613,
+              1614,
+              1615,
+              1616,
+              1617,
+              1618,
+              1619,
+              1620,
+              1621,
+              1622,
+              1623,
+              1624,
+              1625,
+              1626
+            ],
+            "extractedText": "- Railing at\nparapet;\n- Door leaf, frame\n& hinges at main\nentrances to\ndomestic\nblocks,external\nE&M Rooms;\n- S/S steps inside\npotable water tanks"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              309.3757142857143,
+              493.39,
+              411.7557142857143,
+              626.71001
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              1627,
+              1628,
+              1629,
+              1630,
+              1631,
+              1632,
+              1633,
+              1634,
+              1635,
+              1636,
+              1637,
+              1638,
+              1639,
+              1640,
+              1641,
+              1642,
+              1643,
+              1644,
+              1645,
+              1646,
+              1647,
+              1648,
+              1649,
+              1650,
+              1651,
+              1652,
+              1653,
+              1654,
+              1655,
+              1656,
+              1657,
+              1658,
+              1659,
+              1660,
+              1661,
+              1662,
+              1663,
+              1664,
+              1665,
+              1666,
+              1667,
+              1668,
+              1669,
+              1670,
+              1671,
+              1672,
+              1673,
+              1674,
+              1675,
+              1676,
+              1677,
+              1678,
+              1679,
+              1680,
+              1681,
+              1682,
+              1683,
+              1684,
+              1685,
+              1686,
+              1687,
+              1688,
+              1689,
+              1690,
+              1691,
+              1692,
+              1693,
+              1694,
+              1695,
+              1696,
+              1697,
+              1698,
+              1699,
+              1700,
+              1701,
+              1702,
+              1703,
+              1704,
+              1705,
+              1706,
+              1707,
+              1708,
+              1709,
+              1710,
+              1711,
+              1712,
+              1713,
+              1714,
+              1715,
+              1716,
+              1717,
+              1718,
+              1719,
+              1720,
+              1721,
+              1722,
+              1723,
+              1724,
+              1725,
+              1726,
+              1727,
+              1728,
+              1729,
+              1730,
+              1731,
+              1732,
+              1733,
+              1734,
+              1735,
+              1736,
+              1737,
+              1738,
+              1739,
+              1740,
+              1741,
+              1742,
+              1743
+            ],
+            "extractedText": "Proprietary\nChemical drop test\n(e.g. single drop of\nsolution to\ndistinguish between\nlow and high\nmolybdenum\ncontent)"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              411.7557142857143,
+              493.39,
+              525.2491791666666,
+              626.71001
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              1744,
+              1745,
+              1746,
+              1747,
+              1748,
+              1749,
+              1750,
+              1751,
+              1752,
+              1753,
+              1754,
+              1755,
+              1756,
+              1757,
+              1758,
+              1759,
+              1760,
+              1761,
+              1762,
+              1763,
+              1764,
+              1765,
+              1766,
+              1767,
+              1768,
+              1769,
+              1770,
+              1771,
+              1772,
+              1773,
+              1774,
+              1775,
+              1776,
+              1777,
+              1778,
+              1779,
+              1780,
+              1781,
+              1782,
+              1783,
+              1784,
+              1785,
+              1786,
+              1787,
+              1788,
+              1789,
+              1790,
+              1791,
+              1792,
+              1793,
+              1794,
+              1795,
+              1796,
+              1797,
+              1798,
+              1799,
+              1800,
+              1801,
+              1802,
+              1803,
+              1804,
+              1805,
+              1806,
+              1807,
+              1808,
+              1809,
+              1810,
+              1811,
+              1812,
+              1813,
+              1814,
+              1815,
+              1816,
+              1817,
+              1818,
+              1819,
+              1820,
+              1821,
+              1822,
+              1823,
+              1824,
+              1825,
+              1826,
+              1827,
+              1828,
+              1829,
+              1830,
+              1831,
+              1832,
+              1833,
+              1834,
+              1835,
+              1836,
+              1837,
+              1838,
+              1839,
+              1840,
+              1841,
+              1842,
+              1843,
+              1844,
+              1845,
+              1846,
+              1847,
+              1848,
+              1849,
+              1850,
+              1851,
+              1852,
+              1853,
+              1854,
+              1855,
+              1856,
+              1857
+            ],
+            "extractedText": "Change of colour at the\ntested spot matching\nthe colour indicated at\nthe test chemical’s\ninstruction / catalogue"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          213.0390909090909,
+          474.06999999999994,
+          309.3757142857143,
+          626.71001
+        ],
+        "cells": [
+          [
+            213.0390909090909,
+            474.06999999999994,
+            309.3757142857143,
+            493.39
+          ],
+          [
+            213.0390909090909,
+            493.39,
+            309.3757142857143,
+            626.71001
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          309.3757142857143,
+          474.06999999999994,
+          411.7557142857143,
+          626.71001
+        ],
+        "cells": [
+          [
+            309.3757142857143,
+            474.06999999999994,
+            411.7557142857143,
+            493.39
+          ],
+          [
+            309.3757142857143,
+            493.39,
+            411.7557142857143,
+            626.71001
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          411.7557142857143,
+          474.06999999999994,
+          525.2491791666666,
+          626.71001
+        ],
+        "cells": [
+          [
+            411.7557142857143,
+            474.06999999999994,
+            525.2491791666666,
+            493.39
+          ],
+          [
+            411.7557142857143,
+            493.39,
+            525.2491791666666,
+            626.71001
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Verification Items",
+        "Method",
+        "Acceptance Standards"
+      ],
+      [
+        "- Railing at\nparapet;\n- Door leaf, frame\n& hinges at main\nentrances to\ndomestic\nblocks,external\nE&M Rooms;\n- S/S steps inside\npotable water tanks",
+        "Proprietary\nChemical drop test\n(e.g. single drop of\nsolution to\ndistinguish between\nlow and high\nmolybdenum\ncontent)",
+        "Change of colour at the\ntested spot matching\nthe colour indicated at\nthe test chemical’s\ninstruction / catalogue"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

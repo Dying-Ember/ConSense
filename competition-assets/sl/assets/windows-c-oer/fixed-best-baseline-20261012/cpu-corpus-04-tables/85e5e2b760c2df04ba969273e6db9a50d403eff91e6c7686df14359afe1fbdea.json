@@ -1,0 +1,516 @@
+{
+  "id": "physical-table:85e5e2b760c2df04ba969273e6db9a50d403eff91e6c7686df14359afe1fbdea",
+  "sectionId": "building_services:FWP3",
+  "originalPage": 3563,
+  "localPage": 17,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      174.03411764705882,
+      627.7900149999999,
+      525.0853082352942,
+      735.459985
+    ],
+    "cells": [
+      [
+        174.03411764705882,
+        627.7900149999999,
+        277.06874999999997,
+        681.3399999999999
+      ],
+      [
+        174.03411764705882,
+        681.3399999999999,
+        277.06874999999997,
+        735.459985
+      ],
+      [
+        277.06874999999997,
+        627.7900149999999,
+        390.49,
+        681.3399999999999
+      ],
+      [
+        277.06874999999997,
+        681.3399999999999,
+        390.49,
+        735.459985
+      ],
+      [
+        390.49,
+        627.7900149999999,
+        525.0853082352942,
+        681.3399999999999
+      ],
+      [
+        390.49,
+        681.3399999999999,
+        525.0853082352942,
+        735.459985
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          174.03411764705882,
+          627.7900149999999,
+          525.0853082352942,
+          681.3399999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              174.03411764705882,
+              627.7900149999999,
+              277.06874999999997,
+              681.3399999999999
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              2321,
+              2322,
+              2323,
+              2324,
+              2325,
+              2326,
+              2327,
+              2328,
+              2329,
+              2330,
+              2331,
+              2332,
+              2333,
+              2334,
+              2335,
+              2336,
+              2337,
+              2338,
+              2339,
+              2340,
+              2341,
+              2342,
+              2343
+            ],
+            "extractedText": "Nominal Pipe Size\n(mm)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              277.06874999999997,
+              627.7900149999999,
+              390.49,
+              681.3399999999999
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              2344,
+              2345,
+              2346,
+              2347,
+              2348,
+              2349,
+              2350,
+              2351,
+              2352,
+              2353,
+              2354,
+              2355,
+              2356,
+              2357,
+              2358,
+              2359,
+              2360,
+              2361,
+              2362,
+              2363,
+              2364,
+              2365,
+              2366,
+              2367,
+              2368,
+              2369,
+              2370,
+              2371,
+              2372,
+              2373,
+              2374,
+              2375,
+              2376,
+              2377,
+              2378,
+              2379,
+              2380,
+              2381,
+              2382,
+              2383,
+              2384,
+              2385,
+              2386
+            ],
+            "extractedText": "Minimum Bolt\nDiameter\nfor Pipe Clips (mm)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              390.49,
+              627.7900149999999,
+              525.0853082352942,
+              681.3399999999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              2387,
+              2388,
+              2389,
+              2390,
+              2391,
+              2392,
+              2393,
+              2394,
+              2395,
+              2396,
+              2397,
+              2398,
+              2399,
+              2400,
+              2401,
+              2402,
+              2403,
+              2404,
+              2405,
+              2406,
+              2407,
+              2408,
+              2409,
+              2410,
+              2411,
+              2412,
+              2413,
+              2414,
+              2415,
+              2416,
+              2417,
+              2418,
+              2419,
+              2420,
+              2421,
+              2422,
+              2423,
+              2424,
+              2425,
+              2426,
+              2427,
+              2428,
+              2429,
+              2430,
+              2431,
+              2432,
+              2433,
+              2434,
+              2435,
+              2436,
+              2437,
+              2438,
+              2439,
+              2440,
+              2441,
+              2442,
+              2443,
+              2444,
+              2445,
+              2446
+            ],
+            "extractedText": "Minimum Anchor Bolt\nDiameter\nfor Hanger, Double Fixing\n(mm)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          174.03411764705882,
+          681.3399999999999,
+          525.0853082352942,
+          735.459985
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              174.03411764705882,
+              681.3399999999999,
+              277.06874999999997,
+              735.459985
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              2447,
+              2448,
+              2449,
+              2450,
+              2451,
+              2452,
+              2453,
+              2454,
+              2455,
+              2456,
+              2457,
+              2458,
+              2459,
+              2460,
+              2461,
+              2462,
+              2463,
+              2464,
+              2465,
+              2466,
+              2467,
+              2468,
+              2469,
+              2470,
+              2471,
+              2472,
+              2473
+            ],
+            "extractedText": "25 – 50\n65 – 100\n125 – 150"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              277.06874999999997,
+              681.3399999999999,
+              390.49,
+              735.459985
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              2474,
+              2475,
+              2476,
+              2477,
+              2478,
+              2479,
+              2480,
+              2481
+            ],
+            "extractedText": "6\n10\n12"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              390.49,
+              681.3399999999999,
+              525.0853082352942,
+              735.459985
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              2482,
+              2483,
+              2484,
+              2485,
+              2486,
+              2487,
+              2488,
+              2489
+            ],
+            "extractedText": "6\n10\n12"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          174.03411764705882,
+          627.7900149999999,
+          277.06874999999997,
+          735.459985
+        ],
+        "cells": [
+          [
+            174.03411764705882,
+            627.7900149999999,
+            277.06874999999997,
+            681.3399999999999
+          ],
+          [
+            174.03411764705882,
+            681.3399999999999,
+            277.06874999999997,
+            735.459985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          277.06874999999997,
+          627.7900149999999,
+          390.49,
+          735.459985
+        ],
+        "cells": [
+          [
+            277.06874999999997,
+            627.7900149999999,
+            390.49,
+            681.3399999999999
+          ],
+          [
+            277.06874999999997,
+            681.3399999999999,
+            390.49,
+            735.459985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          390.49,
+          627.7900149999999,
+          525.0853082352942,
+          735.459985
+        ],
+        "cells": [
+          [
+            390.49,
+            627.7900149999999,
+            525.0853082352942,
+            681.3399999999999
+          ],
+          [
+            390.49,
+            681.3399999999999,
+            525.0853082352942,
+            735.459985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Nominal Pipe Size\n(mm)",
+        "Minimum Bolt\nDiameter\nfor Pipe Clips (mm)",
+        "Minimum Anchor Bolt\nDiameter\nfor Hanger, Double Fixing\n(mm)"
+      ],
+      [
+        "25 – 50\n65 – 100\n125 – 150",
+        "6\n10\n12",
+        "6\n10\n12"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

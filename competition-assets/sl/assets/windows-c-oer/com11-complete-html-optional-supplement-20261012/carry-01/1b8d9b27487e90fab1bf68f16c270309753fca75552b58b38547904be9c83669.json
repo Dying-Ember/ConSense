@@ -1,0 +1,1273 @@
+{
+  "schema": "consense.complete-observed-logical-html-table.v1",
+  "id": "logical-html-table:1b8d9b27487e90fab1bf68f16c270309753fca75552b58b38547904be9c83669",
+  "sectionId": "architectural:COM11",
+  "originalPage": 1312,
+  "parserPageIndex": 14,
+  "providerInputPageNo": 15,
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "sourceInputSha256": "ce01d9b017107df8f8d70229de1067d5d8d0faf2b0b31995c1e867adb1649f3d",
+  "html": "<table><tr><td>Seq</td><td>Column Name</td><td>Format</td><td>Stored in Tags</td><td>Stored in the database</td><td>Remarks</td></tr><tr><td>1.</td><td>Type of Building Component</td><td>Characters(3)</td><td>Yes</td><td>PCF</td><td>Note (1)</td></tr><tr><td>2.</td><td>Tag Identifier (TID)</td><td>Note (6)</td><td>Yes</td><td>Yes</td><td></td></tr><tr><td>3.</td><td>RFID tag no.</td><td>EPC</td><td>Yes</td><td>Yes</td><td>Note (7)</td></tr><tr><td>4.</td><td>Precast Façade Serial no.</td><td>Char(20)</td><td></td><td>Yes</td><td></td></tr><tr><td>5.</td><td>Contract Number</td><td>Char(12)</td><td>Yes</td><td>Yes</td><td>Note (1)</td></tr><tr><td>6.</td><td>Contract Description</td><td>Char(20)</td><td></td><td>Yes</td><td></td></tr><tr><td>7.</td><td>Contractor</td><td>Char(15)</td><td>Yes</td><td>Yes</td><td>Note (1)</td></tr><tr><td>8.</td><td>Manufacturer</td><td>Char(50)</td><td></td><td>Yes</td><td></td></tr><tr><td>9.</td><td>Manufacturer&#x27;s Address</td><td>Char(100)</td><td></td><td>Yes</td><td></td></tr><tr><td>10.</td><td>Facade Type</td><td>Char(12)</td><td></td><td>Yes</td><td></td></tr><tr><td>11.</td><td>Casting Date</td><td>ddmmyyyy</td><td></td><td>Yes</td><td>Note (2)</td></tr><tr><td>12.</td><td>Delivery Date</td><td>ddmmyyyy</td><td></td><td>Yes</td><td>Note (2)</td></tr><tr><td>13.</td><td>Site Arrival Date</td><td>ddmmyyyy</td><td></td><td>Yes</td><td>Note (2)</td></tr><tr><td>14.</td><td>Installation Date</td><td>ddmmyyyy</td><td></td><td>Yes</td><td>Note (2)</td></tr><tr><td>15.</td><td>Block Number</td><td>Char(2)</td><td></td><td>Yes</td><td>Note (3)</td></tr><tr><td>16.</td><td>Floor Number</td><td>Char(2)</td><td></td><td>Yes</td><td>Note (3)</td></tr><tr><td>17.</td><td>Flat Number</td><td>Char(2)</td><td></td><td>Yes</td><td>Note (3)</td></tr><tr><td>18.</td><td>Concrete Grade</td><td>Char(10)</td><td></td><td>Yes</td><td></td></tr><tr><td>19.</td><td>RS Inspection Date</td><td>ddmmyyyy</td><td></td><td>Yes</td><td>Notes (2,4)</td></tr><tr><td>20.</td><td>RS Company</td><td>Char(50)</td><td></td><td>Yes</td><td></td></tr><tr><td>21.</td><td>Remarks</td><td>Char(50)</td><td></td><td>Yes</td><td>Note (5)</td></tr></table>",
+  "htmlUtf8Sha256": "d48e4404360911989f3cbb6e7ee6993dc1de7691e420a8a7869451be0f4cbb5f",
+  "htmlPointer": "/pages/14/blocks/2/content/1/content",
+  "observedCells": [
+    {
+      "row": 0,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Seq",
+      "attributes": {}
+    },
+    {
+      "row": 0,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Column Name",
+      "attributes": {}
+    },
+    {
+      "row": 0,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Format",
+      "attributes": {}
+    },
+    {
+      "row": 0,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Stored in Tags",
+      "attributes": {}
+    },
+    {
+      "row": 0,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Stored in the database",
+      "attributes": {}
+    },
+    {
+      "row": 0,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Remarks",
+      "attributes": {}
+    },
+    {
+      "row": 1,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "1.",
+      "attributes": {}
+    },
+    {
+      "row": 1,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Type of Building Component",
+      "attributes": {}
+    },
+    {
+      "row": 1,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Characters(3)",
+      "attributes": {}
+    },
+    {
+      "row": 1,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 1,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "PCF",
+      "attributes": {}
+    },
+    {
+      "row": 1,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (1)",
+      "attributes": {}
+    },
+    {
+      "row": 2,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "2.",
+      "attributes": {}
+    },
+    {
+      "row": 2,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Tag Identifier (TID)",
+      "attributes": {}
+    },
+    {
+      "row": 2,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (6)",
+      "attributes": {}
+    },
+    {
+      "row": 2,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 2,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 2,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 3,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "3.",
+      "attributes": {}
+    },
+    {
+      "row": 3,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "RFID tag no.",
+      "attributes": {}
+    },
+    {
+      "row": 3,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "EPC",
+      "attributes": {}
+    },
+    {
+      "row": 3,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 3,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 3,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (7)",
+      "attributes": {}
+    },
+    {
+      "row": 4,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "4.",
+      "attributes": {}
+    },
+    {
+      "row": 4,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Precast Façade Serial no.",
+      "attributes": {}
+    },
+    {
+      "row": 4,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(20)",
+      "attributes": {}
+    },
+    {
+      "row": 4,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 4,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 4,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 5,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "5.",
+      "attributes": {}
+    },
+    {
+      "row": 5,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Contract Number",
+      "attributes": {}
+    },
+    {
+      "row": 5,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(12)",
+      "attributes": {}
+    },
+    {
+      "row": 5,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 5,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 5,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (1)",
+      "attributes": {}
+    },
+    {
+      "row": 6,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "6.",
+      "attributes": {}
+    },
+    {
+      "row": 6,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Contract Description",
+      "attributes": {}
+    },
+    {
+      "row": 6,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(20)",
+      "attributes": {}
+    },
+    {
+      "row": 6,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 6,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 6,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 7,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "7.",
+      "attributes": {}
+    },
+    {
+      "row": 7,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Contractor",
+      "attributes": {}
+    },
+    {
+      "row": 7,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(15)",
+      "attributes": {}
+    },
+    {
+      "row": 7,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 7,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 7,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (1)",
+      "attributes": {}
+    },
+    {
+      "row": 8,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "8.",
+      "attributes": {}
+    },
+    {
+      "row": 8,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Manufacturer",
+      "attributes": {}
+    },
+    {
+      "row": 8,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(50)",
+      "attributes": {}
+    },
+    {
+      "row": 8,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 8,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 8,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 9,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "9.",
+      "attributes": {}
+    },
+    {
+      "row": 9,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Manufacturer's Address",
+      "attributes": {}
+    },
+    {
+      "row": 9,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(100)",
+      "attributes": {}
+    },
+    {
+      "row": 9,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 9,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 9,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 10,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "10.",
+      "attributes": {}
+    },
+    {
+      "row": 10,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Facade Type",
+      "attributes": {}
+    },
+    {
+      "row": 10,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(12)",
+      "attributes": {}
+    },
+    {
+      "row": 10,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 10,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 10,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 11,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "11.",
+      "attributes": {}
+    },
+    {
+      "row": 11,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Casting Date",
+      "attributes": {}
+    },
+    {
+      "row": 11,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "ddmmyyyy",
+      "attributes": {}
+    },
+    {
+      "row": 11,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 11,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 11,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (2)",
+      "attributes": {}
+    },
+    {
+      "row": 12,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "12.",
+      "attributes": {}
+    },
+    {
+      "row": 12,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Delivery Date",
+      "attributes": {}
+    },
+    {
+      "row": 12,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "ddmmyyyy",
+      "attributes": {}
+    },
+    {
+      "row": 12,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 12,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 12,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (2)",
+      "attributes": {}
+    },
+    {
+      "row": 13,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "13.",
+      "attributes": {}
+    },
+    {
+      "row": 13,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Site Arrival Date",
+      "attributes": {}
+    },
+    {
+      "row": 13,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "ddmmyyyy",
+      "attributes": {}
+    },
+    {
+      "row": 13,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 13,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 13,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (2)",
+      "attributes": {}
+    },
+    {
+      "row": 14,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "14.",
+      "attributes": {}
+    },
+    {
+      "row": 14,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Installation Date",
+      "attributes": {}
+    },
+    {
+      "row": 14,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "ddmmyyyy",
+      "attributes": {}
+    },
+    {
+      "row": 14,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 14,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 14,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (2)",
+      "attributes": {}
+    },
+    {
+      "row": 15,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "15.",
+      "attributes": {}
+    },
+    {
+      "row": 15,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Block Number",
+      "attributes": {}
+    },
+    {
+      "row": 15,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(2)",
+      "attributes": {}
+    },
+    {
+      "row": 15,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 15,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 15,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (3)",
+      "attributes": {}
+    },
+    {
+      "row": 16,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "16.",
+      "attributes": {}
+    },
+    {
+      "row": 16,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Floor Number",
+      "attributes": {}
+    },
+    {
+      "row": 16,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(2)",
+      "attributes": {}
+    },
+    {
+      "row": 16,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 16,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 16,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (3)",
+      "attributes": {}
+    },
+    {
+      "row": 17,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "17.",
+      "attributes": {}
+    },
+    {
+      "row": 17,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Flat Number",
+      "attributes": {}
+    },
+    {
+      "row": 17,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(2)",
+      "attributes": {}
+    },
+    {
+      "row": 17,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 17,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 17,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (3)",
+      "attributes": {}
+    },
+    {
+      "row": 18,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "18.",
+      "attributes": {}
+    },
+    {
+      "row": 18,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Concrete Grade",
+      "attributes": {}
+    },
+    {
+      "row": 18,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(10)",
+      "attributes": {}
+    },
+    {
+      "row": 18,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 18,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 18,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 19,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "19.",
+      "attributes": {}
+    },
+    {
+      "row": 19,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "RS Inspection Date",
+      "attributes": {}
+    },
+    {
+      "row": 19,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "ddmmyyyy",
+      "attributes": {}
+    },
+    {
+      "row": 19,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 19,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 19,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Notes (2,4)",
+      "attributes": {}
+    },
+    {
+      "row": 20,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "20.",
+      "attributes": {}
+    },
+    {
+      "row": 20,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "RS Company",
+      "attributes": {}
+    },
+    {
+      "row": 20,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(50)",
+      "attributes": {}
+    },
+    {
+      "row": 20,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 20,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 20,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 21,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "21.",
+      "attributes": {}
+    },
+    {
+      "row": 21,
+      "column": 1,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Remarks",
+      "attributes": {}
+    },
+    {
+      "row": 21,
+      "column": 2,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Char(50)",
+      "attributes": {}
+    },
+    {
+      "row": 21,
+      "column": 3,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "",
+      "attributes": {}
+    },
+    {
+      "row": 21,
+      "column": 4,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Yes",
+      "attributes": {}
+    },
+    {
+      "row": 21,
+      "column": 5,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "htmlTag": "td",
+      "text": "Note (5)",
+      "attributes": {}
+    }
+  ],
+  "declaredRows": 22,
+  "declaredColumns": 6,
+  "providerTableBboxNormalized": [
+    0.09,
+    0.107,
+    0.855,
+    0.597
+  ],
+  "cellGeometryStatus": "not_supplied_unknown",
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null,
+  "relatedLegacyPhysicalTableAssets": [],
+  "legacyRelationStatus": "no_legacy_physical_table_asset_on_this_original_page",
+  "sourceScore": {
+    "report": {
+      "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\com11-mineru-recovered-source-score-20261012\\actual-01\\whole55-source-score.json",
+      "bytes": 266461,
+      "sha256": "dc7071e90052b358d3ec2e4d037c6f852eac9fe0e5e30f25c2bf7c6dbafe9671"
+    },
+    "terminal": {
+      "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\com11-mineru-recovered-source-score-20261012\\actual-01\\terminal.json",
+      "bytes": 1882,
+      "sha256": "744263674245f7ae673f1c94da69a277f3cb450a2a26f8a2da3623a3b9827303"
+    },
+    "fragmentId": "COM11.data-fields.facade.logical-source-page1312",
+    "declaredSlotTopology": {
+      "status": "source_assessed_html_slot_domain",
+      "correct": 132,
+      "total": 132,
+      "rate": 1.0
+    },
+    "slotLiteral": {
+      "status": "source_assessed_html_slot_domain",
+      "correct": 132,
+      "total": 132,
+      "rate": 1.0
+    },
+    "completeDeclaredTableTopology": {
+      "status": "source_assessed_html_slot_domain",
+      "correct": 1,
+      "total": 1,
+      "rate": 1.0
+    },
+    "completeDeclaredTableLiteral": {
+      "status": "source_assessed_html_slot_domain",
+      "correct": 1,
+      "total": 1,
+      "rate": 1.0
+    }
+  },
+  "captureManifest": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\com11-mineru-cpu-capture-recovery-20261012\\actual-01\\capture-manifest.json",
+    "bytes": 1486689,
+    "sha256": "23e27d6a026cd43aa7b95682c761c6a16dce52eb911474db1a72d417e8060b5b"
+  },
+  "captureReceipt": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\com11-mineru-cpu-capture-recovery-20261012\\actual-01\\capture-receipt.json",
+    "bytes": 8568,
+    "sha256": "4916b595879e7eefac78fba1216edf7c6df16053de32e89eea6ca2942672d402"
+  },
+  "recoveryTerminal": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\com11-mineru-cpu-capture-recovery-20261012\\actual-01\\recovery-terminal.json",
+    "bytes": 16443,
+    "sha256": "a0f8f43d43ccfc3841272652f86912f2871e2848acf01abc104c87481ddfa1c4"
+  },
+  "originalNormalWorkerQualified": false,
+  "sourceQualityAccepted": false,
+  "nativeBodyReplaced": false,
+  "cellFusion": false
+}

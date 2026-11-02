@@ -1,0 +1,439 @@
+{
+  "id": "physical-table:91518751b76df6184217175b9ed4f90eeadd9f768d638e41aef5700a39b6a3e9",
+  "sectionId": "building_services:ELE21",
+  "originalPage": 3123,
+  "localPage": 15,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      167.9,
+      737.919985,
+      516.340015,
+      787.47600375
+    ],
+    "cells": [
+      [
+        167.9,
+        737.919985,
+        270.41,
+        768.3360149999999
+      ],
+      [
+        167.9,
+        768.3360149999999,
+        270.41,
+        787.47600375
+      ],
+      [
+        270.41,
+        737.919985,
+        516.340015,
+        768.3360149999999
+      ],
+      [
+        270.41,
+        768.3360149999999,
+        516.340015,
+        787.47600375
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          167.9,
+          737.919985,
+          516.340015,
+          768.3360149999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              167.9,
+              737.919985,
+              270.41,
+              768.3360149999999
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              3345,
+              3346,
+              3347,
+              3348,
+              3349,
+              3350,
+              3351,
+              3352,
+              3353,
+              3354,
+              3355,
+              3356,
+              3357,
+              3358,
+              3359
+            ],
+            "extractedText": "IEC 60598-2-1"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              270.41,
+              737.919985,
+              516.340015,
+              768.3360149999999
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              3360,
+              3361,
+              3362,
+              3363,
+              3364,
+              3365,
+              3366,
+              3367,
+              3368,
+              3369,
+              3370,
+              3371,
+              3372,
+              3373,
+              3374,
+              3375,
+              3376,
+              3377,
+              3378,
+              3379,
+              3380,
+              3381,
+              3382,
+              3383,
+              3384,
+              3385,
+              3386,
+              3387,
+              3388,
+              3389,
+              3390,
+              3391,
+              3392,
+              3393,
+              3394,
+              3395,
+              3396,
+              3397,
+              3398,
+              3399,
+              3400,
+              3401,
+              3402,
+              3403,
+              3404,
+              3405,
+              3406,
+              3407,
+              3408,
+              3409,
+              3410,
+              3411,
+              3412,
+              3413,
+              3414,
+              3415,
+              3416,
+              3417,
+              3418,
+              3419,
+              3420,
+              3421,
+              3422,
+              3423,
+              3424,
+              3425,
+              3426,
+              3427,
+              3428,
+              3429,
+              3430,
+              3431,
+              3432,
+              3433,
+              3434,
+              3435,
+              3436,
+              3437,
+              3438,
+              3439,
+              3440,
+              3441,
+              3442,
+              3443,
+              3444,
+              3445,
+              3446,
+              3447,
+              3448,
+              3449,
+              3450,
+              3451,
+              3452,
+              3453,
+              3454,
+              3455,
+              3456,
+              3457
+            ],
+            "extractedText": "Luminaires – Part 2: Particular requirements.\nSection 1: Fixed general purpose luminaires"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          167.9,
+          768.3360149999999,
+          516.340015,
+          787.47600375
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              167.9,
+              768.3360149999999,
+              270.41,
+              787.47600375
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              3458,
+              3459,
+              3460,
+              3461,
+              3462,
+              3463,
+              3464,
+              3465,
+              3466,
+              3467,
+              3468,
+              3469,
+              3470,
+              3471
+            ],
+            "extractedText": "BS 4533-102.1"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              270.41,
+              768.3360149999999,
+              516.340015,
+              787.47600375
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              3472,
+              3473,
+              3474,
+              3475,
+              3476,
+              3477,
+              3478,
+              3479,
+              3480,
+              3481,
+              3482,
+              3483,
+              3484,
+              3485,
+              3486,
+              3487,
+              3488,
+              3489,
+              3490,
+              3491,
+              3492,
+              3493,
+              3494,
+              3495,
+              3496,
+              3497,
+              3498,
+              3499,
+              3500,
+              3501,
+              3502,
+              3503,
+              3504,
+              3505,
+              3506,
+              3507,
+              3508,
+              3509,
+              3510,
+              3511,
+              3512,
+              3513,
+              3514,
+              3515,
+              3516,
+              3517,
+              3518,
+              3519
+            ],
+            "extractedText": "Luminaires – Part 102: Particular requirement –"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          167.9,
+          737.919985,
+          270.41,
+          787.47600375
+        ],
+        "cells": [
+          [
+            167.9,
+            737.919985,
+            270.41,
+            768.3360149999999
+          ],
+          [
+            167.9,
+            768.3360149999999,
+            270.41,
+            787.47600375
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          270.41,
+          737.919985,
+          516.340015,
+          787.47600375
+        ],
+        "cells": [
+          [
+            270.41,
+            737.919985,
+            516.340015,
+            768.3360149999999
+          ],
+          [
+            270.41,
+            768.3360149999999,
+            516.340015,
+            787.47600375
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "IEC 60598-2-1",
+        "Luminaires – Part 2: Particular requirements.\nSection 1: Fixed general purpose luminaires"
+      ],
+      [
+        "BS 4533-102.1",
+        "Luminaires – Part 102: Particular requirement –"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

@@ -1,0 +1,274 @@
+{
+  "id": "physical-table:0502dacc0c769c5f05b75c66b90e9633e41f2998eb2ebb22ea1548f00411fcc1",
+  "sectionId": "architectural:PLU1",
+  "originalPage": 1657,
+  "localPage": 14,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      170.78,
+      732.580015,
+      518.5388788888889,
+      752.016
+    ],
+    "cells": [
+      [
+        170.78,
+        732.580015,
+        284.2083333333333,
+        752.016
+      ],
+      [
+        284.2083333333333,
+        732.580015,
+        383.47066666666666,
+        752.016
+      ],
+      [
+        383.47066666666666,
+        732.580015,
+        518.5388788888889,
+        752.016
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          170.78,
+          732.580015,
+          518.5388788888889,
+          752.016
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              170.78,
+              732.580015,
+              284.2083333333333,
+              752.016
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              3497,
+              3498,
+              3499,
+              3500,
+              3501,
+              3502,
+              3503,
+              3504,
+              3505,
+              3506,
+              3507,
+              3508
+            ],
+            "extractedText": "Application"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              284.2083333333333,
+              732.580015,
+              383.47066666666666,
+              752.016
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              3509,
+              3510,
+              3511,
+              3512,
+              3513,
+              3514,
+              3515,
+              3516,
+              3517,
+              3518,
+              3519,
+              3520,
+              3521,
+              3522,
+              3523,
+              3524,
+              3525
+            ],
+            "extractedText": "Copper Pipe Size"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              383.47066666666666,
+              732.580015,
+              518.5388788888889,
+              752.016
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              3526,
+              3527,
+              3528,
+              3529,
+              3530,
+              3531,
+              3532,
+              3533,
+              3534,
+              3535,
+              3536,
+              3537,
+              3538,
+              3539,
+              3540,
+              3541
+            ],
+            "extractedText": "Joint / Fitting"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          170.78,
+          732.580015,
+          284.2083333333333,
+          752.016
+        ],
+        "cells": [
+          [
+            170.78,
+            732.580015,
+            284.2083333333333,
+            752.016
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          284.2083333333333,
+          732.580015,
+          383.47066666666666,
+          752.016
+        ],
+        "cells": [
+          [
+            284.2083333333333,
+            732.580015,
+            383.47066666666666,
+            752.016
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          383.47066666666666,
+          732.580015,
+          518.5388788888889,
+          752.016
+        ],
+        "cells": [
+          [
+            383.47066666666666,
+            732.580015,
+            518.5388788888889,
+            752.016
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Application",
+        "Copper Pipe Size",
+        "Joint / Fitting"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

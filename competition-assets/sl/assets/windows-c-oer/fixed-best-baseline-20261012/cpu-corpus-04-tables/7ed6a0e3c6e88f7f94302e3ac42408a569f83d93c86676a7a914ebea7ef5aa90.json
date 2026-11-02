@@ -1,0 +1,451 @@
+{
+  "id": "physical-table:7ed6a0e3c6e88f7f94302e3ac42408a569f83d93c86676a7a914ebea7ef5aa90",
+  "sectionId": "building_services:ELE23",
+  "originalPage": 3190,
+  "localPage": 15,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      177.57636363636365,
+      716.50001,
+      525.0134923255814,
+      776.25599125
+    ],
+    "cells": [
+      [
+        177.57636363636365,
+        716.50001,
+        298.130005,
+        746.37598
+      ],
+      [
+        177.57636363636365,
+        746.37598,
+        298.130005,
+        776.25599125
+      ],
+      [
+        298.130005,
+        716.50001,
+        525.0134923255814,
+        746.37598
+      ],
+      [
+        298.130005,
+        746.37598,
+        525.0134923255814,
+        776.25599125
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        38
+      ],
+      [
+        39
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.57636363636365,
+          716.50001,
+          525.0134923255814,
+          746.37598
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.57636363636365,
+              716.50001,
+              298.130005,
+              746.37598
+            ],
+            "finderCellIndexes": [
+              18
+            ],
+            "rawCharIndexes": [
+              1744,
+              1745,
+              1746,
+              1747,
+              1748,
+              1749,
+              1750,
+              1751,
+              1752,
+              1753,
+              1754,
+              1755,
+              1756,
+              1757,
+              1758,
+              1759,
+              1760,
+              1761,
+              1762,
+              1763
+            ],
+            "extractedText": "Television Standard"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              716.50001,
+              525.0134923255814,
+              746.37598
+            ],
+            "finderCellIndexes": [
+              38
+            ],
+            "rawCharIndexes": [
+              1764,
+              1765,
+              1766,
+              1767,
+              1768,
+              1769,
+              1770,
+              1771,
+              1772,
+              1773,
+              1774,
+              1775,
+              1776,
+              1777,
+              1778,
+              1779,
+              1780,
+              1781,
+              1782,
+              1783,
+              1784,
+              1785,
+              1786,
+              1787,
+              1788,
+              1789,
+              1790,
+              1791,
+              1792,
+              1793,
+              1794,
+              1795,
+              1796,
+              1797,
+              1798,
+              1799,
+              1800,
+              1801,
+              1802,
+              1803,
+              1804,
+              1805,
+              1806,
+              1807,
+              1808,
+              1809,
+              1810,
+              1811,
+              1812,
+              1813,
+              1814,
+              1815,
+              1816,
+              1817,
+              1818,
+              1819,
+              1820,
+              1821,
+              1822,
+              1823,
+              1824,
+              1825,
+              1826,
+              1827,
+              1828,
+              1829,
+              1830,
+              1831,
+              1832,
+              1833,
+              1834,
+              1835,
+              1836,
+              1837,
+              1838,
+              1839,
+              1840,
+              1841,
+              1842,
+              1843,
+              1844,
+              1845,
+              1846,
+              1847,
+              1848,
+              1849,
+              1850,
+              1851,
+              1852
+            ],
+            "extractedText": "CCIR – PAL I System & Digital Terrestrial\nTelevision Broadcasting (DTTB) System suitable"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.57636363636365,
+          746.37598,
+          525.0134923255814,
+          776.25599125
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.57636363636365,
+              746.37598,
+              298.130005,
+              776.25599125
+            ],
+            "finderCellIndexes": [
+              19
+            ],
+            "rawCharIndexes": [
+              1853,
+              1854,
+              1855,
+              1856,
+              1857,
+              1858,
+              1859,
+              1860,
+              1861,
+              1862,
+              1863,
+              1864,
+              1865,
+              1866,
+              1867,
+              1868
+            ],
+            "extractedText": "Frequency Range"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              746.37598,
+              525.0134923255814,
+              776.25599125
+            ],
+            "finderCellIndexes": [
+              39
+            ],
+            "rawCharIndexes": [
+              1869,
+              1870,
+              1871,
+              1872,
+              1873,
+              1874,
+              1875,
+              1876,
+              1877,
+              1878,
+              1879,
+              1880,
+              1881,
+              1882,
+              1883,
+              1884,
+              1885,
+              1886,
+              1887,
+              1888,
+              1889,
+              1890,
+              1891,
+              1892,
+              1893,
+              1894,
+              1895,
+              1896,
+              1897,
+              1898,
+              1899,
+              1900,
+              1901,
+              1902,
+              1903,
+              1904,
+              1905,
+              1906,
+              1907,
+              1908,
+              1909,
+              1910,
+              1911,
+              1912,
+              1913,
+              1914,
+              1915,
+              1916,
+              1917,
+              1918,
+              1919,
+              1920,
+              1921,
+              1922,
+              1923,
+              1924,
+              1925,
+              1926,
+              1927,
+              1928,
+              1929,
+              1930
+            ],
+            "extractedText": "470 to 862 MHz, Channel Selectable with\n0.25 MHz tuning steps"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.57636363636365,
+          716.50001,
+          298.130005,
+          776.25599125
+        ],
+        "cells": [
+          [
+            177.57636363636365,
+            716.50001,
+            298.130005,
+            746.37598
+          ],
+          [
+            177.57636363636365,
+            746.37598,
+            298.130005,
+            776.25599125
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            18
+          ],
+          [
+            19
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          298.130005,
+          716.50001,
+          525.0134923255814,
+          776.25599125
+        ],
+        "cells": [
+          [
+            298.130005,
+            716.50001,
+            525.0134923255814,
+            746.37598
+          ],
+          [
+            298.130005,
+            746.37598,
+            525.0134923255814,
+            776.25599125
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            38
+          ],
+          [
+            39
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Television Standard",
+        "CCIR – PAL I System & Digital Terrestrial\nTelevision Broadcasting (DTTB) System suitable"
+      ],
+      [
+        "Frequency Range",
+        "470 to 862 MHz, Channel Selectable with\n0.25 MHz tuning steps"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

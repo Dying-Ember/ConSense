@@ -1,0 +1,529 @@
+{
+  "id": "physical-table:4679858c9f610b720bf9e61627e54a2c87447eb0c68c730e676944c729de31d9",
+  "sectionId": "building_services:ELE4",
+  "originalPage": 2942,
+  "localPage": 21,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      169.8199984375,
+      594.850015,
+      525.1600149999999,
+      662.079985
+    ],
+    "cells": [
+      [
+        169.8199984375,
+        594.850015,
+        283.97,
+        625.1499799999999
+      ],
+      [
+        169.8199984375,
+        625.1499799999999,
+        283.97,
+        643.02998
+      ],
+      [
+        169.8199984375,
+        643.02998,
+        283.97,
+        662.079985
+      ],
+      [
+        283.97,
+        594.850015,
+        525.1600149999999,
+        625.1499799999999
+      ],
+      [
+        283.97,
+        625.1499799999999,
+        525.1600149999999,
+        643.02998
+      ],
+      [
+        283.97,
+        643.02998,
+        525.1600149999999,
+        662.079985
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          169.8199984375,
+          594.850015,
+          525.1600149999999,
+          625.1499799999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              169.8199984375,
+              594.850015,
+              283.97,
+              625.1499799999999
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1994,
+              1995,
+              1996,
+              1997,
+              1998,
+              1999,
+              2000,
+              2001,
+              2002,
+              2003,
+              2004,
+              2005,
+              2006,
+              2007,
+              2008,
+              2009,
+              2010,
+              2011,
+              2012,
+              2013
+            ],
+            "extractedText": "a. Current setting:"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              283.97,
+              594.850015,
+              525.1600149999999,
+              625.1499799999999
+            ],
+            "finderCellIndexes": [
+              9
+            ],
+            "rawCharIndexes": [
+              2014,
+              2015,
+              2016,
+              2017,
+              2018,
+              2019,
+              2020,
+              2021,
+              2022,
+              2023,
+              2024,
+              2025,
+              2026,
+              2027,
+              2028,
+              2029,
+              2030,
+              2031,
+              2032,
+              2033,
+              2034,
+              2035,
+              2036,
+              2037,
+              2038,
+              2039,
+              2040,
+              2041,
+              2042,
+              2043,
+              2044,
+              2045,
+              2046,
+              2047,
+              2048,
+              2049,
+              2050,
+              2051,
+              2052,
+              2053,
+              2054,
+              2055,
+              2056,
+              2057,
+              2058,
+              2059,
+              2060,
+              2061,
+              2062,
+              2063,
+              2064,
+              2065,
+              2066,
+              2067,
+              2068,
+              2069,
+              2070,
+              2071,
+              2072
+            ],
+            "extractedText": "10% to 40% of 5A (CT Rating), adjustable in 7 equal\nsteps;"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          169.8199984375,
+          625.1499799999999,
+          525.1600149999999,
+          643.02998
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              169.8199984375,
+              625.1499799999999,
+              283.97,
+              643.02998
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              2073,
+              2074,
+              2075,
+              2076,
+              2077,
+              2078,
+              2079,
+              2080,
+              2081,
+              2082,
+              2083,
+              2084,
+              2085,
+              2086,
+              2087,
+              2088,
+              2089
+            ],
+            "extractedText": "b. Time setting:"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              283.97,
+              625.1499799999999,
+              525.1600149999999,
+              643.02998
+            ],
+            "finderCellIndexes": [
+              10
+            ],
+            "rawCharIndexes": [
+              2090,
+              2091,
+              2092,
+              2093,
+              2094,
+              2095,
+              2096,
+              2097,
+              2098,
+              2099,
+              2100,
+              2101,
+              2102,
+              2103,
+              2104,
+              2105,
+              2106,
+              2107,
+              2108,
+              2109,
+              2110,
+              2111,
+              2112,
+              2113,
+              2114,
+              2115,
+              2116,
+              2117,
+              2118,
+              2119,
+              2120,
+              2121,
+              2122,
+              2123,
+              2124,
+              2125,
+              2126,
+              2127,
+              2128,
+              2129,
+              2130
+            ],
+            "extractedText": "1.3 seconds at 10 times current setting;"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          169.8199984375,
+          643.02998,
+          525.1600149999999,
+          662.079985
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              169.8199984375,
+              643.02998,
+              283.97,
+              662.079985
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              2131,
+              2132,
+              2133,
+              2134,
+              2135,
+              2136,
+              2137,
+              2138,
+              2139,
+              2140,
+              2141
+            ],
+            "extractedText": "c. Burden:"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              283.97,
+              643.02998,
+              525.1600149999999,
+              662.079985
+            ],
+            "finderCellIndexes": [
+              11
+            ],
+            "rawCharIndexes": [
+              2142,
+              2143,
+              2144,
+              2145,
+              2146,
+              2147,
+              2148,
+              2149,
+              2150,
+              2151,
+              2152,
+              2153,
+              2154,
+              2155,
+              2156,
+              2157,
+              2158,
+              2159,
+              2160,
+              2161,
+              2162,
+              2163,
+              2164,
+              2165,
+              2166,
+              2167,
+              2168,
+              2169,
+              2170,
+              2171,
+              2172,
+              2173,
+              2174,
+              2175
+            ],
+            "extractedText": "3.5VA maximum at current setting."
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          169.8199984375,
+          594.850015,
+          283.97,
+          662.079985
+        ],
+        "cells": [
+          [
+            169.8199984375,
+            594.850015,
+            283.97,
+            625.1499799999999
+          ],
+          [
+            169.8199984375,
+            625.1499799999999,
+            283.97,
+            643.02998
+          ],
+          [
+            169.8199984375,
+            643.02998,
+            283.97,
+            662.079985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          283.97,
+          594.850015,
+          525.1600149999999,
+          662.079985
+        ],
+        "cells": [
+          [
+            283.97,
+            594.850015,
+            525.1600149999999,
+            625.1499799999999
+          ],
+          [
+            283.97,
+            625.1499799999999,
+            525.1600149999999,
+            643.02998
+          ],
+          [
+            283.97,
+            643.02998,
+            525.1600149999999,
+            662.079985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "a. Current setting:",
+        "10% to 40% of 5A (CT Rating), adjustable in 7 equal\nsteps;"
+      ],
+      [
+        "b. Time setting:",
+        "1.3 seconds at 10 times current setting;"
+      ],
+      [
+        "c. Burden:",
+        "3.5VA maximum at current setting."
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

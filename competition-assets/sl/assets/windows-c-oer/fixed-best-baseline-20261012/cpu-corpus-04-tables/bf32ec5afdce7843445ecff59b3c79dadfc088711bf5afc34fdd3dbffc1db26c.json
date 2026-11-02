@@ -1,0 +1,575 @@
+{
+  "id": "physical-table:bf32ec5afdce7843445ecff59b3c79dadfc088711bf5afc34fdd3dbffc1db26c",
+  "sectionId": "building_services:ELE33",
+  "originalPage": 3385,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      185.60285714285715,
+      138.97999812499998,
+      518.9166685714287,
+      229.21999999999997
+    ],
+    "cells": [
+      [
+        185.60285714285715,
+        138.97999812499998,
+        397.534,
+        157.93999999999994
+      ],
+      [
+        185.60285714285715,
+        157.93999999999994,
+        397.534,
+        187.81999999999994
+      ],
+      [
+        185.60285714285715,
+        187.81999999999994,
+        397.534,
+        229.21999999999997
+      ],
+      [
+        397.534,
+        138.97999812499998,
+        518.9166685714287,
+        157.93999999999994
+      ],
+      [
+        397.534,
+        157.93999999999994,
+        518.9166685714287,
+        187.81999999999994
+      ],
+      [
+        397.534,
+        187.81999999999994,
+        518.9166685714287,
+        229.21999999999997
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          185.60285714285715,
+          138.97999812499998,
+          518.9166685714287,
+          157.93999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              185.60285714285715,
+              138.97999812499998,
+              397.534,
+              157.93999999999994
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              535,
+              536,
+              537,
+              538,
+              539,
+              540,
+              541,
+              542,
+              543,
+              544,
+              545,
+              546,
+              547,
+              548,
+              549,
+              550,
+              551
+            ],
+            "extractedText": "Warranty aspects"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              397.534,
+              138.97999812499998,
+              518.9166685714287,
+              157.93999999999994
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              552,
+              553,
+              554,
+              555,
+              556,
+              557,
+              558,
+              559,
+              560,
+              561,
+              562,
+              563,
+              564,
+              565,
+              566,
+              567,
+              568,
+              569,
+              570
+            ],
+            "extractedText": "Period of warranty"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          185.60285714285715,
+          157.93999999999994,
+          518.9166685714287,
+          187.81999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              185.60285714285715,
+              157.93999999999994,
+              397.534,
+              187.81999999999994
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              571,
+              572,
+              573,
+              574,
+              575,
+              576,
+              577,
+              578,
+              579,
+              580,
+              581,
+              582,
+              583,
+              584,
+              585,
+              586,
+              587,
+              588,
+              589,
+              590,
+              591,
+              592,
+              593,
+              594,
+              595,
+              596,
+              597,
+              598,
+              599,
+              600,
+              601,
+              602,
+              603,
+              604,
+              605,
+              606,
+              607,
+              608,
+              609,
+              610,
+              611,
+              612,
+              613,
+              614,
+              615,
+              616,
+              617,
+              618,
+              619,
+              620,
+              621,
+              622,
+              623,
+              624,
+              625,
+              626
+            ],
+            "extractedText": "i. Free from any defect, failure,\nimperfection or fault"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              397.534,
+              157.93999999999994,
+              518.9166685714287,
+              187.81999999999994
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              627,
+              628,
+              629,
+              630,
+              631,
+              632,
+              633,
+              634,
+              635,
+              636
+            ],
+            "extractedText": "Ten years"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          185.60285714285715,
+          187.81999999999994,
+          518.9166685714287,
+          229.21999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              185.60285714285715,
+              187.81999999999994,
+              397.534,
+              229.21999999999997
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              637,
+              638,
+              639,
+              640,
+              641,
+              642,
+              643,
+              644,
+              645,
+              646,
+              647,
+              648,
+              649,
+              650,
+              651,
+              652,
+              653,
+              654,
+              655,
+              656,
+              657,
+              658,
+              659,
+              660,
+              661,
+              662,
+              663,
+              664,
+              665,
+              666,
+              667,
+              668,
+              669,
+              670,
+              671,
+              672,
+              673,
+              674,
+              675,
+              676,
+              677,
+              678,
+              679,
+              680,
+              681,
+              682,
+              683,
+              684,
+              685,
+              686,
+              687,
+              688,
+              689,
+              690,
+              691,
+              692,
+              693,
+              694,
+              695,
+              696,
+              697,
+              698,
+              699,
+              700,
+              701,
+              702,
+              703,
+              704,
+              705,
+              706,
+              707,
+              708,
+              709,
+              710,
+              711,
+              712,
+              713,
+              714,
+              715,
+              716,
+              717,
+              718,
+              719,
+              720,
+              721,
+              722,
+              723,
+              724,
+              725,
+              726,
+              727,
+              728,
+              729,
+              730,
+              731,
+              732,
+              733,
+              734,
+              735,
+              736,
+              737,
+              738,
+              739,
+              740,
+              741,
+              742,
+              743,
+              744
+            ],
+            "extractedText": "ii. Capable of carrying out the power output\nand performance in accordance with\nELE33.2.020 sub-clause 1(g)"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              397.534,
+              187.81999999999994,
+              518.9166685714287,
+              229.21999999999997
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              745,
+              746,
+              747,
+              748,
+              749,
+              750,
+              751,
+              752,
+              753,
+              754,
+              755,
+              756,
+              757,
+              758,
+              759,
+              760,
+              761,
+              762
+            ],
+            "extractedText": "Twenty-five years"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          185.60285714285715,
+          138.97999812499998,
+          397.534,
+          229.21999999999997
+        ],
+        "cells": [
+          [
+            185.60285714285715,
+            138.97999812499998,
+            397.534,
+            157.93999999999994
+          ],
+          [
+            185.60285714285715,
+            157.93999999999994,
+            397.534,
+            187.81999999999994
+          ],
+          [
+            185.60285714285715,
+            187.81999999999994,
+            397.534,
+            229.21999999999997
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          397.534,
+          138.97999812499998,
+          518.9166685714287,
+          229.21999999999997
+        ],
+        "cells": [
+          [
+            397.534,
+            138.97999812499998,
+            518.9166685714287,
+            157.93999999999994
+          ],
+          [
+            397.534,
+            157.93999999999994,
+            518.9166685714287,
+            187.81999999999994
+          ],
+          [
+            397.534,
+            187.81999999999994,
+            518.9166685714287,
+            229.21999999999997
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Warranty aspects",
+        "Period of warranty"
+      ],
+      [
+        "i. Free from any defect, failure,\nimperfection or fault",
+        "Ten years"
+      ],
+      [
+        "ii. Capable of carrying out the power output\nand performance in accordance with\nELE33.2.020 sub-clause 1(g)",
+        "Twenty-five years"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

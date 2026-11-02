@@ -21,6 +21,11 @@ ai_consense_service/src/test/resources/oer/native-pdf-mixed-family/** -text
 ai_consense_service/src/test/resources/oer/native-pdf-table-condition/** -text
 ai_consense_service/src/test/resources/oer/canonical/shared-note-current-scope-negative.json -text
 
+# Preserve byte-bound SL, model and release files across platforms.
+/competition-assets/sl/** -text
+/competition-assets/models/** -text
+/competition-assets/runtime/** -text
+
 # Competition model weights and large SL datasets (Git LFS).
 /competition-assets/models/embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin.part-* filter=lfs diff=lfs merge=lfs -text
 /competition-assets/models/mineru-base/model.safetensors.part-* filter=lfs diff=lfs merge=lfs -text

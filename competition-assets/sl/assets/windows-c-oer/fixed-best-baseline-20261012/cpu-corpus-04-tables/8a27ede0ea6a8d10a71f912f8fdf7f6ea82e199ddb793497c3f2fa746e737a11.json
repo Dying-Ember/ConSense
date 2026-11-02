@@ -1,0 +1,562 @@
+{
+  "id": "physical-table:8a27ede0ea6a8d10a71f912f8fdf7f6ea82e199ddb793497c3f2fa746e737a11",
+  "sectionId": "building_services:ELE21",
+  "originalPage": 3155,
+  "localPage": 47,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      177.5342838095238,
+      554.950015,
+      525.0652523809524,
+      623.349985
+    ],
+    "cells": [
+      [
+        177.5342838095238,
+        554.950015,
+        277.0334,
+        585.79
+      ],
+      [
+        177.5342838095238,
+        585.79,
+        277.0334,
+        623.349985
+      ],
+      [
+        277.0334,
+        554.950015,
+        397.774,
+        585.79
+      ],
+      [
+        277.0334,
+        585.79,
+        397.774,
+        604.2699849999999
+      ],
+      [
+        277.0334,
+        604.2699849999999,
+        397.774,
+        623.349985
+      ],
+      [
+        397.774,
+        554.950015,
+        525.0652523809524,
+        585.79
+      ],
+      [
+        397.774,
+        585.79,
+        525.0652523809524,
+        604.2699849999999
+      ],
+      [
+        397.774,
+        604.2699849999999,
+        525.0652523809524,
+        623.349985
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.5342838095238,
+          554.950015,
+          525.0652523809524,
+          585.79
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.5342838095238,
+              554.950015,
+              277.0334,
+              585.79
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1762,
+              1763,
+              1764,
+              1765,
+              1766,
+              1767,
+              1768,
+              1769,
+              1770,
+              1771
+            ],
+            "extractedText": "Lamp type"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              277.0334,
+              554.950015,
+              397.774,
+              585.79
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1772,
+              1773,
+              1774,
+              1775,
+              1776,
+              1777,
+              1778,
+              1779,
+              1780,
+              1781,
+              1782,
+              1783,
+              1784,
+              1785,
+              1786,
+              1787,
+              1788,
+              1789,
+              1790,
+              1791,
+              1792,
+              1793,
+              1794,
+              1795,
+              1796,
+              1797
+            ],
+            "extractedText": "Nominal lamp wattage\n(L )\nw"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              397.774,
+              554.950015,
+              525.0652523809524,
+              585.79
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1798,
+              1799,
+              1800,
+              1801,
+              1802,
+              1803,
+              1804,
+              1805,
+              1806,
+              1807,
+              1808,
+              1809,
+              1810,
+              1811,
+              1812,
+              1813,
+              1814,
+              1815,
+              1816,
+              1817,
+              1818,
+              1819,
+              1820,
+              1821,
+              1822,
+              1823,
+              1824,
+              1825,
+              1826,
+              1827,
+              1828,
+              1829,
+              1830,
+              1831,
+              1832,
+              1833,
+              1834,
+              1835,
+              1836,
+              1837,
+              1838,
+              1839,
+              1840,
+              1841
+            ],
+            "extractedText": "Maximum allowable lamp\ncontrolgear loss (W)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.5342838095238,
+          585.79,
+          525.0652523809524,
+          623.349985
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.5342838095238,
+              585.79,
+              277.0334,
+              623.349985
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              1842,
+              1843,
+              1844,
+              1845,
+              1846,
+              1847,
+              1848,
+              1849,
+              1850,
+              1851,
+              1852,
+              1853,
+              1854,
+              1855,
+              1856,
+              1857,
+              1858,
+              1859,
+              1860,
+              1861
+            ],
+            "extractedText": "Compact\nfluorescent"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              277.0334,
+              585.79,
+              397.774,
+              604.2699849999999
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1862,
+              1863,
+              1864,
+              1865,
+              1866,
+              1867,
+              1868,
+              1869,
+              1870
+            ],
+            "extractedText": "L < 18W\nw"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              397.774,
+              585.79,
+              525.0652523809524,
+              604.2699849999999
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              1871,
+              1872
+            ],
+            "extractedText": "6"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          277.0334,
+          604.2699849999999,
+          525.0652523809524,
+          623.349985
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              277.0334,
+              604.2699849999999,
+              397.774,
+              623.349985
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              1873,
+              1874,
+              1875,
+              1876,
+              1877,
+              1878,
+              1879,
+              1880
+            ],
+            "extractedText": "L ≥18W\nw"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              397.774,
+              604.2699849999999,
+              525.0652523809524,
+              623.349985
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              1881,
+              1882
+            ],
+            "extractedText": "9"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.5342838095238,
+          554.950015,
+          277.0334,
+          623.349985
+        ],
+        "cells": [
+          [
+            177.5342838095238,
+            554.950015,
+            277.0334,
+            585.79
+          ],
+          [
+            177.5342838095238,
+            585.79,
+            277.0334,
+            623.349985
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          277.0334,
+          554.950015,
+          397.774,
+          623.349985
+        ],
+        "cells": [
+          [
+            277.0334,
+            554.950015,
+            397.774,
+            585.79
+          ],
+          [
+            277.0334,
+            585.79,
+            397.774,
+            604.2699849999999
+          ],
+          [
+            277.0334,
+            604.2699849999999,
+            397.774,
+            623.349985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          397.774,
+          554.950015,
+          525.0652523809524,
+          623.349985
+        ],
+        "cells": [
+          [
+            397.774,
+            554.950015,
+            525.0652523809524,
+            585.79
+          ],
+          [
+            397.774,
+            585.79,
+            525.0652523809524,
+            604.2699849999999
+          ],
+          [
+            397.774,
+            604.2699849999999,
+            525.0652523809524,
+            623.349985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Lamp type",
+        "Nominal lamp wattage\n(L )\nw",
+        "Maximum allowable lamp\ncontrolgear loss (W)"
+      ],
+      [
+        "Compact\nfluorescent",
+        "L < 18W\nw",
+        "6"
+      ],
+      [
+        null,
+        "L ≥18W\nw",
+        "9"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

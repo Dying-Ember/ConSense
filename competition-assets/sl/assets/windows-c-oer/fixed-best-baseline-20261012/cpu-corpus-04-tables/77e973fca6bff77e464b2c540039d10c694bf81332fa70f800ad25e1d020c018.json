@@ -1,0 +1,987 @@
+{
+  "id": "physical-table:77e973fca6bff77e464b2c540039d10c694bf81332fa70f800ad25e1d020c018",
+  "sectionId": "drainage_external:DRA2",
+  "originalPage": 1910,
+  "localPage": 6,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      177.60434565217392,
+      649.3899849999999,
+      524.9956665217392,
+      757.8960149999999
+    ],
+    "cells": [
+      [
+        177.60434565217392,
+        649.3899849999999,
+        524.9956665217392,
+        668.619985
+      ],
+      [
+        177.60434565217392,
+        668.619985,
+        322.17400000000004,
+        686.7399849999999
+      ],
+      [
+        177.60434565217392,
+        686.7399849999999,
+        322.17400000000004,
+        728.02
+      ],
+      [
+        177.60434565217392,
+        728.02,
+        322.17400000000004,
+        757.8960149999999
+      ],
+      [
+        322.17400000000004,
+        668.619985,
+        383.374,
+        686.7399849999999
+      ],
+      [
+        322.17400000000004,
+        686.7399849999999,
+        383.374,
+        728.02
+      ],
+      [
+        322.17400000000004,
+        728.02,
+        383.374,
+        757.8960149999999
+      ],
+      [
+        383.374,
+        668.619985,
+        432.934,
+        686.7399849999999
+      ],
+      [
+        383.374,
+        686.7399849999999,
+        432.934,
+        728.02
+      ],
+      [
+        383.374,
+        728.02,
+        432.934,
+        757.8960149999999
+      ],
+      [
+        432.934,
+        668.619985,
+        524.9956665217392,
+        686.7399849999999
+      ],
+      [
+        432.934,
+        686.7399849999999,
+        489.75925,
+        728.02
+      ],
+      [
+        432.934,
+        728.02,
+        489.75925,
+        757.8960149999999
+      ],
+      [
+        489.75925,
+        686.7399849999999,
+        524.9956665217392,
+        728.02
+      ],
+      [
+        489.75925,
+        728.02,
+        524.9956665217392,
+        757.8960149999999
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.60434565217392,
+          649.3899849999999,
+          524.9956665217392,
+          668.619985
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.60434565217392,
+              649.3899849999999,
+              524.9956665217392,
+              668.619985
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1760,
+              1761,
+              1762,
+              1763,
+              1764,
+              1765,
+              1766,
+              1767,
+              1768,
+              1769,
+              1770,
+              1771,
+              1772,
+              1773,
+              1774,
+              1775,
+              1776,
+              1777,
+              1778,
+              1779,
+              1780,
+              1781,
+              1782,
+              1783,
+              1784,
+              1785,
+              1786,
+              1787,
+              1788,
+              1789,
+              1790,
+              1791,
+              1792,
+              1793,
+              1794,
+              1795,
+              1796
+            ],
+            "extractedText": "Details of manhole covers and frames"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.60434565217392,
+          668.619985,
+          524.9956665217392,
+          686.7399849999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.60434565217392,
+              668.619985,
+              322.17400000000004,
+              686.7399849999999
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              1797,
+              1798,
+              1799,
+              1800,
+              1801,
+              1802,
+              1803,
+              1804,
+              1805,
+              1806,
+              1807,
+              1808,
+              1809,
+              1810,
+              1811,
+              1812,
+              1813,
+              1814,
+              1815,
+              1816,
+              1817,
+              1818,
+              1819,
+              1820,
+              1821,
+              1822
+            ],
+            "extractedText": "Type of Manhole Cover and"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              322.17400000000004,
+              668.619985,
+              383.374,
+              686.7399849999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              1823,
+              1824,
+              1825,
+              1826,
+              1827,
+              1828,
+              1829,
+              1830
+            ],
+            "extractedText": "Minimum"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              383.374,
+              668.619985,
+              432.934,
+              686.7399849999999
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              1831,
+              1832,
+              1833,
+              1834,
+              1835,
+              1836
+            ],
+            "extractedText": "Grade"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 3,
+            "bbox": [
+              432.934,
+              668.619985,
+              524.9956665217392,
+              686.7399849999999
+            ],
+            "finderCellIndexes": [
+              10
+            ],
+            "rawCharIndexes": [
+              1837,
+              1838,
+              1839,
+              1840,
+              1841,
+              1842,
+              1843,
+              1844,
+              1845,
+              1846,
+              1847,
+              1848,
+              1849,
+              1850,
+              1851,
+              1852,
+              1853,
+              1854
+            ],
+            "extractedText": "Test Requirements"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          177.60434565217392,
+          686.7399849999999,
+          524.9956665217392,
+          728.02
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              177.60434565217392,
+              686.7399849999999,
+              322.17400000000004,
+              728.02
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1855,
+              1856,
+              1857,
+              1858,
+              1859,
+              1860
+            ],
+            "extractedText": "Frame"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              322.17400000000004,
+              686.7399849999999,
+              383.374,
+              728.02
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1861,
+              1862,
+              1863,
+              1864,
+              1865,
+              1866,
+              1867,
+              1868,
+              1869,
+              1870
+            ],
+            "extractedText": "Mass (kg)"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              383.374,
+              686.7399849999999,
+              432.934,
+              728.02
+            ],
+            "finderCellIndexes": [
+              8
+            ],
+            "rawCharIndexes": [
+              1871,
+              1872,
+              1873,
+              1874,
+              1875,
+              1876,
+              1877
+            ],
+            "extractedText": "(duty)"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 3,
+            "bbox": [
+              432.934,
+              686.7399849999999,
+              489.75925,
+              728.02
+            ],
+            "finderCellIndexes": [
+              11
+            ],
+            "rawCharIndexes": [
+              1878,
+              1879,
+              1880,
+              1881,
+              1882,
+              1883,
+              1884,
+              1885,
+              1886,
+              1887,
+              1888,
+              1889,
+              1890,
+              1891,
+              1892,
+              1893,
+              1894,
+              1895,
+              1896,
+              1897,
+              1898,
+              1899,
+              1900
+            ],
+            "extractedText": "Diameter\nof Block\n(mm)"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 4,
+            "bbox": [
+              489.75925,
+              686.7399849999999,
+              524.9956665217392,
+              728.02
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              1901,
+              1902,
+              1903,
+              1904,
+              1905,
+              1906,
+              1907,
+              1908,
+              1909,
+              1910,
+              1911,
+              1912,
+              1913,
+              1914
+            ],
+            "extractedText": "Test\nLoad\n(t)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          177.60434565217392,
+          728.02,
+          524.9956665217392,
+          757.8960149999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              177.60434565217392,
+              728.02,
+              322.17400000000004,
+              757.8960149999999
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1915,
+              1916,
+              1917,
+              1918,
+              1919,
+              1920,
+              1921,
+              1922,
+              1923,
+              1924,
+              1925,
+              1926,
+              1927,
+              1928,
+              1929,
+              1930,
+              1931,
+              1932,
+              1933,
+              1934,
+              1935,
+              1936,
+              1937,
+              1938,
+              1939,
+              1940,
+              1941,
+              1942,
+              1943,
+              1944,
+              1945,
+              1946,
+              1947,
+              1948,
+              1949,
+              1950,
+              1951,
+              1952,
+              1953,
+              1954,
+              1955,
+              1956
+            ],
+            "extractedText": "Double triangular manhole\ncover and frame"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              322.17400000000004,
+              728.02,
+              383.374,
+              757.8960149999999
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              1957,
+              1958,
+              1959,
+              1960,
+              1961
+            ],
+            "extractedText": "180"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 2,
+            "bbox": [
+              383.374,
+              728.02,
+              432.934,
+              757.8960149999999
+            ],
+            "finderCellIndexes": [
+              9
+            ],
+            "rawCharIndexes": [
+              1962,
+              1963,
+              1964,
+              1965,
+              1966,
+              1967,
+              1968,
+              1969
+            ],
+            "extractedText": "Medium"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 3,
+            "bbox": [
+              432.934,
+              728.02,
+              489.75925,
+              757.8960149999999
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              1970,
+              1971,
+              1972,
+              1973,
+              1974
+            ],
+            "extractedText": "100"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 4,
+            "bbox": [
+              489.75925,
+              728.02,
+              524.9956665217392,
+              757.8960149999999
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              1975,
+              1976,
+              1977
+            ],
+            "extractedText": "5"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.60434565217392,
+          649.3899849999999,
+          524.9956665217392,
+          757.8960149999999
+        ],
+        "cells": [
+          [
+            177.60434565217392,
+            649.3899849999999,
+            524.9956665217392,
+            668.619985
+          ],
+          [
+            177.60434565217392,
+            668.619985,
+            322.17400000000004,
+            686.7399849999999
+          ],
+          [
+            177.60434565217392,
+            686.7399849999999,
+            322.17400000000004,
+            728.02
+          ],
+          [
+            177.60434565217392,
+            728.02,
+            322.17400000000004,
+            757.8960149999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          322.17400000000004,
+          668.619985,
+          383.374,
+          757.8960149999999
+        ],
+        "cells": [
+          null,
+          [
+            322.17400000000004,
+            668.619985,
+            383.374,
+            686.7399849999999
+          ],
+          [
+            322.17400000000004,
+            686.7399849999999,
+            383.374,
+            728.02
+          ],
+          [
+            322.17400000000004,
+            728.02,
+            383.374,
+            757.8960149999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          383.374,
+          668.619985,
+          432.934,
+          757.8960149999999
+        ],
+        "cells": [
+          null,
+          [
+            383.374,
+            668.619985,
+            432.934,
+            686.7399849999999
+          ],
+          [
+            383.374,
+            686.7399849999999,
+            432.934,
+            728.02
+          ],
+          [
+            383.374,
+            728.02,
+            432.934,
+            757.8960149999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ]
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          432.934,
+          668.619985,
+          524.9956665217392,
+          757.8960149999999
+        ],
+        "cells": [
+          null,
+          [
+            432.934,
+            668.619985,
+            524.9956665217392,
+            686.7399849999999
+          ],
+          [
+            432.934,
+            686.7399849999999,
+            489.75925,
+            728.02
+          ],
+          [
+            432.934,
+            728.02,
+            489.75925,
+            757.8960149999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            10
+          ],
+          [
+            11
+          ],
+          [
+            12
+          ]
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          489.75925,
+          686.7399849999999,
+          524.9956665217392,
+          757.8960149999999
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            489.75925,
+            686.7399849999999,
+            524.9956665217392,
+            728.02
+          ],
+          [
+            489.75925,
+            728.02,
+            524.9956665217392,
+            757.8960149999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            13
+          ],
+          [
+            14
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Details of manhole covers and frames",
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        "Type of Manhole Cover and",
+        "Minimum",
+        "Grade",
+        "Test Requirements",
+        null
+      ],
+      [
+        "Frame",
+        "Mass (kg)",
+        "(duty)",
+        "Diameter\nof Block\n(mm)",
+        "Test\nLoad\n(t)"
+      ],
+      [
+        "Double triangular manhole\ncover and frame",
+        "180",
+        "Medium",
+        "100",
+        "5"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

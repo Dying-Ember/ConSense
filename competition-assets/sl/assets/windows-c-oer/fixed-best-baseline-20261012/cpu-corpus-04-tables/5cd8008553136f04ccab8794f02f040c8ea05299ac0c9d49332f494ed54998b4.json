@@ -1,0 +1,339 @@
+{
+  "id": "physical-table:5cd8008553136f04ccab8794f02f040c8ea05299ac0c9d49332f494ed54998b4",
+  "sectionId": "architectural:WAT6",
+  "originalPage": 1826,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 4,
+    "bbox": [
+      190.99181818181816,
+      149.0466666666666,
+      267.05,
+      198.01999999999998
+    ],
+    "cells": [
+      [
+        190.99181818181816,
+        149.0466666666666,
+        267.05,
+        163.1599999999999
+      ],
+      [
+        190.99181818181816,
+        163.1599999999999,
+        239.54,
+        174.52999999999994
+      ],
+      [
+        190.99181818181816,
+        174.52999999999994,
+        261.41,
+        186.14
+      ],
+      [
+        190.99181818181816,
+        186.14,
+        267.05,
+        198.01999999999998
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          190.99181818181816,
+          149.0466666666666,
+          267.05,
+          163.1599999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              149.0466666666666,
+              267.05,
+              163.1599999999999
+            ],
+            "finderCellIndexes": [
+              11
+            ],
+            "rawCharIndexes": [
+              330,
+              331,
+              332,
+              333,
+              334,
+              335,
+              336,
+              337,
+              338,
+              339,
+              340,
+              341,
+              342,
+              343,
+              344,
+              345,
+              346,
+              347
+            ],
+            "extractedText": "Pull-Off Strength"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          190.99181818181816,
+          163.1599999999999,
+          239.54,
+          174.52999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              163.1599999999999,
+              239.54,
+              174.52999999999994
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              348,
+              349,
+              350,
+              351,
+              352,
+              353,
+              354,
+              355,
+              356,
+              357,
+              358
+            ],
+            "extractedText": "on concrete"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          190.99181818181816,
+          174.52999999999994,
+          261.41,
+          186.14
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              174.52999999999994,
+              261.41,
+              186.14
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              360,
+              361,
+              362,
+              363,
+              364,
+              365,
+              366,
+              367,
+              368,
+              369,
+              370,
+              371,
+              372,
+              373,
+              374,
+              375,
+              376
+            ],
+            "extractedText": "substrate with or"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          190.99181818181816,
+          186.14,
+          267.05,
+          198.01999999999998
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              186.14,
+              267.05,
+              198.01999999999998
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              378,
+              379,
+              380,
+              381,
+              382,
+              383,
+              384,
+              385,
+              386,
+              387,
+              388,
+              389,
+              390,
+              391,
+              392,
+              393
+            ],
+            "extractedText": "without bond coa"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          190.99181818181816,
+          149.0466666666666,
+          267.05,
+          198.01999999999998
+        ],
+        "cells": [
+          [
+            190.99181818181816,
+            149.0466666666666,
+            267.05,
+            163.1599999999999
+          ],
+          [
+            190.99181818181816,
+            163.1599999999999,
+            239.54,
+            174.52999999999994
+          ],
+          [
+            190.99181818181816,
+            174.52999999999994,
+            261.41,
+            186.14
+          ],
+          [
+            190.99181818181816,
+            186.14,
+            267.05,
+            198.01999999999998
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            11
+          ],
+          [
+            12
+          ],
+          [
+            13
+          ],
+          [
+            14
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Pull-Off Strength"
+      ],
+      [
+        "on concrete"
+      ],
+      [
+        "substrate with or"
+      ],
+      [
+        "without bond coa"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

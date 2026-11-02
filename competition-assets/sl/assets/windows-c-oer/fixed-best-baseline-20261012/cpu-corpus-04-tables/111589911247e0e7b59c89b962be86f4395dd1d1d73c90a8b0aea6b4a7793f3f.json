@@ -1,0 +1,276 @@
+{
+  "id": "physical-table:111589911247e0e7b59c89b962be86f4395dd1d1d73c90a8b0aea6b4a7793f3f",
+  "sectionId": "architectural:COM4",
+  "originalPage": 1217,
+  "localPage": 5,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      212.81,
+      739.419985,
+      525.2588988888888,
+      758.976
+    ],
+    "cells": [
+      [
+        212.81,
+        739.419985,
+        309.41,
+        758.976
+      ],
+      [
+        309.41,
+        739.419985,
+        411.78999999999996,
+        758.976
+      ],
+      [
+        411.78999999999996,
+        739.419985,
+        525.2588988888888,
+        758.976
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          212.81,
+          739.419985,
+          525.2588988888888,
+          758.976
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              212.81,
+              739.419985,
+              309.41,
+              758.976
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              3084,
+              3085,
+              3086,
+              3087,
+              3088,
+              3089,
+              3090,
+              3091,
+              3092,
+              3093,
+              3094,
+              3095,
+              3096,
+              3097,
+              3098,
+              3099,
+              3100,
+              3101,
+              3102
+            ],
+            "extractedText": "Verification Items"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              309.41,
+              739.419985,
+              411.78999999999996,
+              758.976
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              3103,
+              3104,
+              3105,
+              3106,
+              3107,
+              3108,
+              3109
+            ],
+            "extractedText": "Method"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              411.78999999999996,
+              739.419985,
+              525.2588988888888,
+              758.976
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              3110,
+              3111,
+              3112,
+              3113,
+              3114,
+              3115,
+              3116,
+              3117,
+              3118,
+              3119,
+              3120,
+              3121,
+              3122,
+              3123,
+              3124,
+              3125,
+              3126,
+              3127,
+              3128,
+              3129,
+              3130
+            ],
+            "extractedText": "Acceptance Standards"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          212.81,
+          739.419985,
+          309.41,
+          758.976
+        ],
+        "cells": [
+          [
+            212.81,
+            739.419985,
+            309.41,
+            758.976
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          309.41,
+          739.419985,
+          411.78999999999996,
+          758.976
+        ],
+        "cells": [
+          [
+            309.41,
+            739.419985,
+            411.78999999999996,
+            758.976
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          411.78999999999996,
+          739.419985,
+          525.2588988888888,
+          758.976
+        ],
+        "cells": [
+          [
+            411.78999999999996,
+            739.419985,
+            525.2588988888888,
+            758.976
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Verification Items",
+        "Method",
+        "Acceptance Standards"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

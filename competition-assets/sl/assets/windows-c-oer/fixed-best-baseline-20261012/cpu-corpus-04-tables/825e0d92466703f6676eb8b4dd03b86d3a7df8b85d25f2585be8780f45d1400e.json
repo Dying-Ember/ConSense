@@ -1,0 +1,461 @@
+{
+  "id": "physical-table:825e0d92466703f6676eb8b4dd03b86d3a7df8b85d25f2585be8780f45d1400e",
+  "sectionId": "geotechnical:GIN",
+  "originalPage": 4154,
+  "localPage": 15,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      177.5141158823529,
+      495.96999999999997,
+      525.0853082352942,
+      604.450015
+    ],
+    "cells": [
+      [
+        177.5141158823529,
+        495.96999999999997,
+        340.93,
+        515.47
+      ],
+      [
+        177.5141158823529,
+        515.47,
+        340.93,
+        604.450015
+      ],
+      [
+        340.93,
+        495.96999999999997,
+        525.0853082352942,
+        515.47
+      ],
+      [
+        340.93,
+        515.47,
+        525.0853082352942,
+        604.450015
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.5141158823529,
+          495.96999999999997,
+          525.0853082352942,
+          515.47
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.5141158823529,
+              495.96999999999997,
+              340.93,
+              515.47
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              2037,
+              2038,
+              2039,
+              2040,
+              2041,
+              2042,
+              2043,
+              2044,
+              2045,
+              2046,
+              2047,
+              2048,
+              2049,
+              2050,
+              2051,
+              2052,
+              2053,
+              2054,
+              2055,
+              2056
+            ],
+            "extractedText": "Measuring Equipment"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              340.93,
+              495.96999999999997,
+              525.0853082352942,
+              515.47
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              2057,
+              2058,
+              2059,
+              2060,
+              2061,
+              2062,
+              2063,
+              2064,
+              2065,
+              2066,
+              2067,
+              2068,
+              2069,
+              2070,
+              2071,
+              2072,
+              2073,
+              2074,
+              2075,
+              2076,
+              2077
+            ],
+            "extractedText": "Calibration Interval"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.5141158823529,
+          515.47,
+          525.0853082352942,
+          604.450015
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.5141158823529,
+              515.47,
+              340.93,
+              604.450015
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              2078,
+              2079,
+              2080,
+              2081,
+              2082,
+              2083,
+              2084,
+              2085,
+              2086,
+              2087,
+              2088,
+              2089,
+              2090,
+              2091,
+              2092,
+              2093,
+              2094,
+              2095,
+              2096,
+              2097,
+              2098,
+              2099,
+              2100,
+              2101,
+              2102,
+              2103,
+              2104,
+              2105,
+              2106,
+              2107,
+              2108,
+              2109,
+              2110,
+              2111,
+              2112,
+              2113,
+              2114,
+              2115,
+              2116,
+              2117,
+              2118,
+              2119,
+              2120,
+              2121,
+              2122,
+              2123,
+              2124,
+              2125,
+              2126,
+              2127,
+              2128,
+              2129,
+              2130,
+              2131,
+              2132,
+              2133,
+              2134,
+              2135,
+              2136,
+              2137,
+              2138,
+              2139,
+              2140,
+              2141,
+              2142,
+              2143,
+              2144,
+              2145,
+              2146,
+              2147,
+              2148
+            ],
+            "extractedText": "Flowmeters\nProving rings\nPressure gauges\nTorque Head (Vane)\nLoad cells"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              340.93,
+              515.47,
+              525.0853082352942,
+              604.450015
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              2149,
+              2150,
+              2151,
+              2152,
+              2153,
+              2154,
+              2155,
+              2156,
+              2157,
+              2158,
+              2159,
+              2160,
+              2161,
+              2162,
+              2163,
+              2164,
+              2165,
+              2166,
+              2167,
+              2168,
+              2169,
+              2170,
+              2171,
+              2172,
+              2173,
+              2174,
+              2175,
+              2176,
+              2177,
+              2178,
+              2179,
+              2180,
+              2181,
+              2182,
+              2183,
+              2184,
+              2185,
+              2186,
+              2187,
+              2188,
+              2189,
+              2190,
+              2191,
+              2192,
+              2193,
+              2194,
+              2195,
+              2196,
+              2197,
+              2198,
+              2199,
+              2200,
+              2201,
+              2202,
+              2203,
+              2204,
+              2205,
+              2206,
+              2207,
+              2208,
+              2209,
+              2210,
+              2211,
+              2212,
+              2213,
+              2214,
+              2215,
+              2216,
+              2217,
+              2218,
+              2219,
+              2220,
+              2221,
+              2222,
+              2223,
+              2224,
+              2225,
+              2226,
+              2227,
+              2228,
+              2229,
+              2230,
+              2231,
+              2232,
+              2233
+            ],
+            "extractedText": "6 months\n2 years (or as agreed by the CM)\n6 months\nPrior to each mobilisation\n1 year"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.5141158823529,
+          495.96999999999997,
+          340.93,
+          604.450015
+        ],
+        "cells": [
+          [
+            177.5141158823529,
+            495.96999999999997,
+            340.93,
+            515.47
+          ],
+          [
+            177.5141158823529,
+            515.47,
+            340.93,
+            604.450015
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          340.93,
+          495.96999999999997,
+          525.0853082352942,
+          604.450015
+        ],
+        "cells": [
+          [
+            340.93,
+            495.96999999999997,
+            525.0853082352942,
+            515.47
+          ],
+          [
+            340.93,
+            515.47,
+            525.0853082352942,
+            604.450015
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Measuring Equipment",
+        "Calibration Interval"
+      ],
+      [
+        "Flowmeters\nProving rings\nPressure gauges\nTorque Head (Vane)\nLoad cells",
+        "6 months\n2 years (or as agreed by the CM)\n6 months\nPrior to each mobilisation\n1 year"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

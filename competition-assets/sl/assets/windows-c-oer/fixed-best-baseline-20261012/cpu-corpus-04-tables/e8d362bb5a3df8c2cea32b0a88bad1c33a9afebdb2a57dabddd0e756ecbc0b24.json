@@ -1,0 +1,200 @@
+{
+  "id": "physical-table:e8d362bb5a3df8c2cea32b0a88bad1c33a9afebdb2a57dabddd0e756ecbc0b24",
+  "sectionId": "architectural:WAT6",
+  "originalPage": 1826,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 3,
+    "bbox": [
+      406.75,
+      73.28470588235285,
+      470.734,
+      99.74000000000001
+    ],
+    "cells": [
+      [
+        406.75,
+        73.28470588235285,
+        470.734,
+        87.53799999999995
+      ],
+      [
+        406.75,
+        87.53799999999995,
+        436.75,
+        99.74000000000001
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        67
+      ],
+      [
+        68
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          406.75,
+          73.28470588235285,
+          470.734,
+          87.53799999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              406.75,
+              73.28470588235285,
+              470.734,
+              87.53799999999995
+            ],
+            "finderCellIndexes": [
+              67
+            ],
+            "rawCharIndexes": [
+              281,
+              282,
+              283,
+              284,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293
+            ],
+            "extractedText": "DIN 1048 Part"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          406.75,
+          87.53799999999995,
+          436.75,
+          99.74000000000001
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              406.75,
+              87.53799999999995,
+              436.75,
+              99.74000000000001
+            ],
+            "finderCellIndexes": [
+              68
+            ],
+            "rawCharIndexes": [
+              295,
+              296,
+              297,
+              298,
+              299,
+              300
+            ],
+            "extractedText": "5:1991"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          406.75,
+          73.28470588235285,
+          470.734,
+          99.74000000000001
+        ],
+        "cells": [
+          [
+            406.75,
+            73.28470588235285,
+            470.734,
+            87.53799999999995
+          ],
+          [
+            406.75,
+            87.53799999999995,
+            436.75,
+            99.74000000000001
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            67
+          ],
+          [
+            68
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "DIN 1048 Part"
+      ],
+      [
+        "5:1991"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

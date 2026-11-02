@@ -1,0 +1,1267 @@
+{
+  "id": "physical-table:fb7b811a16a019356f8fe2c1373e0b516a313aa5e946b56581ca46b2600a8097",
+  "sectionId": "demolition:DEM1",
+  "originalPage": 2615,
+  "localPage": 7,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      176.108,
+      636.850015,
+      528.1720144,
+      734.1914435714285
+    ],
+    "cells": [
+      [
+        176.108,
+        636.850015,
+        285.4091666666667,
+        674.26
+      ],
+      [
+        176.108,
+        674.26,
+        285.4091666666667,
+        704.02001
+      ],
+      [
+        176.108,
+        704.02001,
+        285.4091666666667,
+        734.1914435714285
+      ],
+      [
+        285.4091666666667,
+        636.850015,
+        528.1720144,
+        655.87001
+      ],
+      [
+        285.4091666666667,
+        655.87001,
+        339.21439999999996,
+        674.26
+      ],
+      [
+        285.4091666666667,
+        674.26,
+        339.21439999999996,
+        704.02001
+      ],
+      [
+        285.4091666666667,
+        704.02001,
+        339.21439999999996,
+        734.1914435714285
+      ],
+      [
+        339.21439999999996,
+        655.87001,
+        390.334,
+        674.26
+      ],
+      [
+        339.21439999999996,
+        674.26,
+        390.334,
+        704.02001
+      ],
+      [
+        339.21439999999996,
+        704.02001,
+        390.334,
+        734.1914435714285
+      ],
+      [
+        390.334,
+        655.87001,
+        426.334,
+        674.26
+      ],
+      [
+        390.334,
+        674.26,
+        426.334,
+        704.02001
+      ],
+      [
+        390.334,
+        704.02001,
+        426.334,
+        734.1914435714285
+      ],
+      [
+        426.334,
+        655.87001,
+        462.36339100000004,
+        674.26
+      ],
+      [
+        426.334,
+        674.26,
+        462.36339100000004,
+        704.02001
+      ],
+      [
+        426.334,
+        704.02001,
+        462.36339100000004,
+        734.1914435714285
+      ],
+      [
+        462.36339100000004,
+        655.87001,
+        491.404,
+        674.26
+      ],
+      [
+        462.36339100000004,
+        674.26,
+        491.404,
+        704.02001
+      ],
+      [
+        462.36339100000004,
+        704.02001,
+        491.404,
+        734.1914435714285
+      ],
+      [
+        491.404,
+        655.87001,
+        528.1720144,
+        674.26
+      ],
+      [
+        491.404,
+        674.26,
+        528.1720144,
+        704.02001
+      ],
+      [
+        491.404,
+        704.02001,
+        528.1720144,
+        734.1914435714285
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        20
+      ],
+      [
+        21
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          176.108,
+          636.850015,
+          528.1720144,
+          674.26
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              176.108,
+              636.850015,
+              285.4091666666667,
+              674.26
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1722,
+              1723,
+              1724,
+              1725,
+              1726,
+              1727,
+              1728,
+              1729,
+              1730,
+              1731,
+              1732,
+              1733,
+              1734,
+              1735,
+              1736,
+              1737,
+              1738,
+              1739,
+              1740,
+              1741,
+              1742,
+              1743,
+              1744,
+              1745,
+              1746,
+              1747,
+              1748,
+              1749,
+              1750
+            ],
+            "extractedText": "Critical Stages of the\nWorks"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              285.4091666666667,
+              636.850015,
+              528.1720144,
+              655.87001
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1751,
+              1752,
+              1753,
+              1754,
+              1755,
+              1756,
+              1757,
+              1758,
+              1759,
+              1760,
+              1761,
+              1762,
+              1763,
+              1764,
+              1765,
+              1766,
+              1767,
+              1768,
+              1769,
+              1770
+            ],
+            "extractedText": "Contractor's Stream"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 6,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          285.4091666666667,
+          655.87001,
+          528.1720144,
+          674.26
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              285.4091666666667,
+              655.87001,
+              339.21439999999996,
+              674.26
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              1771,
+              1772,
+              1773
+            ],
+            "extractedText": "AS"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              339.21439999999996,
+              655.87001,
+              390.334,
+              674.26
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              1774,
+              1775,
+              1776,
+              1777,
+              1778,
+              1779,
+              1780,
+              1781,
+              1782,
+              1783
+            ],
+            "extractedText": "CR/T5Note"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 3,
+            "bbox": [
+              390.334,
+              655.87001,
+              426.334,
+              674.26
+            ],
+            "finderCellIndexes": [
+              10
+            ],
+            "rawCharIndexes": [
+              1784,
+              1785,
+              1786
+            ],
+            "extractedText": "T4"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 4,
+            "bbox": [
+              426.334,
+              655.87001,
+              462.36339100000004,
+              674.26
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              1787,
+              1788,
+              1789
+            ],
+            "extractedText": "T3"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 5,
+            "bbox": [
+              462.36339100000004,
+              655.87001,
+              491.404,
+              674.26
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              1790,
+              1791,
+              1792
+            ],
+            "extractedText": "T2"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 6,
+            "bbox": [
+              491.404,
+              655.87001,
+              528.1720144,
+              674.26
+            ],
+            "finderCellIndexes": [
+              19
+            ],
+            "rawCharIndexes": [
+              1793,
+              1794,
+              1795
+            ],
+            "extractedText": "T1"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          176.108,
+          674.26,
+          528.1720144,
+          704.02001
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              176.108,
+              674.26,
+              285.4091666666667,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              1796,
+              1797,
+              1798,
+              1799,
+              1800,
+              1801,
+              1802,
+              1803,
+              1804,
+              1805,
+              1806,
+              1807,
+              1808,
+              1809,
+              1810,
+              1811,
+              1812,
+              1813,
+              1814,
+              1815,
+              1816,
+              1817,
+              1818,
+              1819
+            ],
+            "extractedText": "Cantilevered Structures"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              285.4091666666667,
+              674.26,
+              339.21439999999996,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1820,
+              1821,
+              1822,
+              1823,
+              1824,
+              1825,
+              1826,
+              1827,
+              1828,
+              1829
+            ],
+            "extractedText": "Bi-weekly"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              339.21439999999996,
+              674.26,
+              390.334,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              8
+            ],
+            "rawCharIndexes": [
+              1830,
+              1831,
+              1832,
+              1833,
+              1834,
+              1835,
+              1836,
+              1837,
+              1838,
+              1839
+            ],
+            "extractedText": "Bi-weekly"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 3,
+            "bbox": [
+              390.334,
+              674.26,
+              426.334,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              11
+            ],
+            "rawCharIndexes": [
+              1840,
+              1841,
+              1842,
+              1843,
+              1844,
+              1845,
+              1846,
+              1847,
+              1848,
+              1849
+            ],
+            "extractedText": "Full\nTime"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 4,
+            "bbox": [
+              426.334,
+              674.26,
+              462.36339100000004,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              1850,
+              1851,
+              1852,
+              1853,
+              1854,
+              1855,
+              1856,
+              1857,
+              1858,
+              1859
+            ],
+            "extractedText": "Full\nTime"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 5,
+            "bbox": [
+              462.36339100000004,
+              674.26,
+              491.404,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              17
+            ],
+            "rawCharIndexes": [
+              1860,
+              1861
+            ],
+            "extractedText": "-"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 6,
+            "bbox": [
+              491.404,
+              674.26,
+              528.1720144,
+              704.02001
+            ],
+            "finderCellIndexes": [
+              20
+            ],
+            "rawCharIndexes": [
+              1862,
+              1863,
+              1864,
+              1865,
+              1866,
+              1867,
+              1868,
+              1869,
+              1870,
+              1871
+            ],
+            "extractedText": "Full\nTime"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          176.108,
+          704.02001,
+          528.1720144,
+          734.1914435714285
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              176.108,
+              704.02001,
+              285.4091666666667,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1872,
+              1873,
+              1874,
+              1875,
+              1876,
+              1877,
+              1878,
+              1879,
+              1880,
+              1881,
+              1882,
+              1883,
+              1884,
+              1885
+            ],
+            "extractedText": "Factory Block"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              285.4091666666667,
+              704.02001,
+              339.21439999999996,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              1886,
+              1887,
+              1888,
+              1889,
+              1890,
+              1891,
+              1892,
+              1893,
+              1894,
+              1895
+            ],
+            "extractedText": "Bi-weekly"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 2,
+            "bbox": [
+              339.21439999999996,
+              704.02001,
+              390.334,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              9
+            ],
+            "rawCharIndexes": [
+              1896,
+              1897,
+              1898,
+              1899,
+              1900,
+              1901,
+              1902,
+              1903,
+              1904,
+              1905
+            ],
+            "extractedText": "Bi-weekly"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 3,
+            "bbox": [
+              390.334,
+              704.02001,
+              426.334,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              1906,
+              1907,
+              1908,
+              1909,
+              1910,
+              1911,
+              1912,
+              1913,
+              1914,
+              1915
+            ],
+            "extractedText": "Full\nTime"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 4,
+            "bbox": [
+              426.334,
+              704.02001,
+              462.36339100000004,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              15
+            ],
+            "rawCharIndexes": [
+              1916,
+              1917,
+              1918,
+              1919,
+              1920,
+              1921,
+              1922,
+              1923,
+              1924,
+              1925
+            ],
+            "extractedText": "Full\nTime"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 5,
+            "bbox": [
+              462.36339100000004,
+              704.02001,
+              491.404,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              18
+            ],
+            "rawCharIndexes": [
+              1926,
+              1927
+            ],
+            "extractedText": "-"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 6,
+            "bbox": [
+              491.404,
+              704.02001,
+              528.1720144,
+              734.1914435714285
+            ],
+            "finderCellIndexes": [
+              21
+            ],
+            "rawCharIndexes": [
+              1928,
+              1929,
+              1930,
+              1931,
+              1932,
+              1933,
+              1934,
+              1935,
+              1936,
+              1937
+            ],
+            "extractedText": "Full\nTime"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          176.108,
+          636.850015,
+          285.4091666666667,
+          734.1914435714285
+        ],
+        "cells": [
+          [
+            176.108,
+            636.850015,
+            285.4091666666667,
+            674.26
+          ],
+          null,
+          [
+            176.108,
+            674.26,
+            285.4091666666667,
+            704.02001
+          ],
+          [
+            176.108,
+            704.02001,
+            285.4091666666667,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          null,
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          285.4091666666667,
+          636.850015,
+          528.1720144,
+          734.1914435714285
+        ],
+        "cells": [
+          [
+            285.4091666666667,
+            636.850015,
+            528.1720144,
+            655.87001
+          ],
+          [
+            285.4091666666667,
+            655.87001,
+            339.21439999999996,
+            674.26
+          ],
+          [
+            285.4091666666667,
+            674.26,
+            339.21439999999996,
+            704.02001
+          ],
+          [
+            285.4091666666667,
+            704.02001,
+            339.21439999999996,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          339.21439999999996,
+          655.87001,
+          390.334,
+          734.1914435714285
+        ],
+        "cells": [
+          null,
+          [
+            339.21439999999996,
+            655.87001,
+            390.334,
+            674.26
+          ],
+          [
+            339.21439999999996,
+            674.26,
+            390.334,
+            704.02001
+          ],
+          [
+            339.21439999999996,
+            704.02001,
+            390.334,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ]
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          390.334,
+          655.87001,
+          426.334,
+          734.1914435714285
+        ],
+        "cells": [
+          null,
+          [
+            390.334,
+            655.87001,
+            426.334,
+            674.26
+          ],
+          [
+            390.334,
+            674.26,
+            426.334,
+            704.02001
+          ],
+          [
+            390.334,
+            704.02001,
+            426.334,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            10
+          ],
+          [
+            11
+          ],
+          [
+            12
+          ]
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          426.334,
+          655.87001,
+          462.36339100000004,
+          734.1914435714285
+        ],
+        "cells": [
+          null,
+          [
+            426.334,
+            655.87001,
+            462.36339100000004,
+            674.26
+          ],
+          [
+            426.334,
+            674.26,
+            462.36339100000004,
+            704.02001
+          ],
+          [
+            426.334,
+            704.02001,
+            462.36339100000004,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            13
+          ],
+          [
+            14
+          ],
+          [
+            15
+          ]
+        ]
+      },
+      {
+        "columnIndex": 5,
+        "bbox": [
+          462.36339100000004,
+          655.87001,
+          491.404,
+          734.1914435714285
+        ],
+        "cells": [
+          null,
+          [
+            462.36339100000004,
+            655.87001,
+            491.404,
+            674.26
+          ],
+          [
+            462.36339100000004,
+            674.26,
+            491.404,
+            704.02001
+          ],
+          [
+            462.36339100000004,
+            704.02001,
+            491.404,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            16
+          ],
+          [
+            17
+          ],
+          [
+            18
+          ]
+        ]
+      },
+      {
+        "columnIndex": 6,
+        "bbox": [
+          491.404,
+          655.87001,
+          528.1720144,
+          734.1914435714285
+        ],
+        "cells": [
+          null,
+          [
+            491.404,
+            655.87001,
+            528.1720144,
+            674.26
+          ],
+          [
+            491.404,
+            674.26,
+            528.1720144,
+            704.02001
+          ],
+          [
+            491.404,
+            704.02001,
+            528.1720144,
+            734.1914435714285
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            19
+          ],
+          [
+            20
+          ],
+          [
+            21
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Critical Stages of the\nWorks",
+        "Contractor's Stream",
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        "AS",
+        "CR/T5Note",
+        "T4",
+        "T3",
+        "T2",
+        "T1"
+      ],
+      [
+        "Cantilevered Structures",
+        "Bi-weekly",
+        "Bi-weekly",
+        "Full\nTime",
+        "Full\nTime",
+        "-",
+        "Full\nTime"
+      ],
+      [
+        "Factory Block",
+        "Bi-weekly",
+        "Bi-weekly",
+        "Full\nTime",
+        "Full\nTime",
+        "-",
+        "Full\nTime"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

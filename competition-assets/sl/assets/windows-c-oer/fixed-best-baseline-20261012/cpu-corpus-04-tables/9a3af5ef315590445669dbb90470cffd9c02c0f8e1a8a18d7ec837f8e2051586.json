@@ -1,0 +1,582 @@
+{
+  "id": "physical-table:9a3af5ef315590445669dbb90470cffd9c02c0f8e1a8a18d7ec837f8e2051586",
+  "sectionId": "drainage_external:DRA1",
+  "originalPage": 1888,
+  "localPage": 24,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      206.53914114285715,
+      72.83999999999992,
+      525.2500128571428,
+      156.7400029166666
+    ],
+    "cells": [
+      [
+        206.53914114285715,
+        72.83999999999992,
+        304.826,
+        137.29999999999995
+      ],
+      [
+        206.53914114285715,
+        137.29999999999995,
+        304.826,
+        156.7400029166666
+      ],
+      [
+        304.826,
+        72.83999999999992,
+        409.006,
+        137.29999999999995
+      ],
+      [
+        304.826,
+        137.29999999999995,
+        409.006,
+        156.7400029166666
+      ],
+      [
+        409.006,
+        72.83999999999992,
+        525.2500128571428,
+        137.29999999999995
+      ],
+      [
+        409.006,
+        137.29999999999995,
+        525.2500128571428,
+        156.7400029166666
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          206.53914114285715,
+          72.83999999999992,
+          525.2500128571428,
+          137.29999999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              206.53914114285715,
+              72.83999999999992,
+              304.826,
+              137.29999999999995
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              189,
+              190,
+              191,
+              192,
+              193,
+              194,
+              195,
+              196,
+              197,
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204,
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229,
+              230,
+              231,
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238,
+              239,
+              240,
+              241
+            ],
+            "extractedText": "Delivery Note with\ncontent at sub-\nclause (3)(a)(iii)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              304.826,
+              72.83999999999992,
+              409.006,
+              137.29999999999995
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256
+            ],
+            "extractedText": "Document check"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              409.006,
+              72.83999999999992,
+              525.2500128571428,
+              137.29999999999995
+            ],
+            "finderCellIndexes": [
+              8
+            ],
+            "rawCharIndexes": [
+              257,
+              258,
+              259,
+              260,
+              261,
+              262,
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270,
+              271,
+              272,
+              273,
+              274,
+              275,
+              276,
+              277,
+              278,
+              279,
+              280,
+              281,
+              282,
+              283,
+              284,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294,
+              295,
+              296,
+              297,
+              298,
+              299,
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+              309,
+              310,
+              311,
+              312,
+              313,
+              314,
+              315,
+              316,
+              317,
+              318,
+              319,
+              320,
+              321,
+              322,
+              323,
+              324,
+              325,
+              326,
+              327,
+              328,
+              329,
+              330,
+              331,
+              332,
+              333,
+              334,
+              335,
+              336,
+              337,
+              338,
+              339,
+              340,
+              341,
+              342,
+              343,
+              344,
+              345,
+              346,
+              347,
+              348,
+              349,
+              350,
+              351,
+              352,
+              353,
+              354,
+              355,
+              356,
+              357,
+              358,
+              359,
+              360,
+              361,
+              362,
+              363,
+              364,
+              365,
+              366,
+              367,
+              368,
+              369,
+              370
+            ],
+            "extractedText": "Material delivered is\nfrom the manufacturer\nin sub-clause (1)(a)(v);\nSerial number same as\nsub-clause (3)(a)(iii)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          206.53914114285715,
+          137.29999999999995,
+          525.2500128571428,
+          156.7400029166666
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              206.53914114285715,
+              137.29999999999995,
+              304.826,
+              156.7400029166666
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              371,
+              372,
+              373,
+              374,
+              375,
+              376,
+              377,
+              378,
+              379,
+              380,
+              381,
+              382,
+              383,
+              384,
+              385,
+              386,
+              387,
+              388
+            ],
+            "extractedText": "Collar dimensions"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              304.826,
+              137.29999999999995,
+              409.006,
+              156.7400029166666
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              389,
+              390,
+              391,
+              392,
+              393,
+              394,
+              395,
+              396,
+              397,
+              398,
+              399,
+              400
+            ],
+            "extractedText": "Measurement"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              409.006,
+              137.29999999999995,
+              525.2500128571428,
+              156.7400029166666
+            ],
+            "finderCellIndexes": [
+              9
+            ],
+            "rawCharIndexes": [
+              401,
+              402,
+              403,
+              404,
+              405,
+              406,
+              407,
+              408,
+              409,
+              410,
+              411,
+              412,
+              413,
+              414,
+              415,
+              416,
+              417,
+              418,
+              419,
+              420,
+              421,
+              422,
+              423
+            ],
+            "extractedText": "As per approved sample"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          206.53914114285715,
+          72.83999999999992,
+          304.826,
+          156.7400029166666
+        ],
+        "cells": [
+          [
+            206.53914114285715,
+            72.83999999999992,
+            304.826,
+            137.29999999999995
+          ],
+          [
+            206.53914114285715,
+            137.29999999999995,
+            304.826,
+            156.7400029166666
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          304.826,
+          72.83999999999992,
+          409.006,
+          156.7400029166666
+        ],
+        "cells": [
+          [
+            304.826,
+            72.83999999999992,
+            409.006,
+            137.29999999999995
+          ],
+          [
+            304.826,
+            137.29999999999995,
+            409.006,
+            156.7400029166666
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          409.006,
+          72.83999999999992,
+          525.2500128571428,
+          156.7400029166666
+        ],
+        "cells": [
+          [
+            409.006,
+            72.83999999999992,
+            525.2500128571428,
+            137.29999999999995
+          ],
+          [
+            409.006,
+            137.29999999999995,
+            525.2500128571428,
+            156.7400029166666
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            8
+          ],
+          [
+            9
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Delivery Note with\ncontent at sub-\nclause (3)(a)(iii)",
+        "Document check",
+        "Material delivered is\nfrom the manufacturer\nin sub-clause (1)(a)(v);\nSerial number same as\nsub-clause (3)(a)(iii)"
+      ],
+      [
+        "Collar dimensions",
+        "Measurement",
+        "As per approved sample"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

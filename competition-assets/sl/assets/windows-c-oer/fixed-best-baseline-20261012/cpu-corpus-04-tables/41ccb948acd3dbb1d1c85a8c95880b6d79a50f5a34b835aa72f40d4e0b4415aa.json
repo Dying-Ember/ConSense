@@ -1,0 +1,548 @@
+{
+  "id": "physical-table:41ccb948acd3dbb1d1c85a8c95880b6d79a50f5a34b835aa72f40d4e0b4415aa",
+  "sectionId": "structural:CON3",
+  "originalPage": 2260,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      180.668,
+      72.83999999999992,
+      530.9315976,
+      147.80000312499993
+    ],
+    "cells": [
+      [
+        180.668,
+        72.83999999999992,
+        530.9315976,
+        92.03999999999996
+      ],
+      [
+        180.668,
+        92.03999999999996,
+        400.894,
+        110.41999999999996
+      ],
+      [
+        180.668,
+        110.41999999999996,
+        400.894,
+        128.77999999999997
+      ],
+      [
+        180.668,
+        128.77999999999997,
+        400.894,
+        147.80000312499993
+      ],
+      [
+        400.894,
+        92.03999999999996,
+        530.9315976,
+        110.41999999999996
+      ],
+      [
+        400.894,
+        110.41999999999996,
+        530.9315976,
+        128.77999999999997
+      ],
+      [
+        400.894,
+        128.77999999999997,
+        530.9315976,
+        147.80000312499993
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          180.668,
+          72.83999999999992,
+          530.9315976,
+          92.03999999999996
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              180.668,
+              72.83999999999992,
+              530.9315976,
+              92.03999999999996
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              180,
+              181,
+              182,
+              183,
+              184,
+              185,
+              186,
+              187,
+              188,
+              189,
+              190,
+              191,
+              192,
+              193,
+              194,
+              195,
+              196,
+              197,
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204,
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217
+            ],
+            "extractedText": "Sampling Rate of Fabric Reinforcement"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          180.668,
+          92.03999999999996,
+          530.9315976,
+          110.41999999999996
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              180.668,
+              92.03999999999996,
+              400.894,
+              110.41999999999996
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229,
+              230,
+              231
+            ],
+            "extractedText": "Size of Batch"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              400.894,
+              92.03999999999996,
+              530.9315976,
+              110.41999999999996
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238,
+              239,
+              240,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256
+            ],
+            "extractedText": "No. of Samples per Batch"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          180.668,
+          110.41999999999996,
+          530.9315976,
+          128.77999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              180.668,
+              110.41999999999996,
+              400.894,
+              128.77999999999997
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              257,
+              258,
+              259,
+              260,
+              261,
+              262,
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270
+            ],
+            "extractedText": "0 - 50 tonnes"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              400.894,
+              110.41999999999996,
+              530.9315976,
+              128.77999999999997
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              271,
+              272
+            ],
+            "extractedText": "1"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          180.668,
+          128.77999999999997,
+          530.9315976,
+          147.80000312499993
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              180.668,
+              128.77999999999997,
+              400.894,
+              147.80000312499993
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              273,
+              274,
+              275,
+              276,
+              277,
+              278,
+              279,
+              280,
+              281,
+              282,
+              283,
+              284,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294,
+              295,
+              296,
+              297,
+              298,
+              299,
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+              309,
+              310,
+              311,
+              312,
+              313,
+              314,
+              315,
+              316,
+              317,
+              318,
+              319
+            ],
+            "extractedText": "Each additional 50 tonnes or part of 50 tonnes"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              400.894,
+              128.77999999999997,
+              530.9315976,
+              147.80000312499993
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              320,
+              321
+            ],
+            "extractedText": "1"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          180.668,
+          72.83999999999992,
+          530.9315976,
+          147.80000312499993
+        ],
+        "cells": [
+          [
+            180.668,
+            72.83999999999992,
+            530.9315976,
+            92.03999999999996
+          ],
+          [
+            180.668,
+            92.03999999999996,
+            400.894,
+            110.41999999999996
+          ],
+          [
+            180.668,
+            110.41999999999996,
+            400.894,
+            128.77999999999997
+          ],
+          [
+            180.668,
+            128.77999999999997,
+            400.894,
+            147.80000312499993
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          400.894,
+          92.03999999999996,
+          530.9315976,
+          147.80000312499993
+        ],
+        "cells": [
+          null,
+          [
+            400.894,
+            92.03999999999996,
+            530.9315976,
+            110.41999999999996
+          ],
+          [
+            400.894,
+            110.41999999999996,
+            530.9315976,
+            128.77999999999997
+          ],
+          [
+            400.894,
+            128.77999999999997,
+            530.9315976,
+            147.80000312499993
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Sampling Rate of Fabric Reinforcement",
+        null
+      ],
+      [
+        "Size of Batch",
+        "No. of Samples per Batch"
+      ],
+      [
+        "0 - 50 tonnes",
+        "1"
+      ],
+      [
+        "Each additional 50 tonnes or part of 50 tonnes",
+        "1"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

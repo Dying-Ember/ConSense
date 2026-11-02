@@ -1,0 +1,2382 @@
+{
+  "id": "physical-table:6e2ebd8759041157fbdd41634a928d178c9d188658d3a05b03c392ca5e89e3c6",
+  "sectionId": "architectural:PLU2",
+  "originalPage": 1740,
+  "localPage": 16,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      213.114,
+      262.69999999999993,
+      517.9394305109489,
+      514.480015
+    ],
+    "cells": [
+      [
+        213.114,
+        262.69999999999993,
+        373.6457391304347,
+        293.56999999999994
+      ],
+      [
+        213.114,
+        293.56999999999994,
+        276.71857142857147,
+        414.050015
+      ],
+      [
+        213.114,
+        414.050015,
+        276.71857142857147,
+        477.78999999999996
+      ],
+      [
+        213.114,
+        477.78999999999996,
+        276.71857142857147,
+        514.480015
+      ],
+      [
+        276.71857142857147,
+        293.56999999999994,
+        316.4936666666667,
+        350.45
+      ],
+      [
+        276.71857142857147,
+        350.45,
+        373.6457391304347,
+        371.68999999999994
+      ],
+      [
+        276.71857142857147,
+        371.68999999999994,
+        373.6457391304347,
+        392.80999999999995
+      ],
+      [
+        276.71857142857147,
+        392.80999999999995,
+        373.6457391304347,
+        414.050015
+      ],
+      [
+        276.71857142857147,
+        414.050015,
+        373.6457391304347,
+        477.78999999999996
+      ],
+      [
+        276.71857142857147,
+        477.78999999999996,
+        373.6457391304347,
+        514.480015
+      ],
+      [
+        316.4936666666667,
+        293.56999999999994,
+        373.6457391304347,
+        307.9699999999999
+      ],
+      [
+        316.4936666666667,
+        307.9699999999999,
+        373.6457391304347,
+        322.3699999999999
+      ],
+      [
+        316.4936666666667,
+        322.3699999999999,
+        373.6457391304347,
+        336.40999999999997
+      ],
+      [
+        316.4936666666667,
+        336.40999999999997,
+        373.6457391304347,
+        350.45
+      ],
+      [
+        373.6457391304347,
+        262.69999999999993,
+        444.642347826087,
+        293.56999999999994
+      ],
+      [
+        373.6457391304347,
+        293.56999999999994,
+        444.642347826087,
+        350.45
+      ],
+      [
+        373.6457391304347,
+        350.45,
+        444.642347826087,
+        371.68999999999994
+      ],
+      [
+        373.6457391304347,
+        371.68999999999994,
+        444.642347826087,
+        392.80999999999995
+      ],
+      [
+        373.6457391304347,
+        392.80999999999995,
+        444.642347826087,
+        414.050015
+      ],
+      [
+        373.6457391304347,
+        414.050015,
+        444.642347826087,
+        442.60999999999996
+      ],
+      [
+        373.6457391304347,
+        442.60999999999996,
+        409.03000000000003,
+        463.84999999999997
+      ],
+      [
+        373.6457391304347,
+        463.84999999999997,
+        409.03000000000003,
+        477.78999999999996
+      ],
+      [
+        373.6457391304347,
+        477.78999999999996,
+        444.642347826087,
+        514.480015
+      ],
+      [
+        409.03000000000003,
+        442.60999999999996,
+        444.642347826087,
+        463.84999999999997
+      ],
+      [
+        409.03000000000003,
+        463.84999999999997,
+        444.642347826087,
+        477.78999999999996
+      ],
+      [
+        444.642347826087,
+        262.69999999999993,
+        517.9394305109489,
+        293.56999999999994
+      ],
+      [
+        444.642347826087,
+        293.56999999999994,
+        517.9394305109489,
+        514.480015
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        23
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ],
+      [
+        26
+      ],
+      [
+        32
+      ],
+      [
+        33
+      ],
+      [
+        34
+      ],
+      [
+        35
+      ],
+      [
+        36
+      ],
+      [
+        37
+      ],
+      [
+        38
+      ],
+      [
+        39
+      ],
+      [
+        40
+      ],
+      [
+        48
+      ],
+      [
+        49
+      ],
+      [
+        52
+      ],
+      [
+        53
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          213.114,
+          262.69999999999993,
+          517.9394305109489,
+          293.56999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              213.114,
+              262.69999999999993,
+              373.6457391304347,
+              293.56999999999994
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              675,
+              676,
+              677,
+              678,
+              679,
+              680,
+              681,
+              682,
+              683,
+              684,
+              685,
+              686
+            ],
+            "extractedText": "Test Method"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              262.69999999999993,
+              444.642347826087,
+              293.56999999999994
+            ],
+            "finderCellIndexes": [
+              32
+            ],
+            "rawCharIndexes": [
+              687,
+              688,
+              689,
+              690,
+              691,
+              692,
+              693,
+              694,
+              695,
+              696,
+              697,
+              698,
+              699,
+              700,
+              701,
+              702,
+              703,
+              704,
+              705,
+              706,
+              707
+            ],
+            "extractedText": "Acceptance\nStandards"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 5,
+            "bbox": [
+              444.642347826087,
+              262.69999999999993,
+              517.9394305109489,
+              293.56999999999994
+            ],
+            "finderCellIndexes": [
+              52
+            ],
+            "rawCharIndexes": [
+              708,
+              709,
+              710,
+              711,
+              712,
+              713,
+              714,
+              715
+            ],
+            "extractedText": "Remarks"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          213.114,
+          293.56999999999994,
+          517.9394305109489,
+          514.480015
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              213.114,
+              293.56999999999994,
+              276.71857142857147,
+              414.050015
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              716,
+              848,
+              849,
+              850,
+              851,
+              852,
+              853,
+              854,
+              855,
+              856,
+              857,
+              858,
+              886,
+              901,
+              916,
+              961,
+              1016
+            ],
+            "extractedText": "Dimensions"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              276.71857142857147,
+              293.56999999999994,
+              316.4936666666667,
+              350.45
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              717,
+              859,
+              860,
+              861,
+              862,
+              863,
+              864,
+              865,
+              866,
+              867,
+              887,
+              902
+            ],
+            "extractedText": "Assembly"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              316.4936666666667,
+              293.56999999999994,
+              373.6457391304347,
+              307.9699999999999
+            ],
+            "finderCellIndexes": [
+              23
+            ],
+            "rawCharIndexes": [
+              718,
+              719,
+              720,
+              721,
+              722,
+              723,
+              724,
+              725,
+              726,
+              727,
+              728,
+              729
+            ],
+            "extractedText": "Length (mm)"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              293.56999999999994,
+              444.642347826087,
+              350.45
+            ],
+            "finderCellIndexes": [
+              33
+            ],
+            "rawCharIndexes": [
+              730,
+              879,
+              880,
+              881,
+              882,
+              883,
+              884,
+              885,
+              900,
+              915
+            ],
+            "extractedText": " 5 mm"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 5,
+            "bbox": [
+              444.642347826087,
+              293.56999999999994,
+              517.9394305109489,
+              514.480015
+            ],
+            "finderCellIndexes": [
+              53
+            ],
+            "rawCharIndexes": [
+              731,
+              732,
+              733,
+              734,
+              735,
+              736,
+              737,
+              738,
+              739,
+              740,
+              741,
+              742,
+              743,
+              744,
+              745,
+              746,
+              747,
+              748,
+              749,
+              750,
+              751,
+              752,
+              753,
+              754,
+              755,
+              756,
+              757,
+              758,
+              759,
+              760,
+              761,
+              762,
+              763,
+              764,
+              765,
+              766,
+              767,
+              768,
+              769,
+              770,
+              771,
+              772,
+              773,
+              774,
+              775,
+              776,
+              777,
+              778,
+              779,
+              780,
+              781,
+              782,
+              783,
+              784,
+              785,
+              786,
+              787,
+              788,
+              789,
+              790,
+              791,
+              792,
+              793,
+              794,
+              795,
+              796,
+              797,
+              798,
+              799,
+              800,
+              801,
+              802,
+              803,
+              804,
+              805,
+              806,
+              807,
+              808,
+              809,
+              810,
+              811,
+              812,
+              813,
+              814,
+              815,
+              816,
+              817,
+              818,
+              819,
+              820,
+              821,
+              822,
+              823,
+              824,
+              825,
+              826,
+              827,
+              828,
+              829,
+              830,
+              831,
+              832,
+              833,
+              834,
+              835,
+              836,
+              837,
+              838,
+              839,
+              840,
+              841,
+              842,
+              843,
+              844,
+              845,
+              846,
+              847
+            ],
+            "extractedText": "The dimensions shall\nnot deviate from the\nwork size quoted by\nthe manufacturer by\nmore than the\nacceptance standards"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          316.4936666666667,
+          307.9699999999999,
+          373.6457391304347,
+          322.3699999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              316.4936666666667,
+              307.9699999999999,
+              373.6457391304347,
+              322.3699999999999
+            ],
+            "finderCellIndexes": [
+              24
+            ],
+            "rawCharIndexes": [
+              868,
+              869,
+              870,
+              871,
+              872,
+              873,
+              874,
+              875,
+              876,
+              877,
+              878
+            ],
+            "extractedText": "Width (mm)"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          316.4936666666667,
+          322.3699999999999,
+          373.6457391304347,
+          336.40999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 2,
+            "bbox": [
+              316.4936666666667,
+              322.3699999999999,
+              373.6457391304347,
+              336.40999999999997
+            ],
+            "finderCellIndexes": [
+              25
+            ],
+            "rawCharIndexes": [
+              888,
+              889,
+              890,
+              891,
+              892,
+              893,
+              894,
+              895,
+              896,
+              897,
+              898,
+              899
+            ],
+            "extractedText": "Height (mm)"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 4,
+        "bbox": [
+          316.4936666666667,
+          336.40999999999997,
+          373.6457391304347,
+          350.45
+        ],
+        "slots": [
+          {
+            "rowIndex": 4,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 2,
+            "bbox": [
+              316.4936666666667,
+              336.40999999999997,
+              373.6457391304347,
+              350.45
+            ],
+            "finderCellIndexes": [
+              26
+            ],
+            "rawCharIndexes": [
+              903,
+              904,
+              905,
+              906,
+              907,
+              908,
+              909,
+              910,
+              911,
+              912,
+              913,
+              914
+            ],
+            "extractedText": "Radius (mm)"
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 5,
+        "bbox": [
+          276.71857142857147,
+          350.45,
+          444.642347826087,
+          371.68999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 5,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 5,
+            "columnIndex": 1,
+            "bbox": [
+              276.71857142857147,
+              350.45,
+              373.6457391304347,
+              371.68999999999994
+            ],
+            "finderCellIndexes": [
+              15
+            ],
+            "rawCharIndexes": [
+              917,
+              918,
+              919,
+              920,
+              921,
+              922,
+              923,
+              924,
+              925,
+              926,
+              927,
+              928,
+              929,
+              930,
+              931,
+              932,
+              933,
+              934,
+              935,
+              936,
+              937,
+              938,
+              939,
+              940,
+              941,
+              942,
+              943,
+              944,
+              945,
+              946,
+              947,
+              948,
+              949,
+              950,
+              951,
+              952,
+              953
+            ],
+            "extractedText": "Thickness of Door (Outer\nFrame) (mm)"
+          },
+          {
+            "rowIndex": 5,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 5,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              350.45,
+              444.642347826087,
+              371.68999999999994
+            ],
+            "finderCellIndexes": [
+              34
+            ],
+            "rawCharIndexes": [
+              954,
+              955,
+              956,
+              957,
+              958,
+              959,
+              960
+            ],
+            "extractedText": " 2 mm"
+          },
+          {
+            "rowIndex": 5,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 5,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 6,
+        "bbox": [
+          276.71857142857147,
+          371.68999999999994,
+          444.642347826087,
+          392.80999999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 6,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 6,
+            "columnIndex": 1,
+            "bbox": [
+              276.71857142857147,
+              371.68999999999994,
+              373.6457391304347,
+              392.80999999999995
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              962,
+              963,
+              964,
+              965,
+              966,
+              967,
+              968,
+              969,
+              970,
+              971,
+              972,
+              973,
+              974,
+              975,
+              976,
+              977,
+              978,
+              979,
+              980,
+              981,
+              982,
+              983,
+              984,
+              985,
+              986,
+              987,
+              988,
+              989,
+              990,
+              991,
+              992,
+              993,
+              994,
+              995,
+              996,
+              997,
+              998,
+              999,
+              1000,
+              1001,
+              1002,
+              1003,
+              1004,
+              1005,
+              1006,
+              1007,
+              1008
+            ],
+            "extractedText": "Thickness of Enclosure Wall\n(Outer Frame) (mm)"
+          },
+          {
+            "rowIndex": 6,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 6,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              371.68999999999994,
+              444.642347826087,
+              392.80999999999995
+            ],
+            "finderCellIndexes": [
+              35
+            ],
+            "rawCharIndexes": [
+              1009,
+              1010,
+              1011,
+              1012,
+              1013,
+              1014,
+              1015
+            ],
+            "extractedText": " 2 mm"
+          },
+          {
+            "rowIndex": 6,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 6,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 7,
+        "bbox": [
+          276.71857142857147,
+          392.80999999999995,
+          444.642347826087,
+          414.050015
+        ],
+        "slots": [
+          {
+            "rowIndex": 7,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 7,
+            "columnIndex": 1,
+            "bbox": [
+              276.71857142857147,
+              392.80999999999995,
+              373.6457391304347,
+              414.050015
+            ],
+            "finderCellIndexes": [
+              17
+            ],
+            "rawCharIndexes": [
+              1017,
+              1018,
+              1019,
+              1020,
+              1021,
+              1022,
+              1023,
+              1024,
+              1025,
+              1026,
+              1027,
+              1028,
+              1029,
+              1030,
+              1031,
+              1032,
+              1033,
+              1034,
+              1035,
+              1036,
+              1037,
+              1038,
+              1039,
+              1040,
+              1041,
+              1042,
+              1043,
+              1044,
+              1045,
+              1046,
+              1047,
+              1048,
+              1049
+            ],
+            "extractedText": "Thickness of Tempered Glass\n(mm)"
+          },
+          {
+            "rowIndex": 7,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 7,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              392.80999999999995,
+              444.642347826087,
+              414.050015
+            ],
+            "finderCellIndexes": [
+              36
+            ],
+            "rawCharIndexes": [
+              1050,
+              1051,
+              1052,
+              1053,
+              1054,
+              1055,
+              1056,
+              1057,
+              1058,
+              1059,
+              1060,
+              1061,
+              1062
+            ],
+            "extractedText": "Minimum 5 mm"
+          },
+          {
+            "rowIndex": 7,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 7,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 8,
+        "bbox": [
+          213.114,
+          414.050015,
+          444.642347826087,
+          477.78999999999996
+        ],
+        "slots": [
+          {
+            "rowIndex": 8,
+            "columnIndex": 0,
+            "bbox": [
+              213.114,
+              414.050015,
+              276.71857142857147,
+              477.78999999999996
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1063,
+              1064,
+              1065,
+              1066,
+              1067,
+              1068,
+              1069,
+              1070,
+              1071,
+              1072,
+              1073,
+              1074,
+              1075,
+              1076,
+              1077,
+              1078,
+              1079,
+              1080,
+              1081,
+              1082,
+              1144,
+              1145,
+              1146,
+              1147,
+              1148,
+              1149,
+              1150,
+              1151,
+              1152,
+              1153,
+              1154,
+              1176
+            ],
+            "extractedText": "BS 6340:Part 3:19\n85\nAppendix A"
+          },
+          {
+            "rowIndex": 8,
+            "columnIndex": 1,
+            "bbox": [
+              276.71857142857147,
+              414.050015,
+              373.6457391304347,
+              477.78999999999996
+            ],
+            "finderCellIndexes": [
+              18
+            ],
+            "rawCharIndexes": [
+              1083,
+              1084,
+              1085,
+              1086,
+              1087,
+              1088,
+              1089,
+              1090,
+              1091,
+              1092,
+              1093,
+              1094,
+              1095,
+              1096,
+              1097,
+              1098,
+              1099,
+              1100,
+              1101,
+              1102,
+              1103,
+              1104,
+              1105,
+              1106,
+              1107,
+              1108,
+              1109,
+              1110,
+              1111,
+              1112,
+              1155,
+              1177
+            ],
+            "extractedText": "Test on Rigid Enclosure Walls"
+          },
+          {
+            "rowIndex": 8,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 8,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              414.050015,
+              444.642347826087,
+              442.60999999999996
+            ],
+            "finderCellIndexes": [
+              37
+            ],
+            "rawCharIndexes": [
+              1113,
+              1114,
+              1115,
+              1116,
+              1117,
+              1118,
+              1119,
+              1120,
+              1121,
+              1122,
+              1123,
+              1124,
+              1125,
+              1126,
+              1127,
+              1128,
+              1129,
+              1130,
+              1131,
+              1132,
+              1133,
+              1134,
+              1135,
+              1136,
+              1137,
+              1138,
+              1139,
+              1140,
+              1141,
+              1142,
+              1143
+            ],
+            "extractedText": "Maximum\nPermissible\nDeflection"
+          },
+          {
+            "rowIndex": 8,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 8,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 9,
+        "bbox": [
+          373.6457391304347,
+          442.60999999999996,
+          444.642347826087,
+          463.84999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 9,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 9,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 9,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 9,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              442.60999999999996,
+              409.03000000000003,
+              463.84999999999997
+            ],
+            "finderCellIndexes": [
+              38
+            ],
+            "rawCharIndexes": [
+              1156,
+              1157,
+              1158,
+              1159,
+              1160,
+              1161,
+              1162,
+              1163,
+              1164,
+              1165,
+              1166
+            ],
+            "extractedText": "Under\nload"
+          },
+          {
+            "rowIndex": 9,
+            "columnIndex": 4,
+            "bbox": [
+              409.03000000000003,
+              442.60999999999996,
+              444.642347826087,
+              463.84999999999997
+            ],
+            "finderCellIndexes": [
+              48
+            ],
+            "rawCharIndexes": [
+              1167,
+              1168,
+              1169,
+              1170,
+              1171,
+              1172,
+              1173,
+              1174,
+              1175
+            ],
+            "extractedText": "Residual"
+          },
+          {
+            "rowIndex": 9,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 10,
+        "bbox": [
+          373.6457391304347,
+          463.84999999999997,
+          444.642347826087,
+          477.78999999999996
+        ],
+        "slots": [
+          {
+            "rowIndex": 10,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 10,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 10,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 10,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              463.84999999999997,
+              409.03000000000003,
+              477.78999999999996
+            ],
+            "finderCellIndexes": [
+              39
+            ],
+            "rawCharIndexes": [
+              1178,
+              1179,
+              1180,
+              1181,
+              1182,
+              1183
+            ],
+            "extractedText": "55 mm"
+          },
+          {
+            "rowIndex": 10,
+            "columnIndex": 4,
+            "bbox": [
+              409.03000000000003,
+              463.84999999999997,
+              444.642347826087,
+              477.78999999999996
+            ],
+            "finderCellIndexes": [
+              49
+            ],
+            "rawCharIndexes": [
+              1184,
+              1185,
+              1186,
+              1187,
+              1188
+            ],
+            "extractedText": "5 mm"
+          },
+          {
+            "rowIndex": 10,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 11,
+        "bbox": [
+          213.114,
+          477.78999999999996,
+          444.642347826087,
+          514.480015
+        ],
+        "slots": [
+          {
+            "rowIndex": 11,
+            "columnIndex": 0,
+            "bbox": [
+              213.114,
+              477.78999999999996,
+              276.71857142857147,
+              514.480015
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              1189,
+              1190,
+              1191,
+              1192,
+              1193,
+              1194,
+              1195,
+              1196,
+              1197,
+              1198,
+              1199,
+              1200,
+              1201,
+              1202,
+              1203,
+              1204,
+              1205,
+              1206,
+              1207,
+              1208,
+              1209,
+              1210,
+              1211,
+              1212,
+              1213,
+              1214,
+              1215,
+              1216,
+              1217,
+              1218,
+              1219
+            ],
+            "extractedText": "BS 6340:Part 3:19\n85 Appendix A"
+          },
+          {
+            "rowIndex": 11,
+            "columnIndex": 1,
+            "bbox": [
+              276.71857142857147,
+              477.78999999999996,
+              373.6457391304347,
+              514.480015
+            ],
+            "finderCellIndexes": [
+              19
+            ],
+            "rawCharIndexes": [
+              1220,
+              1221,
+              1222,
+              1223,
+              1224,
+              1225,
+              1226,
+              1227,
+              1228,
+              1229,
+              1230,
+              1231,
+              1232
+            ],
+            "extractedText": "Leakage Test"
+          },
+          {
+            "rowIndex": 11,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 11,
+            "columnIndex": 3,
+            "bbox": [
+              373.6457391304347,
+              477.78999999999996,
+              444.642347826087,
+              514.480015
+            ],
+            "finderCellIndexes": [
+              40
+            ],
+            "rawCharIndexes": [
+              1233,
+              1234,
+              1235,
+              1236,
+              1237,
+              1238,
+              1239,
+              1240,
+              1241,
+              1242,
+              1243,
+              1244,
+              1245,
+              1246,
+              1247,
+              1248,
+              1249,
+              1250,
+              1251,
+              1252,
+              1253,
+              1254,
+              1255,
+              1256,
+              1257,
+              1258,
+              1259,
+              1260,
+              1261,
+              1262,
+              1263,
+              1264,
+              1265,
+              1266,
+              1267,
+              1268,
+              1269,
+              1270,
+              1271,
+              1272,
+              1273,
+              1274,
+              1275,
+              1276,
+              1277,
+              1278,
+              1279,
+              1280,
+              1281,
+              1282,
+              1283,
+              1284,
+              1285,
+              1286,
+              1287,
+              1288,
+              1289,
+              1290,
+              1291,
+              1292,
+              1293,
+              1294,
+              1295,
+              1296,
+              1297,
+              1298,
+              1299,
+              1300,
+              1301,
+              1302,
+              1303,
+              1304,
+              1305,
+              1306,
+              1307,
+              1308,
+              1309,
+              1310
+            ],
+            "extractedText": "Inspect at the other\nside of the cubicle to\ncheck no water\nleakage / seepage."
+          },
+          {
+            "rowIndex": 11,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 11,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          213.114,
+          262.69999999999993,
+          373.6457391304347,
+          514.480015
+        ],
+        "cells": [
+          [
+            213.114,
+            262.69999999999993,
+            373.6457391304347,
+            293.56999999999994
+          ],
+          [
+            213.114,
+            293.56999999999994,
+            276.71857142857147,
+            414.050015
+          ],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          [
+            213.114,
+            414.050015,
+            276.71857142857147,
+            477.78999999999996
+          ],
+          null,
+          null,
+          [
+            213.114,
+            477.78999999999996,
+            276.71857142857147,
+            514.480015
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          [
+            5
+          ],
+          null,
+          null,
+          [
+            6
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          276.71857142857147,
+          293.56999999999994,
+          373.6457391304347,
+          514.480015
+        ],
+        "cells": [
+          null,
+          [
+            276.71857142857147,
+            293.56999999999994,
+            316.4936666666667,
+            350.45
+          ],
+          null,
+          null,
+          null,
+          [
+            276.71857142857147,
+            350.45,
+            373.6457391304347,
+            371.68999999999994
+          ],
+          [
+            276.71857142857147,
+            371.68999999999994,
+            373.6457391304347,
+            392.80999999999995
+          ],
+          [
+            276.71857142857147,
+            392.80999999999995,
+            373.6457391304347,
+            414.050015
+          ],
+          [
+            276.71857142857147,
+            414.050015,
+            373.6457391304347,
+            477.78999999999996
+          ],
+          null,
+          null,
+          [
+            276.71857142857147,
+            477.78999999999996,
+            373.6457391304347,
+            514.480015
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            14
+          ],
+          null,
+          null,
+          null,
+          [
+            15
+          ],
+          [
+            16
+          ],
+          [
+            17
+          ],
+          [
+            18
+          ],
+          null,
+          null,
+          [
+            19
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          316.4936666666667,
+          293.56999999999994,
+          373.6457391304347,
+          350.45
+        ],
+        "cells": [
+          null,
+          [
+            316.4936666666667,
+            293.56999999999994,
+            373.6457391304347,
+            307.9699999999999
+          ],
+          [
+            316.4936666666667,
+            307.9699999999999,
+            373.6457391304347,
+            322.3699999999999
+          ],
+          [
+            316.4936666666667,
+            322.3699999999999,
+            373.6457391304347,
+            336.40999999999997
+          ],
+          [
+            316.4936666666667,
+            336.40999999999997,
+            373.6457391304347,
+            350.45
+          ],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            23
+          ],
+          [
+            24
+          ],
+          [
+            25
+          ],
+          [
+            26
+          ],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          373.6457391304347,
+          262.69999999999993,
+          444.642347826087,
+          514.480015
+        ],
+        "cells": [
+          [
+            373.6457391304347,
+            262.69999999999993,
+            444.642347826087,
+            293.56999999999994
+          ],
+          [
+            373.6457391304347,
+            293.56999999999994,
+            444.642347826087,
+            350.45
+          ],
+          null,
+          null,
+          null,
+          [
+            373.6457391304347,
+            350.45,
+            444.642347826087,
+            371.68999999999994
+          ],
+          [
+            373.6457391304347,
+            371.68999999999994,
+            444.642347826087,
+            392.80999999999995
+          ],
+          [
+            373.6457391304347,
+            392.80999999999995,
+            444.642347826087,
+            414.050015
+          ],
+          [
+            373.6457391304347,
+            414.050015,
+            444.642347826087,
+            442.60999999999996
+          ],
+          [
+            373.6457391304347,
+            442.60999999999996,
+            409.03000000000003,
+            463.84999999999997
+          ],
+          [
+            373.6457391304347,
+            463.84999999999997,
+            409.03000000000003,
+            477.78999999999996
+          ],
+          [
+            373.6457391304347,
+            477.78999999999996,
+            444.642347826087,
+            514.480015
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            32
+          ],
+          [
+            33
+          ],
+          null,
+          null,
+          null,
+          [
+            34
+          ],
+          [
+            35
+          ],
+          [
+            36
+          ],
+          [
+            37
+          ],
+          [
+            38
+          ],
+          [
+            39
+          ],
+          [
+            40
+          ]
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          409.03000000000003,
+          442.60999999999996,
+          444.642347826087,
+          477.78999999999996
+        ],
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          [
+            409.03000000000003,
+            442.60999999999996,
+            444.642347826087,
+            463.84999999999997
+          ],
+          [
+            409.03000000000003,
+            463.84999999999997,
+            444.642347826087,
+            477.78999999999996
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          [
+            48
+          ],
+          [
+            49
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 5,
+        "bbox": [
+          444.642347826087,
+          262.69999999999993,
+          517.9394305109489,
+          514.480015
+        ],
+        "cells": [
+          [
+            444.642347826087,
+            262.69999999999993,
+            517.9394305109489,
+            293.56999999999994
+          ],
+          [
+            444.642347826087,
+            293.56999999999994,
+            517.9394305109489,
+            514.480015
+          ],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "finderCellIndexes": [
+          [
+            52
+          ],
+          [
+            53
+          ],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Test Method",
+        null,
+        null,
+        "Acceptance\nStandards",
+        null,
+        "Remarks"
+      ],
+      [
+        "Dimensions",
+        "Assembly",
+        "Length (mm)",
+        " 5 mm",
+        null,
+        "The dimensions shall\nnot deviate from the\nwork size quoted by\nthe manufacturer by\nmore than the\nacceptance standards"
+      ],
+      [
+        null,
+        null,
+        "Width (mm)",
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        "Height (mm)",
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        "Radius (mm)",
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        "Thickness of Door (Outer\nFrame) (mm)",
+        null,
+        " 2 mm",
+        null,
+        null
+      ],
+      [
+        null,
+        "Thickness of Enclosure Wall\n(Outer Frame) (mm)",
+        null,
+        " 2 mm",
+        null,
+        null
+      ],
+      [
+        null,
+        "Thickness of Tempered Glass\n(mm)",
+        null,
+        "Minimum 5 mm",
+        null,
+        null
+      ],
+      [
+        "BS 6340:Part 3:19\n85\nAppendix A",
+        "Test on Rigid Enclosure Walls",
+        null,
+        "Maximum\nPermissible\nDeflection",
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        "Under\nload",
+        "Residual",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        "55 mm",
+        "5 mm",
+        null
+      ],
+      [
+        "BS 6340:Part 3:19\n85 Appendix A",
+        "Leakage Test",
+        null,
+        "Inspect at the other\nside of the cubicle to\ncheck no water\nleakage / seepage.",
+        null,
+        null
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

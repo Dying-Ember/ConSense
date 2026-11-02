@@ -1,0 +1,565 @@
+{
+  "id": "physical-table:3d867a74a21c568f20c2c5325b1d2f2ff7050c2faae557439d3737038bc12f5d",
+  "sectionId": "drainage_external:DRA1",
+  "originalPage": 1881,
+  "localPage": 17,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      213.026,
+      72.83999999999992,
+      525.364015,
+      155.89999999999998
+    ],
+    "cells": [
+      [
+        213.026,
+        72.83999999999992,
+        309.17,
+        114.14000499999997
+      ],
+      [
+        213.026,
+        114.14000499999997,
+        309.17,
+        155.89999999999998
+      ],
+      [
+        309.17,
+        72.83999999999992,
+        405.19,
+        114.14000499999997
+      ],
+      [
+        309.17,
+        114.14000499999997,
+        405.19,
+        155.89999999999998
+      ],
+      [
+        405.19,
+        72.83999999999992,
+        525.364015,
+        114.14000499999997
+      ],
+      [
+        405.19,
+        114.14000499999997,
+        525.364015,
+        155.89999999999998
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          213.026,
+          72.83999999999992,
+          525.364015,
+          114.14000499999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              213.026,
+              72.83999999999992,
+              309.17,
+              114.14000499999997
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              189,
+              190,
+              191,
+              192,
+              193,
+              194,
+              195,
+              196,
+              197,
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204
+            ],
+            "extractedText": "Surface Quality"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              309.17,
+              72.83999999999992,
+              405.19,
+              114.14000499999997
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229
+            ],
+            "extractedText": "1 sample from each\nbatch"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              405.19,
+              72.83999999999992,
+              525.364015,
+              114.14000499999997
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              230,
+              231,
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238,
+              239,
+              240,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              258,
+              259,
+              260,
+              261,
+              262,
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270,
+              271,
+              272,
+              273,
+              274,
+              275,
+              276,
+              277,
+              278,
+              279,
+              280,
+              281,
+              282,
+              283,
+              284,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294
+            ],
+            "extractedText": "Same batch of material\ndelivered to Site under\none Delivery Note"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          213.026,
+          114.14000499999997,
+          525.364015,
+          155.89999999999998
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              213.026,
+              114.14000499999997,
+              309.17,
+              155.89999999999998
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              295,
+              296,
+              297,
+              298,
+              299,
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+              309,
+              310,
+              311,
+              312,
+              313,
+              314,
+              315,
+              316
+            ],
+            "extractedText": "Logo and Label\nCheck"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              309.17,
+              114.14000499999997,
+              405.19,
+              155.89999999999998
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              317,
+              318,
+              319,
+              320,
+              321,
+              322,
+              323,
+              324,
+              325,
+              326,
+              327,
+              328,
+              329,
+              330,
+              331,
+              332,
+              333,
+              334,
+              335,
+              336,
+              337,
+              338,
+              339,
+              340,
+              341
+            ],
+            "extractedText": "1 sample from each\nbatch"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              405.19,
+              114.14000499999997,
+              525.364015,
+              155.89999999999998
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              342,
+              343,
+              344,
+              345,
+              346,
+              347,
+              348,
+              349,
+              350,
+              351,
+              352,
+              353,
+              354,
+              355,
+              356,
+              357,
+              358,
+              359,
+              360,
+              361,
+              362,
+              363,
+              364,
+              365,
+              366,
+              367,
+              368,
+              369,
+              370,
+              371,
+              372,
+              373,
+              374,
+              375,
+              376,
+              377,
+              378,
+              379,
+              380,
+              381,
+              382,
+              383,
+              384,
+              385,
+              386,
+              387,
+              388,
+              389,
+              390,
+              391,
+              392,
+              393,
+              394,
+              395,
+              396,
+              397,
+              398,
+              399,
+              400,
+              401,
+              402,
+              403,
+              404,
+              405,
+              406
+            ],
+            "extractedText": "Same batch of material\ndelivered to Site under\none Delivery Note"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          213.026,
+          72.83999999999992,
+          309.17,
+          155.89999999999998
+        ],
+        "cells": [
+          [
+            213.026,
+            72.83999999999992,
+            309.17,
+            114.14000499999997
+          ],
+          [
+            213.026,
+            114.14000499999997,
+            309.17,
+            155.89999999999998
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          309.17,
+          72.83999999999992,
+          405.19,
+          155.89999999999998
+        ],
+        "cells": [
+          [
+            309.17,
+            72.83999999999992,
+            405.19,
+            114.14000499999997
+          ],
+          [
+            309.17,
+            114.14000499999997,
+            405.19,
+            155.89999999999998
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          405.19,
+          72.83999999999992,
+          525.364015,
+          155.89999999999998
+        ],
+        "cells": [
+          [
+            405.19,
+            72.83999999999992,
+            525.364015,
+            114.14000499999997
+          ],
+          [
+            405.19,
+            114.14000499999997,
+            525.364015,
+            155.89999999999998
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Surface Quality",
+        "1 sample from each\nbatch",
+        "Same batch of material\ndelivered to Site under\none Delivery Note"
+      ],
+      [
+        "Logo and Label\nCheck",
+        "1 sample from each\nbatch",
+        "Same batch of material\ndelivered to Site under\none Delivery Note"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

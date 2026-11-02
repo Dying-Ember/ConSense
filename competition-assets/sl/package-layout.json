@@ -1,0 +1,25 @@
+{
+  "schema": "consense.sl-snapshot-package-layout.v1",
+  "status": "asset_copy_and_snapshot_restore_verified_in_isolation",
+  "fixedManifestDescriptorRoot": "/srv/consense-rehearsal-20261029/evidence/local01/ticket14-fixed-20261101-a2/sl-only-export-20261101-a1",
+  "fixedManifestMountNote": "Bind this package root at fixedManifestDescriptorRoot, or rebind descriptors and repin manifests.",
+  "windowsPathMappings": [
+    {
+      "prefix": "D:\\R&D\\ConSense",
+      "packageSubdir": "assets/windows-d-consense",
+      "suggestedContainerRoot": "/runtime/sl-fixed-assets/windows-d-consense"
+    },
+    {
+      "prefix": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer",
+      "packageSubdir": "assets/windows-c-oer",
+      "suggestedContainerRoot": "/runtime/sl-fixed-assets/windows-c-oer"
+    }
+  ],
+  "collectionNames": {
+    "six": "sl_six_20261101_a1",
+    "competition": "sl_competition_20261101_a1"
+  },
+  "requires": "Restore each collection snapshot, configure both fixed manifest SHA values and these two source-path mappings, and provide embedding/reranking model assets.",
+  "modelCalls": 0,
+  "businessAccepted": false
+}

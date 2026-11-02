@@ -1,0 +1,798 @@
+{
+  "id": "physical-table:ab2ee57bdec34f3176bdd1141955bae3dba9e06f23bbda896f737328e305ec53",
+  "sectionId": "geotechnical:SLO",
+  "originalPage": 4298,
+  "localPage": 44,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      173.4826095652174,
+      145.01999791666665,
+      509.484352826087,
+      273.45999499999994
+    ],
+    "cells": [
+      [
+        173.4826095652174,
+        145.01999791666665,
+        254.09,
+        172.2199999999999
+      ],
+      [
+        173.4826095652174,
+        172.2199999999999,
+        254.09,
+        197.41999999999996
+      ],
+      [
+        173.4826095652174,
+        197.41999999999996,
+        254.09,
+        273.45999499999994
+      ],
+      [
+        254.09,
+        145.01999791666665,
+        361.030005,
+        172.2199999999999
+      ],
+      [
+        254.09,
+        172.2199999999999,
+        361.030005,
+        197.41999999999996
+      ],
+      [
+        254.09,
+        197.41999999999996,
+        361.030005,
+        222.5
+      ],
+      [
+        254.09,
+        222.5,
+        361.030005,
+        247.69999999999993
+      ],
+      [
+        254.09,
+        247.69999999999993,
+        361.030005,
+        273.45999499999994
+      ],
+      [
+        361.030005,
+        145.01999791666665,
+        509.484352826087,
+        172.2199999999999
+      ],
+      [
+        361.030005,
+        172.2199999999999,
+        509.484352826087,
+        197.41999999999996
+      ],
+      [
+        361.030005,
+        197.41999999999996,
+        509.484352826087,
+        222.5
+      ],
+      [
+        361.030005,
+        222.5,
+        509.484352826087,
+        247.69999999999993
+      ],
+      [
+        361.030005,
+        247.69999999999993,
+        509.484352826087,
+        273.45999499999994
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ],
+      [
+        26
+      ],
+      [
+        27
+      ],
+      [
+        28
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          173.4826095652174,
+          145.01999791666665,
+          509.484352826087,
+          172.2199999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              173.4826095652174,
+              145.01999791666665,
+              254.09,
+              172.2199999999999
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              504,
+              505,
+              506,
+              507,
+              508,
+              509,
+              510,
+              511,
+              512,
+              513,
+              514,
+              515
+            ],
+            "extractedText": "Description"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              254.09,
+              145.01999791666665,
+              361.030005,
+              172.2199999999999
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              516,
+              517,
+              518,
+              519,
+              520,
+              521,
+              522,
+              523,
+              524,
+              525,
+              526,
+              527,
+              528,
+              529
+            ],
+            "extractedText": "Size of batch"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              361.030005,
+              145.01999791666665,
+              509.484352826087,
+              172.2199999999999
+            ],
+            "finderCellIndexes": [
+              24
+            ],
+            "rawCharIndexes": [
+              530,
+              531,
+              532,
+              533,
+              534,
+              535,
+              536,
+              537,
+              538,
+              539,
+              540,
+              541,
+              542,
+              543,
+              544,
+              545,
+              546,
+              547,
+              548,
+              549,
+              550,
+              551,
+              552,
+              553,
+              554
+            ],
+            "extractedText": "No. of samples per batch"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          173.4826095652174,
+          172.2199999999999,
+          509.484352826087,
+          197.41999999999996
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              173.4826095652174,
+              172.2199999999999,
+              254.09,
+              197.41999999999996
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              555,
+              556,
+              557,
+              558,
+              559,
+              560,
+              561,
+              562,
+              563,
+              564,
+              565,
+              566,
+              567,
+              568,
+              569
+            ],
+            "extractedText": "Soil nail bars"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              254.09,
+              172.2199999999999,
+              361.030005,
+              197.41999999999996
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              570,
+              571,
+              572,
+              573,
+              574,
+              575,
+              576,
+              577,
+              578
+            ],
+            "extractedText": "All size"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              361.030005,
+              172.2199999999999,
+              509.484352826087,
+              197.41999999999996
+            ],
+            "finderCellIndexes": [
+              25
+            ],
+            "rawCharIndexes": [
+              579,
+              580
+            ],
+            "extractedText": "1"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          173.4826095652174,
+          197.41999999999996,
+          509.484352826087,
+          273.45999499999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              173.4826095652174,
+              197.41999999999996,
+              254.09,
+              273.45999499999994
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              581,
+              582,
+              583,
+              584,
+              585,
+              586,
+              587,
+              588,
+              589,
+              590,
+              591,
+              592
+            ],
+            "extractedText": "Connectors"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              254.09,
+              197.41999999999996,
+              361.030005,
+              222.5
+            ],
+            "finderCellIndexes": [
+              15
+            ],
+            "rawCharIndexes": [
+              593,
+              594,
+              595,
+              596,
+              597,
+              598,
+              599,
+              600,
+              601,
+              602,
+              603,
+              604,
+              605,
+              606,
+              607,
+              608,
+              609,
+              610
+            ],
+            "extractedText": "less than 100 no."
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              361.030005,
+              197.41999999999996,
+              509.484352826087,
+              222.5
+            ],
+            "finderCellIndexes": [
+              26
+            ],
+            "rawCharIndexes": [
+              611,
+              612
+            ],
+            "extractedText": "1"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          254.09,
+          222.5,
+          509.484352826087,
+          247.69999999999993
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              254.09,
+              222.5,
+              361.030005,
+              247.69999999999993
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              613,
+              614,
+              615,
+              616,
+              617,
+              618,
+              619,
+              620,
+              621,
+              622,
+              623,
+              624,
+              625,
+              626
+            ],
+            "extractedText": "100 – 500 no."
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 2,
+            "bbox": [
+              361.030005,
+              222.5,
+              509.484352826087,
+              247.69999999999993
+            ],
+            "finderCellIndexes": [
+              27
+            ],
+            "rawCharIndexes": [
+              627,
+              628
+            ],
+            "extractedText": "2"
+          }
+        ]
+      },
+      {
+        "rowIndex": 4,
+        "bbox": [
+          254.09,
+          247.69999999999993,
+          509.484352826087,
+          273.45999499999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 4,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 1,
+            "bbox": [
+              254.09,
+              247.69999999999993,
+              361.030005,
+              273.45999499999994
+            ],
+            "finderCellIndexes": [
+              17
+            ],
+            "rawCharIndexes": [
+              629,
+              630,
+              631,
+              632,
+              633,
+              634,
+              635,
+              636,
+              637,
+              638,
+              639,
+              640,
+              641,
+              642,
+              643,
+              644,
+              645,
+              646
+            ],
+            "extractedText": "Exceeding 500 no."
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 2,
+            "bbox": [
+              361.030005,
+              247.69999999999993,
+              509.484352826087,
+              273.45999499999994
+            ],
+            "finderCellIndexes": [
+              28
+            ],
+            "rawCharIndexes": [
+              647,
+              648
+            ],
+            "extractedText": "3"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          173.4826095652174,
+          145.01999791666665,
+          254.09,
+          273.45999499999994
+        ],
+        "cells": [
+          [
+            173.4826095652174,
+            145.01999791666665,
+            254.09,
+            172.2199999999999
+          ],
+          [
+            173.4826095652174,
+            172.2199999999999,
+            254.09,
+            197.41999999999996
+          ],
+          [
+            173.4826095652174,
+            197.41999999999996,
+            254.09,
+            273.45999499999994
+          ],
+          null,
+          null
+        ],
+        "finderCellIndexes": [
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          null,
+          null
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          254.09,
+          145.01999791666665,
+          361.030005,
+          273.45999499999994
+        ],
+        "cells": [
+          [
+            254.09,
+            145.01999791666665,
+            361.030005,
+            172.2199999999999
+          ],
+          [
+            254.09,
+            172.2199999999999,
+            361.030005,
+            197.41999999999996
+          ],
+          [
+            254.09,
+            197.41999999999996,
+            361.030005,
+            222.5
+          ],
+          [
+            254.09,
+            222.5,
+            361.030005,
+            247.69999999999993
+          ],
+          [
+            254.09,
+            247.69999999999993,
+            361.030005,
+            273.45999499999994
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            13
+          ],
+          [
+            14
+          ],
+          [
+            15
+          ],
+          [
+            16
+          ],
+          [
+            17
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          361.030005,
+          145.01999791666665,
+          509.484352826087,
+          273.45999499999994
+        ],
+        "cells": [
+          [
+            361.030005,
+            145.01999791666665,
+            509.484352826087,
+            172.2199999999999
+          ],
+          [
+            361.030005,
+            172.2199999999999,
+            509.484352826087,
+            197.41999999999996
+          ],
+          [
+            361.030005,
+            197.41999999999996,
+            509.484352826087,
+            222.5
+          ],
+          [
+            361.030005,
+            222.5,
+            509.484352826087,
+            247.69999999999993
+          ],
+          [
+            361.030005,
+            247.69999999999993,
+            509.484352826087,
+            273.45999499999994
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            24
+          ],
+          [
+            25
+          ],
+          [
+            26
+          ],
+          [
+            27
+          ],
+          [
+            28
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Description",
+        "Size of batch",
+        "No. of samples per batch"
+      ],
+      [
+        "Soil nail bars",
+        "All size",
+        "1"
+      ],
+      [
+        "Connectors",
+        "less than 100 no.",
+        "1"
+      ],
+      [
+        null,
+        "100 – 500 no.",
+        "2"
+      ],
+      [
+        null,
+        "Exceeding 500 no.",
+        "3"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

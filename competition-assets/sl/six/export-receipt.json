@@ -1,0 +1,33 @@
+{
+  "collection": "sl_six_20261101_a1",
+  "files": {
+    "copy-receipt.json": {
+      "bytes": 419,
+      "sha256": "0ee2388208972f46f7b0b66f8ba89c14fe2140072408d179dbac981f44457bd4"
+    },
+    "corpus.jsonl": {
+      "bytes": 297478097,
+      "sha256": "49ebdb7449155aa7ca5fb186bb6f4b1125fbcf64c293c9365b751ad9d3e4afd8"
+    },
+    "frozen-manifest.json": {
+      "bytes": 4740,
+      "sha256": "e2141db3160b13566309f90d85f0520f202a8ce819f7eea16b18a854998252ad"
+    },
+    "metadata.json": {
+      "bytes": 439548352,
+      "sha256": "78dfd39d35cdd8b563bf434c6edc8b8f09a2bb5a7e54870f40b4a3698fa16405"
+    },
+    "runtime-plan.json": {
+      "bytes": 6430,
+      "sha256": "6e4c8f8cbbff825171beb4b4b14f84e8f03d187273de39e1f123901dac82aaa7"
+    }
+  },
+  "indexSignature": "dcc0df532f048abba7a0adb85358ea775f0de7f19259fb32d308873799dad2c5",
+  "manifestSha256": "e2141db3160b13566309f90d85f0520f202a8ce819f7eea16b18a854998252ad",
+  "pointCount": 64270,
+  "snapshot": {
+    "bytes": 420101632,
+    "serverSnapshotName": "sl_six_20261101_a1-3698861570748424-2026-11-01-14-23-50.snapshot",
+    "sha256": "4c1f296deda3ef157f93af76f72b6ad6cf25574473d9fd24b40245aabf1e5587"
+  }
+}

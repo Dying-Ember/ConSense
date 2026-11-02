@@ -1,0 +1,848 @@
+{
+  "id": "physical-table:ce020dbe0f25b38d7d39db2ed5479cf927cc4e4158bddc5bda8c7e32cfd30df9",
+  "sectionId": "geotechnical:SLO",
+  "originalPage": 4298,
+  "localPage": 44,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 2,
+    "bbox": [
+      64.63542857142858,
+      660.572513125,
+      535.4885742857143,
+      746.1360099999999
+    ],
+    "cells": [
+      [
+        64.63542857142858,
+        660.572513125,
+        133.70000000000002,
+        720.3400099999999
+      ],
+      [
+        64.63542857142858,
+        720.3400099999999,
+        133.70000000000002,
+        746.1360099999999
+      ],
+      [
+        133.70000000000002,
+        660.572513125,
+        535.4885742857143,
+        681.81998
+      ],
+      [
+        133.70000000000002,
+        681.81998,
+        196.13,
+        720.3400099999999
+      ],
+      [
+        133.70000000000002,
+        720.3400099999999,
+        445.540005,
+        746.1360099999999
+      ],
+      [
+        196.13,
+        681.81998,
+        267.650005,
+        720.3400099999999
+      ],
+      [
+        267.650005,
+        681.81998,
+        323.70999000000006,
+        720.3400099999999
+      ],
+      [
+        323.70999000000006,
+        681.81998,
+        445.540005,
+        720.3400099999999
+      ],
+      [
+        445.540005,
+        681.81998,
+        535.4885742857143,
+        720.3400099999999
+      ],
+      [
+        445.540005,
+        720.3400099999999,
+        535.4885742857143,
+        746.1360099999999
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        12
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        29
+      ],
+      [
+        30
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          64.63542857142858,
+          660.572513125,
+          535.4885742857143,
+          720.3400099999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              64.63542857142858,
+              660.572513125,
+              133.70000000000002,
+              720.3400099999999
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1985
+            ],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              133.70000000000002,
+              660.572513125,
+              535.4885742857143,
+              681.81998
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1986,
+              1987,
+              1988,
+              1989,
+              1990,
+              1991,
+              1992,
+              1993,
+              1994,
+              1995,
+              1996,
+              1997,
+              1998,
+              1999,
+              2000,
+              2001,
+              2002,
+              2003,
+              2004,
+              2005,
+              2006,
+              2007,
+              2008,
+              2009,
+              2010
+            ],
+            "extractedText": "Type and number of tests"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 5,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          133.70000000000002,
+          681.81998,
+          535.4885742857143,
+          720.3400099999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              133.70000000000002,
+              681.81998,
+              196.13,
+              720.3400099999999
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              2011,
+              2012,
+              2013,
+              2014,
+              2015,
+              2016,
+              2017,
+              2018,
+              2019,
+              2020,
+              2021,
+              2022,
+              2023,
+              2024,
+              2025,
+              2026,
+              2027,
+              2028,
+              2029
+            ],
+            "extractedText": "Tensile\nproperties"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              196.13,
+              681.81998,
+              267.650005,
+              720.3400099999999
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              2030,
+              2031,
+              2032,
+              2033,
+              2034,
+              2035,
+              2036,
+              2037,
+              2038,
+              2039,
+              2040,
+              2041,
+              2042,
+              2043,
+              2044,
+              2045,
+              2046
+            ],
+            "extractedText": "Bend\nperformance"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 3,
+            "bbox": [
+              267.650005,
+              681.81998,
+              323.70999000000006,
+              720.3400099999999
+            ],
+            "finderCellIndexes": [
+              18
+            ],
+            "rawCharIndexes": [
+              2047,
+              2048,
+              2049,
+              2050,
+              2051,
+              2052,
+              2053,
+              2054,
+              2055,
+              2056,
+              2057,
+              2058,
+              2059,
+              2060,
+              2061
+            ],
+            "extractedText": "Mass per\nmetre"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 4,
+            "bbox": [
+              323.70999000000006,
+              681.81998,
+              445.540005,
+              720.3400099999999
+            ],
+            "finderCellIndexes": [
+              19
+            ],
+            "rawCharIndexes": [
+              2062,
+              2063,
+              2064,
+              2065,
+              2066,
+              2067,
+              2068,
+              2069,
+              2070,
+              2071,
+              2072,
+              2073,
+              2074,
+              2075,
+              2076,
+              2077,
+              2078,
+              2079,
+              2080,
+              2081,
+              2082,
+              2083,
+              2084,
+              2085,
+              2086,
+              2087,
+              2088,
+              2089,
+              2090,
+              2091,
+              2092,
+              2093,
+              2094,
+              2095,
+              2096,
+              2097,
+              2098,
+              2099,
+              2100,
+              2101
+            ],
+            "extractedText": "Chemical composition\n(product analysis)"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 5,
+            "bbox": [
+              445.540005,
+              681.81998,
+              535.4885742857143,
+              720.3400099999999
+            ],
+            "finderCellIndexes": [
+              29
+            ],
+            "rawCharIndexes": [
+              2102,
+              2103,
+              2104,
+              2105,
+              2106,
+              2107,
+              2108,
+              2109,
+              2110,
+              2111,
+              2112,
+              2113,
+              2114,
+              2115,
+              2116,
+              2117,
+              2118,
+              2119,
+              2120,
+              2121,
+              2122,
+              2123,
+              2124,
+              2125,
+              2126
+            ],
+            "extractedText": "Thickness and\nuniformity"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          64.63542857142858,
+          720.3400099999999,
+          535.4885742857143,
+          746.1360099999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              64.63542857142858,
+              720.3400099999999,
+              133.70000000000002,
+              746.1360099999999
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              2127,
+              2128,
+              2129,
+              2130,
+              2131,
+              2132,
+              2133,
+              2134,
+              2135,
+              2136,
+              2137,
+              2138,
+              2139,
+              2140,
+              2141
+            ],
+            "extractedText": "Soil nail bars"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              133.70000000000002,
+              720.3400099999999,
+              445.540005,
+              746.1360099999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              2142,
+              2143,
+              2144,
+              2145,
+              2146,
+              2147,
+              2148,
+              2149,
+              2150,
+              2151,
+              2152,
+              2153,
+              2154,
+              2155,
+              2156,
+              2157,
+              2158,
+              2159,
+              2160,
+              2161,
+              2162,
+              2163,
+              2164,
+              2165,
+              2166,
+              2167,
+              2168,
+              2169,
+              2170,
+              2171,
+              2172,
+              2173,
+              2174,
+              2175,
+              2176,
+              2177,
+              2178,
+              2179,
+              2180,
+              2181,
+              2182,
+              2183,
+              2184,
+              2185,
+              2186,
+              2187,
+              2188,
+              2189,
+              2190,
+              2191,
+              2192,
+              2193,
+              2194,
+              2195,
+              2196,
+              2197,
+              2198,
+              2199,
+              2200,
+              2201,
+              2202,
+              2203
+            ],
+            "extractedText": "In accordance with Clause 5.1.1 of CS2:2012 for Class 2 Steel"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 5,
+            "bbox": [
+              445.540005,
+              720.3400099999999,
+              535.4885742857143,
+              746.1360099999999
+            ],
+            "finderCellIndexes": [
+              30
+            ],
+            "rawCharIndexes": [
+              2204,
+              2205
+            ],
+            "extractedText": "-"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          64.63542857142858,
+          660.572513125,
+          133.70000000000002,
+          746.1360099999999
+        ],
+        "cells": [
+          [
+            64.63542857142858,
+            660.572513125,
+            133.70000000000002,
+            720.3400099999999
+          ],
+          null,
+          [
+            64.63542857142858,
+            720.3400099999999,
+            133.70000000000002,
+            746.1360099999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          null,
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          133.70000000000002,
+          660.572513125,
+          535.4885742857143,
+          746.1360099999999
+        ],
+        "cells": [
+          [
+            133.70000000000002,
+            660.572513125,
+            535.4885742857143,
+            681.81998
+          ],
+          [
+            133.70000000000002,
+            681.81998,
+            196.13,
+            720.3400099999999
+          ],
+          [
+            133.70000000000002,
+            720.3400099999999,
+            445.540005,
+            746.1360099999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          196.13,
+          681.81998,
+          267.650005,
+          720.3400099999999
+        ],
+        "cells": [
+          null,
+          [
+            196.13,
+            681.81998,
+            267.650005,
+            720.3400099999999
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            12
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          267.650005,
+          681.81998,
+          323.70999000000006,
+          720.3400099999999
+        ],
+        "cells": [
+          null,
+          [
+            267.650005,
+            681.81998,
+            323.70999000000006,
+            720.3400099999999
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            18
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          323.70999000000006,
+          681.81998,
+          445.540005,
+          720.3400099999999
+        ],
+        "cells": [
+          null,
+          [
+            323.70999000000006,
+            681.81998,
+            445.540005,
+            720.3400099999999
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            19
+          ],
+          null
+        ]
+      },
+      {
+        "columnIndex": 5,
+        "bbox": [
+          445.540005,
+          681.81998,
+          535.4885742857143,
+          746.1360099999999
+        ],
+        "cells": [
+          null,
+          [
+            445.540005,
+            681.81998,
+            535.4885742857143,
+            720.3400099999999
+          ],
+          [
+            445.540005,
+            720.3400099999999,
+            535.4885742857143,
+            746.1360099999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            29
+          ],
+          [
+            30
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "",
+        "Type and number of tests",
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        "Tensile\nproperties",
+        "Bend\nperformance",
+        "Mass per\nmetre",
+        "Chemical composition\n(product analysis)",
+        "Thickness and\nuniformity"
+      ],
+      [
+        "Soil nail bars",
+        "In accordance with Clause 5.1.1 of CS2:2012 for Class 2 Steel",
+        null,
+        null,
+        null,
+        "-"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

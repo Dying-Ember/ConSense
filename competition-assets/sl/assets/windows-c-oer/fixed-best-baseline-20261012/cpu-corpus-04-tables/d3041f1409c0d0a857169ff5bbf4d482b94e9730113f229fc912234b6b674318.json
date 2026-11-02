@@ -1,0 +1,574 @@
+{
+  "id": "physical-table:d3041f1409c0d0a857169ff5bbf4d482b94e9730113f229fc912234b6b674318",
+  "sectionId": "architectural:COM5",
+  "originalPage": 1232,
+  "localPage": 3,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      177.5639996,
+      73.07999999999993,
+      525.035872,
+      224.05999999999995
+    ],
+    "cells": [
+      [
+        177.5639996,
+        73.07999999999993,
+        291.34875,
+        103.93999999999994
+      ],
+      [
+        177.5639996,
+        103.93999999999994,
+        291.34875,
+        224.05999999999995
+      ],
+      [
+        291.34875,
+        73.07999999999993,
+        388.4504925,
+        103.93999999999994
+      ],
+      [
+        291.34875,
+        103.93999999999994,
+        388.4504925,
+        224.05999999999995
+      ],
+      [
+        388.4504925,
+        73.07999999999993,
+        525.035872,
+        103.93999999999994
+      ],
+      [
+        388.4504925,
+        103.93999999999994,
+        525.035872,
+        224.05999999999995
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.5639996,
+          73.07999999999993,
+          525.035872,
+          103.93999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.5639996,
+              73.07999999999993,
+              291.34875,
+              103.93999999999994
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              183,
+              184,
+              185,
+              186,
+              187,
+              188,
+              189,
+              190,
+              191,
+              192
+            ],
+            "extractedText": "Component"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              291.34875,
+              73.07999999999993,
+              388.4504925,
+              103.93999999999994
+            ],
+            "finderCellIndexes": [
+              10
+            ],
+            "rawCharIndexes": [
+              193,
+              194,
+              195,
+              196,
+              197,
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204,
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217
+            ],
+            "extractedText": "Maximum face\nwidth (mm)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              388.4504925,
+              73.07999999999993,
+              525.035872,
+              103.93999999999994
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229,
+              230,
+              231,
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238,
+              239,
+              240,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              258,
+              259,
+              260,
+              261,
+              262
+            ],
+            "extractedText": "Maximum ratio of knot size\nto face width (%)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.5639996,
+          103.93999999999994,
+          525.035872,
+          224.05999999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.5639996,
+              103.93999999999994,
+              291.34875,
+              224.05999999999995
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270,
+              271,
+              272,
+              273,
+              274,
+              275,
+              276,
+              277,
+              278,
+              279,
+              280,
+              281,
+              282,
+              283,
+              284,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294,
+              295,
+              296,
+              297,
+              298,
+              299,
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+              309,
+              310,
+              311,
+              312,
+              313,
+              314,
+              315,
+              316,
+              317,
+              318,
+              319,
+              320,
+              321,
+              322,
+              323,
+              324,
+              325,
+              326,
+              327,
+              328,
+              329,
+              330,
+              331,
+              332,
+              333,
+              334,
+              335,
+              336,
+              337,
+              338,
+              339,
+              340,
+              341,
+              342,
+              343,
+              344,
+              345,
+              346,
+              347,
+              348,
+              349,
+              350,
+              351,
+              352,
+              353,
+              354,
+              355,
+              356,
+              357,
+              358,
+              359,
+              360,
+              361,
+              362,
+              363,
+              364
+            ],
+            "extractedText": "a. Door frame\nb. Door leaf\ni. Stiles and rails\nii. Eggcrate ribs\niii. Core (lamels)\niv. Lipping"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              291.34875,
+              103.93999999999994,
+              388.4504925,
+              224.05999999999995
+            ],
+            "finderCellIndexes": [
+              11
+            ],
+            "rawCharIndexes": [
+              365,
+              366,
+              367,
+              368,
+              369,
+              370,
+              371,
+              372,
+              373,
+              374,
+              375,
+              376,
+              377,
+              378,
+              379,
+              380,
+              381,
+              382,
+              383,
+              384,
+              385,
+              386,
+              387
+            ],
+            "extractedText": "90\n35\n100\n35\n40\n15\n50"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              388.4504925,
+              103.93999999999994,
+              525.035872,
+              224.05999999999995
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              388,
+              389,
+              390,
+              391,
+              392,
+              393,
+              394,
+              395,
+              396,
+              397,
+              398,
+              399,
+              400,
+              401,
+              402,
+              403,
+              404,
+              405,
+              406,
+              407,
+              408,
+              409
+            ],
+            "extractedText": "25\n50\n45\n50\n50\n40\n30"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.5639996,
+          73.07999999999993,
+          291.34875,
+          224.05999999999995
+        ],
+        "cells": [
+          [
+            177.5639996,
+            73.07999999999993,
+            291.34875,
+            103.93999999999994
+          ],
+          [
+            177.5639996,
+            103.93999999999994,
+            291.34875,
+            224.05999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          291.34875,
+          73.07999999999993,
+          388.4504925,
+          224.05999999999995
+        ],
+        "cells": [
+          [
+            291.34875,
+            73.07999999999993,
+            388.4504925,
+            103.93999999999994
+          ],
+          [
+            291.34875,
+            103.93999999999994,
+            388.4504925,
+            224.05999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          388.4504925,
+          73.07999999999993,
+          525.035872,
+          224.05999999999995
+        ],
+        "cells": [
+          [
+            388.4504925,
+            73.07999999999993,
+            525.035872,
+            103.93999999999994
+          ],
+          [
+            388.4504925,
+            103.93999999999994,
+            525.035872,
+            224.05999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            12
+          ],
+          [
+            13
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Component",
+        "Maximum face\nwidth (mm)",
+        "Maximum ratio of knot size\nto face width (%)"
+      ],
+      [
+        "a. Door frame\nb. Door leaf\ni. Stiles and rails\nii. Eggcrate ribs\niii. Core (lamels)\niv. Lipping",
+        "90\n35\n100\n35\n40\n15\n50",
+        "25\n50\n45\n50\n50\n40\n30"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

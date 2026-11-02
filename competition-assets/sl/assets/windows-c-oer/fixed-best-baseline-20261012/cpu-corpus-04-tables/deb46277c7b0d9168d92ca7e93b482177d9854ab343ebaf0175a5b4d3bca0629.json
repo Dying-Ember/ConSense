@@ -1,0 +1,509 @@
+{
+  "id": "physical-table:deb46277c7b0d9168d92ca7e93b482177d9854ab343ebaf0175a5b4d3bca0629",
+  "sectionId": "architectural:FIN5",
+  "originalPage": 1444,
+  "localPage": 24,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      191.786,
+      72.4799999999999,
+      524.3551428205128,
+      143.89999999999998
+    ],
+    "cells": [
+      [
+        191.786,
+        72.4799999999999,
+        337.15000000000003,
+        102.01999999999998
+      ],
+      [
+        191.786,
+        102.01999999999998,
+        337.15000000000003,
+        143.89999999999998
+      ],
+      [
+        337.15000000000003,
+        72.4799999999999,
+        417.19,
+        102.01999999999998
+      ],
+      [
+        337.15000000000003,
+        102.01999999999998,
+        417.19,
+        143.89999999999998
+      ],
+      [
+        417.19,
+        72.4799999999999,
+        524.3551428205128,
+        143.89999999999998
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        19
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          191.786,
+          72.4799999999999,
+          524.3551428205128,
+          143.89999999999998
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              191.786,
+              72.4799999999999,
+              337.15000000000003,
+              102.01999999999998
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204,
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229,
+              230,
+              231,
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238,
+              239,
+              240,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248
+            ],
+            "extractedText": "Tensile adhesion strength after\nfreeze-thaw cycles"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              337.15000000000003,
+              72.4799999999999,
+              417.19,
+              102.01999999999998
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              258
+            ],
+            "extractedText": "≥ 1 N/mm²"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              417.19,
+              72.4799999999999,
+              524.3551428205128,
+              143.89999999999998
+            ],
+            "finderCellIndexes": [
+              19
+            ],
+            "rawCharIndexes": [
+              259,
+              260,
+              261,
+              262,
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270,
+              271,
+              272,
+              273,
+              274,
+              275,
+              276,
+              277,
+              278,
+              279,
+              280,
+              281,
+              282,
+              283,
+              284,
+              285,
+              362,
+              363,
+              364,
+              365,
+              366,
+              367,
+              368,
+              369,
+              370,
+              371,
+              372,
+              373,
+              374,
+              375,
+              376,
+              377,
+              378,
+              379,
+              380,
+              381,
+              382,
+              383
+            ],
+            "extractedText": "8.5 of BSEN 1348:\n2007 (1)\nBSEN 1346:2007\n(1)(2)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          191.786,
+          102.01999999999998,
+          417.19,
+          143.89999999999998
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              191.786,
+              102.01999999999998,
+              337.15000000000003,
+              143.89999999999998
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294,
+              295,
+              296,
+              297,
+              298,
+              299,
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+              309,
+              310,
+              311,
+              312,
+              313,
+              314,
+              315,
+              316,
+              317,
+              318,
+              319,
+              320,
+              321,
+              322
+            ],
+            "extractedText": "Open time: tensile adhesion\nstrength"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              337.15000000000003,
+              102.01999999999998,
+              417.19,
+              143.89999999999998
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              323,
+              324,
+              325,
+              326,
+              327,
+              328,
+              329,
+              330,
+              331,
+              332,
+              333,
+              334,
+              335,
+              336,
+              337,
+              338,
+              339,
+              340,
+              341,
+              342,
+              343,
+              344,
+              345,
+              346,
+              347,
+              348,
+              349,
+              350,
+              351,
+              352,
+              353,
+              354,
+              355,
+              356,
+              357,
+              358,
+              359,
+              360,
+              361
+            ],
+            "extractedText": "≥ 0.5 N/mm²\nafter not less\nthan 30 min"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          191.786,
+          72.4799999999999,
+          337.15000000000003,
+          143.89999999999998
+        ],
+        "cells": [
+          [
+            191.786,
+            72.4799999999999,
+            337.15000000000003,
+            102.01999999999998
+          ],
+          [
+            191.786,
+            102.01999999999998,
+            337.15000000000003,
+            143.89999999999998
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          337.15000000000003,
+          72.4799999999999,
+          417.19,
+          143.89999999999998
+        ],
+        "cells": [
+          [
+            337.15000000000003,
+            72.4799999999999,
+            417.19,
+            102.01999999999998
+          ],
+          [
+            337.15000000000003,
+            102.01999999999998,
+            417.19,
+            143.89999999999998
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            12
+          ],
+          [
+            13
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          417.19,
+          72.4799999999999,
+          524.3551428205128,
+          143.89999999999998
+        ],
+        "cells": [
+          [
+            417.19,
+            72.4799999999999,
+            524.3551428205128,
+            143.89999999999998
+          ],
+          null
+        ],
+        "finderCellIndexes": [
+          [
+            19
+          ],
+          null
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Tensile adhesion strength after\nfreeze-thaw cycles",
+        "≥ 1 N/mm²",
+        "8.5 of BSEN 1348:\n2007 (1)\nBSEN 1346:2007\n(1)(2)"
+      ],
+      [
+        "Open time: tensile adhesion\nstrength",
+        "≥ 0.5 N/mm²\nafter not less\nthan 30 min",
+        null
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

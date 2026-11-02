@@ -1,0 +1,382 @@
+{
+  "id": "physical-table:261d5f40a0b9b269ae416f2ccdb0df47ee92595cba6f9f667e2dd5abfc16d10b",
+  "sectionId": "structural:CON1",
+  "originalPage": 2221,
+  "localPage": 40,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      194.32999833333335,
+      72.3599999999999,
+      532.4917237142856,
+      98.49200274999995
+    ],
+    "cells": [
+      [
+        194.32999833333335,
+        72.3599999999999,
+        220.1958064516129,
+        98.49200274999995
+      ],
+      [
+        220.1958064516129,
+        72.3599999999999,
+        290.57,
+        98.49200274999995
+      ],
+      [
+        290.57,
+        72.3599999999999,
+        368.59000000000003,
+        98.49200274999995
+      ],
+      [
+        368.59000000000003,
+        72.3599999999999,
+        470.62,
+        98.49200274999995
+      ],
+      [
+        470.62,
+        72.3599999999999,
+        532.4917237142856,
+        98.49200274999995
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        7
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          194.32999833333335,
+          72.3599999999999,
+          532.4917237142856,
+          98.49200274999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              194.32999833333335,
+              72.3599999999999,
+              220.1958064516129,
+              98.49200274999995
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              181,
+              182,
+              183,
+              184
+            ],
+            "extractedText": "(v)"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              220.1958064516129,
+              72.3599999999999,
+              290.57,
+              98.49200274999995
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              185,
+              186,
+              187,
+              188,
+              189,
+              190,
+              191,
+              192,
+              193,
+              194,
+              195,
+              196,
+              197,
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204,
+              205,
+              206,
+              207,
+              208,
+              209,
+              210,
+              211,
+              212
+            ],
+            "extractedText": "Acid-soluble alkali\ncontent"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              290.57,
+              72.3599999999999,
+              368.59000000000003,
+              98.49200274999995
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              221,
+              222
+            ],
+            "extractedText": "≤ 600 ppm"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": [
+              368.59000000000003,
+              72.3599999999999,
+              470.62,
+              98.49200274999995
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229,
+              230,
+              231,
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238
+            ],
+            "extractedText": "BS EN 1008:2002"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": [
+              470.62,
+              72.3599999999999,
+              532.4917237142856,
+              98.49200274999995
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          194.32999833333335,
+          72.3599999999999,
+          220.1958064516129,
+          98.49200274999995
+        ],
+        "cells": [
+          [
+            194.32999833333335,
+            72.3599999999999,
+            220.1958064516129,
+            98.49200274999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          220.1958064516129,
+          72.3599999999999,
+          290.57,
+          98.49200274999995
+        ],
+        "cells": [
+          [
+            220.1958064516129,
+            72.3599999999999,
+            290.57,
+            98.49200274999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          290.57,
+          72.3599999999999,
+          368.59000000000003,
+          98.49200274999995
+        ],
+        "cells": [
+          [
+            290.57,
+            72.3599999999999,
+            368.59000000000003,
+            98.49200274999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            7
+          ]
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          368.59000000000003,
+          72.3599999999999,
+          470.62,
+          98.49200274999995
+        ],
+        "cells": [
+          [
+            368.59000000000003,
+            72.3599999999999,
+            470.62,
+            98.49200274999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            12
+          ]
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          470.62,
+          72.3599999999999,
+          532.4917237142856,
+          98.49200274999995
+        ],
+        "cells": [
+          [
+            470.62,
+            72.3599999999999,
+            532.4917237142856,
+            98.49200274999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            13
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "(v)",
+        "Acid-soluble alkali\ncontent",
+        "≤ 600 ppm",
+        "BS EN 1008:2002",
+        ""
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

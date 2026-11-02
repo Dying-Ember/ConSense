@@ -1,0 +1,656 @@
+{
+  "id": "physical-table:076a32313330cbea200d5349c00ed0cd8147c0962d27ebef76d5d423c9ee37f6",
+  "sectionId": "building_services:ELE6",
+  "originalPage": 2970,
+  "localPage": 4,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      153.4142857142857,
+      145.33999999999992,
+      525.3052523809523,
+      231.0199999999999
+    ],
+    "cells": [
+      [
+        153.4142857142857,
+        145.33999999999992,
+        178.844,
+        164.65999999999997
+      ],
+      [
+        153.4142857142857,
+        164.65999999999997,
+        178.844,
+        183.26
+      ],
+      [
+        153.4142857142857,
+        183.26,
+        178.844,
+        231.0199999999999
+      ],
+      [
+        178.844,
+        145.33999999999992,
+        321.694,
+        164.65999999999997
+      ],
+      [
+        178.844,
+        164.65999999999997,
+        321.694,
+        183.26
+      ],
+      [
+        178.844,
+        183.26,
+        321.694,
+        231.0199999999999
+      ],
+      [
+        321.694,
+        145.33999999999992,
+        525.3052523809523,
+        164.65999999999997
+      ],
+      [
+        321.694,
+        164.65999999999997,
+        525.3052523809523,
+        183.26
+      ],
+      [
+        321.694,
+        183.26,
+        525.3052523809523,
+        231.0199999999999
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          153.4142857142857,
+          145.33999999999992,
+          525.3052523809523,
+          164.65999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              153.4142857142857,
+              145.33999999999992,
+              178.844,
+              164.65999999999997
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              489
+            ],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              178.844,
+              145.33999999999992,
+              321.694,
+              164.65999999999997
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              490,
+              491,
+              492,
+              493,
+              494,
+              495,
+              496,
+              497,
+              498,
+              499,
+              500,
+              501,
+              502,
+              503
+            ],
+            "extractedText": "Busbar rating"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              321.694,
+              145.33999999999992,
+              525.3052523809523,
+              164.65999999999997
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              504,
+              505,
+              506,
+              507,
+              508,
+              509,
+              510,
+              511,
+              512,
+              513,
+              514,
+              515,
+              516
+            ],
+            "extractedText": "Test circuit"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          153.4142857142857,
+          164.65999999999997,
+          525.3052523809523,
+          183.26
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              153.4142857142857,
+              164.65999999999997,
+              178.844,
+              183.26
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              517,
+              518,
+              519
+            ],
+            "extractedText": "1."
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              178.844,
+              164.65999999999997,
+              321.694,
+              183.26
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              520,
+              521,
+              522,
+              523,
+              524,
+              525,
+              526,
+              527,
+              528,
+              529,
+              530,
+              531,
+              532,
+              533,
+              534,
+              535,
+              536,
+              537,
+              538
+            ],
+            "extractedText": "Not exceeding 500A"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              321.694,
+              164.65999999999997,
+              525.3052523809523,
+              183.26
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              539,
+              540,
+              541,
+              542,
+              543,
+              544,
+              545,
+              546,
+              547,
+              548,
+              549,
+              550,
+              551,
+              552,
+              553,
+              554,
+              555,
+              556,
+              557,
+              558,
+              559,
+              560,
+              561,
+              562,
+              563,
+              564,
+              565,
+              566,
+              567,
+              568,
+              569,
+              570,
+              571,
+              572,
+              573,
+              574,
+              575
+            ],
+            "extractedText": "*Fused short circuit current of 40kA"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          153.4142857142857,
+          183.26,
+          525.3052523809523,
+          231.0199999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              153.4142857142857,
+              183.26,
+              178.844,
+              231.0199999999999
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              576,
+              577,
+              578
+            ],
+            "extractedText": "2."
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              178.844,
+              183.26,
+              321.694,
+              231.0199999999999
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              579,
+              580,
+              581,
+              582,
+              583,
+              584,
+              585,
+              586,
+              587,
+              588
+            ],
+            "extractedText": "Over 500A"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              321.694,
+              183.26,
+              525.3052523809523,
+              231.0199999999999
+            ],
+            "finderCellIndexes": [
+              8
+            ],
+            "rawCharIndexes": [
+              589,
+              590,
+              591,
+              592,
+              593,
+              594,
+              595,
+              596,
+              597,
+              598,
+              599,
+              600,
+              601,
+              602,
+              603,
+              604,
+              605,
+              606,
+              607,
+              608,
+              609,
+              610,
+              611,
+              612,
+              613,
+              614,
+              615,
+              616,
+              617,
+              618,
+              619,
+              620,
+              621,
+              622,
+              623,
+              624,
+              625,
+              626,
+              627,
+              628,
+              629,
+              630,
+              631,
+              632,
+              633,
+              634,
+              635,
+              636,
+              637,
+              638,
+              639,
+              640,
+              641,
+              642,
+              643,
+              644,
+              645,
+              646,
+              647,
+              648,
+              649,
+              650,
+              651,
+              652,
+              653,
+              654,
+              655,
+              656,
+              657,
+              658,
+              659,
+              660,
+              661,
+              662,
+              663,
+              664,
+              665,
+              666,
+              667,
+              668,
+              669,
+              670,
+              671,
+              672,
+              673,
+              674,
+              675,
+              676,
+              677,
+              678,
+              679
+            ],
+            "extractedText": "a. Short time withstand current of 40kA\nfor one second;\nb. Peak withstand current of 84kA."
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          153.4142857142857,
+          145.33999999999992,
+          178.844,
+          231.0199999999999
+        ],
+        "cells": [
+          [
+            153.4142857142857,
+            145.33999999999992,
+            178.844,
+            164.65999999999997
+          ],
+          [
+            153.4142857142857,
+            164.65999999999997,
+            178.844,
+            183.26
+          ],
+          [
+            153.4142857142857,
+            183.26,
+            178.844,
+            231.0199999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          178.844,
+          145.33999999999992,
+          321.694,
+          231.0199999999999
+        ],
+        "cells": [
+          [
+            178.844,
+            145.33999999999992,
+            321.694,
+            164.65999999999997
+          ],
+          [
+            178.844,
+            164.65999999999997,
+            321.694,
+            183.26
+          ],
+          [
+            178.844,
+            183.26,
+            321.694,
+            231.0199999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          321.694,
+          145.33999999999992,
+          525.3052523809523,
+          231.0199999999999
+        ],
+        "cells": [
+          [
+            321.694,
+            145.33999999999992,
+            525.3052523809523,
+            164.65999999999997
+          ],
+          [
+            321.694,
+            164.65999999999997,
+            525.3052523809523,
+            183.26
+          ],
+          [
+            321.694,
+            183.26,
+            525.3052523809523,
+            231.0199999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "",
+        "Busbar rating",
+        "Test circuit"
+      ],
+      [
+        "1.",
+        "Not exceeding 500A",
+        "*Fused short circuit current of 40kA"
+      ],
+      [
+        "2.",
+        "Over 500A",
+        "a. Short time withstand current of 40kA\nfor one second;\nb. Peak withstand current of 84kA."
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

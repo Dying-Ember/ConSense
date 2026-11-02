@@ -1,0 +1,468 @@
+{
+  "id": "physical-table:88756c2888d98f7231867cc10b372a418ffbb1bc04a1cbdae6766e7fcb0f80cc",
+  "sectionId": "structural:APH",
+  "originalPage": 2560,
+  "localPage": 43,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-remaining28-20261012\\prepare-01\\root-control-remaining28-01\\remaining28-pdfplumber-default-table-pages.jsonl",
+    "bytes": 503256456,
+    "sha256": "8f919f2f7c59092c5d8da4285574b8329ce9f2b7069d2b4bea55f2b2fc2f9f88"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      156.34625,
+      346.07,
+      525.01359375,
+      419.0899999999999
+    ],
+    "cells": [
+      [
+        156.34625,
+        346.07,
+        298.609375,
+        376.84999999999997
+      ],
+      [
+        156.34625,
+        376.84999999999997,
+        298.609375,
+        419.0899999999999
+      ],
+      [
+        298.609375,
+        346.07,
+        525.01359375,
+        376.84999999999997
+      ],
+      [
+        298.609375,
+        376.84999999999997,
+        406.99,
+        419.0899999999999
+      ],
+      [
+        406.99,
+        376.84999999999997,
+        525.01359375,
+        419.0899999999999
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        26
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          156.34625,
+          346.07,
+          525.01359375,
+          376.84999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              156.34625,
+              346.07,
+              298.609375,
+              376.84999999999997
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              912,
+              913,
+              914,
+              915,
+              916,
+              917,
+              918,
+              919,
+              920,
+              921,
+              922,
+              923
+            ],
+            "extractedText": "Requirement"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              298.609375,
+              346.07,
+              525.01359375,
+              376.84999999999997
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              924,
+              925,
+              926,
+              927,
+              928,
+              929,
+              930,
+              931,
+              932,
+              933,
+              934,
+              935,
+              936,
+              937,
+              938,
+              939,
+              940,
+              941,
+              942,
+              943,
+              944,
+              945,
+              946,
+              947,
+              948,
+              949,
+              950,
+              951,
+              952,
+              953,
+              954,
+              955,
+              956,
+              957,
+              958,
+              959,
+              960,
+              961,
+              962,
+              963,
+              964,
+              965,
+              966,
+              967,
+              968,
+              969,
+              970,
+              971,
+              972,
+              973,
+              974,
+              975,
+              976,
+              977,
+              978,
+              979
+            ],
+            "extractedText": "Tolerance (mm)\n+ -"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          156.34625,
+          376.84999999999997,
+          525.01359375,
+          419.0899999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              156.34625,
+              376.84999999999997,
+              298.609375,
+              419.0899999999999
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              980,
+              981,
+              982,
+              983,
+              984,
+              985,
+              986,
+              987,
+              988,
+              989,
+              990,
+              991,
+              992,
+              993,
+              994,
+              995,
+              996,
+              997,
+              998,
+              999,
+              1000,
+              1001,
+              1002,
+              1003,
+              1004,
+              1005,
+              1006,
+              1007,
+              1008,
+              1009,
+              1010,
+              1011,
+              1012,
+              1013,
+              1014,
+              1015,
+              1016,
+              1017,
+              1018,
+              1019,
+              1020,
+              1021,
+              1022,
+              1023,
+              1024,
+              1025,
+              1026,
+              1027,
+              1028,
+              1029,
+              1030,
+              1031,
+              1032,
+              1033,
+              1034,
+              1035,
+              1036,
+              1037,
+              1038,
+              1039,
+              1040,
+              1041,
+              1042,
+              1043,
+              1044,
+              1045,
+              1046,
+              1047,
+              1048
+            ],
+            "extractedText": "PD in plan of any point\nmeasured from the nearest\nbuilding grid line"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              298.609375,
+              376.84999999999997,
+              406.99,
+              419.0899999999999
+            ],
+            "finderCellIndexes": [
+              8
+            ],
+            "rawCharIndexes": [
+              1049,
+              1050,
+              1051,
+              1052
+            ],
+            "extractedText": "35"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              406.99,
+              376.84999999999997,
+              525.01359375,
+              419.0899999999999
+            ],
+            "finderCellIndexes": [
+              26
+            ],
+            "rawCharIndexes": [
+              1053,
+              1054,
+              1055,
+              1056
+            ],
+            "extractedText": "35"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          156.34625,
+          346.07,
+          298.609375,
+          419.0899999999999
+        ],
+        "cells": [
+          [
+            156.34625,
+            346.07,
+            298.609375,
+            376.84999999999997
+          ],
+          [
+            156.34625,
+            376.84999999999997,
+            298.609375,
+            419.0899999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          298.609375,
+          346.07,
+          525.01359375,
+          419.0899999999999
+        ],
+        "cells": [
+          [
+            298.609375,
+            346.07,
+            525.01359375,
+            376.84999999999997
+          ],
+          [
+            298.609375,
+            376.84999999999997,
+            406.99,
+            419.0899999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            7
+          ],
+          [
+            8
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          406.99,
+          376.84999999999997,
+          525.01359375,
+          419.0899999999999
+        ],
+        "cells": [
+          null,
+          [
+            406.99,
+            376.84999999999997,
+            525.01359375,
+            419.0899999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            26
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Requirement",
+        "Tolerance (mm)\n+ -",
+        null
+      ],
+      [
+        "PD in plan of any point\nmeasured from the nearest\nbuilding grid line",
+        "35",
+        "35"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

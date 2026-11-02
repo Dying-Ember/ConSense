@@ -1,0 +1,55 @@
+{
+  "models": [
+    {
+      "path": "embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin",
+      "size": 2271145830,
+      "sha256": "b5e0ce3470abf5ef3831aa1bd5553b486803e83251590ab7ff35a117cf6aad38",
+      "parts": [
+        {
+          "path": "embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin.part-000",
+          "size": 1800000000,
+          "sha256": "dbb34538a4e4243961b5bd35e807b178c04f34ad73836070c0e01878a27f27a1"
+        },
+        {
+          "path": "embedding/46abdb4cec61a76eb5b18a1525ecceabba5744251e4fe3444bd36e30c1ca9719/snapshot/pytorch_model.bin.part-001",
+          "size": 471145830,
+          "sha256": "0ac414a7c92a2b9b994938cbce66a007a070f0bef44812a3b3b296d60dca2938"
+        }
+      ]
+    },
+    {
+      "path": "reranker/5472fbe9a055019957d811a8e28c2a76abd0043d0c8b8c06e997fe8cba8b5603/snapshot/model.safetensors",
+      "size": 2271071852,
+      "sha256": "d9e3e081faff1eefb84019509b2f5558fd74c1a05a2c7db22f74174fcedb5286",
+      "parts": [
+        {
+          "path": "reranker/5472fbe9a055019957d811a8e28c2a76abd0043d0c8b8c06e997fe8cba8b5603/snapshot/model.safetensors.part-000",
+          "size": 1800000000,
+          "sha256": "e7680a7981bc303d34d6100dd3d537230dd323dcbc77cf26cc2b050239aed4d4"
+        },
+        {
+          "path": "reranker/5472fbe9a055019957d811a8e28c2a76abd0043d0c8b8c06e997fe8cba8b5603/snapshot/model.safetensors.part-001",
+          "size": 471071852,
+          "sha256": "8d61aafddcd875e28240ef41cc5714b2b7d32139a39a98b3bcf4ff4a2db4d68c"
+        }
+      ]
+    },
+    {
+      "path": "mineru-base/model.safetensors",
+      "size": 2312126640,
+      "sha256": "abf8681ca63b8dec7b67de257af47b821f179442f72998d0696ae2ed9232a5f0",
+      "parts": [
+        {
+          "path": "mineru-base/model.safetensors.part-000",
+          "size": 1800000000,
+          "sha256": "502e125adf663d5c5811dae13b2f77ae08cd8887a710c886cc67dc1fde6bcca5"
+        },
+        {
+          "path": "mineru-base/model.safetensors.part-001",
+          "size": 512126640,
+          "sha256": "26e8fe0961706537c71eb5a5b243da5076792e4775fa47273bde496d07695ca1"
+        }
+      ]
+    }
+  ]
+}

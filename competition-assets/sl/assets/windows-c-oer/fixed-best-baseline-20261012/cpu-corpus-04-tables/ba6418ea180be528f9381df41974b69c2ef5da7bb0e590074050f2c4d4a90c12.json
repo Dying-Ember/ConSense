@@ -1,0 +1,540 @@
+{
+  "id": "physical-table:ba6418ea180be528f9381df41974b69c2ef5da7bb0e590074050f2c4d4a90c12",
+  "sectionId": "architectural:FIN1",
+  "originalPage": 1382,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      209.81,
+      414.050015,
+      525.219985,
+      484.50999999999993
+    ],
+    "cells": [
+      [
+        209.81,
+        414.050015,
+        309.17,
+        432.1699999999999
+      ],
+      [
+        209.81,
+        432.1699999999999,
+        309.17,
+        484.50999999999993
+      ],
+      [
+        309.17,
+        414.050015,
+        405.19,
+        432.1699999999999
+      ],
+      [
+        309.17,
+        432.1699999999999,
+        405.19,
+        484.50999999999993
+      ],
+      [
+        405.19,
+        414.050015,
+        525.219985,
+        432.1699999999999
+      ],
+      [
+        405.19,
+        432.1699999999999,
+        525.219985,
+        484.50999999999993
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          209.81,
+          414.050015,
+          525.219985,
+          432.1699999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              209.81,
+              414.050015,
+              309.17,
+              432.1699999999999
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              1600,
+              1601,
+              1602,
+              1603,
+              1604,
+              1605,
+              1606,
+              1607,
+              1608,
+              1609,
+              1610,
+              1611,
+              1612,
+              1613,
+              1614,
+              1615,
+              1616,
+              1617,
+              1618
+            ],
+            "extractedText": "Verification Items"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              309.17,
+              414.050015,
+              405.19,
+              432.1699999999999
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1619,
+              1620,
+              1621,
+              1622,
+              1623,
+              1624,
+              1625
+            ],
+            "extractedText": "Method"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              405.19,
+              414.050015,
+              525.219985,
+              432.1699999999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              1626,
+              1627,
+              1628,
+              1629,
+              1630,
+              1631,
+              1632,
+              1633,
+              1634,
+              1635,
+              1636,
+              1637,
+              1638,
+              1639,
+              1640,
+              1641,
+              1642,
+              1643,
+              1644,
+              1645,
+              1646
+            ],
+            "extractedText": "Acceptance Standards"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          209.81,
+          432.1699999999999,
+          525.219985,
+          484.50999999999993
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              209.81,
+              432.1699999999999,
+              309.17,
+              484.50999999999993
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              1647,
+              1648,
+              1649,
+              1650,
+              1651,
+              1652,
+              1653,
+              1654,
+              1655,
+              1656,
+              1657,
+              1658,
+              1659,
+              1660,
+              1661,
+              1662,
+              1663,
+              1664,
+              1665,
+              1666,
+              1667,
+              1668,
+              1669,
+              1670,
+              1671,
+              1672,
+              1673,
+              1674,
+              1675,
+              1676,
+              1677,
+              1678,
+              1679,
+              1680,
+              1681,
+              1682,
+              1683,
+              1684,
+              1685,
+              1686,
+              1687,
+              1688,
+              1689,
+              1690,
+              1691,
+              1692,
+              1693,
+              1694,
+              1695,
+              1696,
+              1697
+            ],
+            "extractedText": "Supplier’s\nCertificate of Origin\nand delivery note"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              309.17,
+              432.1699999999999,
+              405.19,
+              484.50999999999993
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              1698,
+              1699,
+              1700,
+              1701,
+              1702,
+              1703,
+              1704,
+              1705,
+              1706,
+              1707,
+              1708,
+              1709,
+              1710,
+              1711,
+              1712
+            ],
+            "extractedText": "Document Check"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              405.19,
+              432.1699999999999,
+              525.219985,
+              484.50999999999993
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1713,
+              1714,
+              1715,
+              1716,
+              1717,
+              1718,
+              1719,
+              1720,
+              1721,
+              1722,
+              1723,
+              1724,
+              1725,
+              1726,
+              1727,
+              1728,
+              1729,
+              1730,
+              1731,
+              1732,
+              1733,
+              1734,
+              1735,
+              1736,
+              1737,
+              1738,
+              1739,
+              1740,
+              1741,
+              1742,
+              1743,
+              1744,
+              1745,
+              1746,
+              1747,
+              1748,
+              1749,
+              1750,
+              1751,
+              1752,
+              1753,
+              1754,
+              1755,
+              1756,
+              1757,
+              1758,
+              1759,
+              1760,
+              1761,
+              1762,
+              1763,
+              1764,
+              1766,
+              1767,
+              1768,
+              1769,
+              1770,
+              1771,
+              1772,
+              1773,
+              1774,
+              1775,
+              1776,
+              1777,
+              1778,
+              1779,
+              1780,
+              1781,
+              1782,
+              1783,
+              1784,
+              1785,
+              1786,
+              1787,
+              1788,
+              1789,
+              1790,
+              1791,
+              1792,
+              1793
+            ],
+            "extractedText": "Source of origin in the\nCertificate of Origin and\ndelivery note are the\nsame"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          209.81,
+          414.050015,
+          309.17,
+          484.50999999999993
+        ],
+        "cells": [
+          [
+            209.81,
+            414.050015,
+            309.17,
+            432.1699999999999
+          ],
+          [
+            209.81,
+            432.1699999999999,
+            309.17,
+            484.50999999999993
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          309.17,
+          414.050015,
+          405.19,
+          484.50999999999993
+        ],
+        "cells": [
+          [
+            309.17,
+            414.050015,
+            405.19,
+            432.1699999999999
+          ],
+          [
+            309.17,
+            432.1699999999999,
+            405.19,
+            484.50999999999993
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          405.19,
+          414.050015,
+          525.219985,
+          484.50999999999993
+        ],
+        "cells": [
+          [
+            405.19,
+            414.050015,
+            525.219985,
+            432.1699999999999
+          ],
+          [
+            405.19,
+            432.1699999999999,
+            525.219985,
+            484.50999999999993
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Verification Items",
+        "Method",
+        "Acceptance Standards"
+      ],
+      [
+        "Supplier’s\nCertificate of Origin\nand delivery note",
+        "Document Check",
+        "Source of origin in the\nCertificate of Origin and\ndelivery note are the\nsame"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

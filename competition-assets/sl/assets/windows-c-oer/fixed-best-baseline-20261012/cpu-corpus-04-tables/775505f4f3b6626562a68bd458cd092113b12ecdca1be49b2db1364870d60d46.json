@@ -1,0 +1,466 @@
+{
+  "id": "physical-table:775505f4f3b6626562a68bd458cd092113b12ecdca1be49b2db1364870d60d46",
+  "sectionId": "architectural:COM5",
+  "originalPage": 1232,
+  "localPage": 3,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      177.5639996,
+      322.48999499999996,
+      525.035872,
+      395.32999499999994
+    ],
+    "cells": [
+      [
+        177.5639996,
+        322.48999499999996,
+        454.31643214285714,
+        341.56999999999994
+      ],
+      [
+        177.5639996,
+        341.56999999999994,
+        454.31643214285714,
+        395.32999499999994
+      ],
+      [
+        454.31643214285714,
+        322.48999499999996,
+        525.035872,
+        341.56999999999994
+      ],
+      [
+        454.31643214285714,
+        341.56999999999994,
+        525.035872,
+        395.32999499999994
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.5639996,
+          322.48999499999996,
+          525.035872,
+          341.56999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.5639996,
+              322.48999499999996,
+              454.31643214285714,
+              341.56999999999994
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              751,
+              752,
+              753,
+              754,
+              755,
+              756,
+              757,
+              758,
+              759,
+              760,
+              761,
+              762,
+              763,
+              764,
+              765,
+              766,
+              767,
+              768,
+              769,
+              770,
+              771,
+              772,
+              773,
+              774,
+              775,
+              776,
+              777,
+              778,
+              779,
+              780,
+              781,
+              782,
+              783,
+              784,
+              785,
+              786,
+              787,
+              788,
+              789,
+              790,
+              791
+            ],
+            "extractedText": "a. Composite jointed (Laminated) timber:"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              454.31643214285714,
+              322.48999499999996,
+              525.035872,
+              341.56999999999994
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              792
+            ],
+            "extractedText": ""
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.5639996,
+          341.56999999999994,
+          525.035872,
+          395.32999499999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.5639996,
+              341.56999999999994,
+              454.31643214285714,
+              395.32999499999994
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              793,
+              794,
+              795,
+              796,
+              797,
+              798,
+              799,
+              800,
+              801,
+              802,
+              803,
+              804,
+              805,
+              806,
+              807,
+              808,
+              809,
+              810,
+              811,
+              812,
+              813,
+              814,
+              815,
+              816,
+              817,
+              818,
+              819,
+              820,
+              821,
+              822,
+              823,
+              824,
+              825,
+              826,
+              827,
+              828,
+              835,
+              836,
+              837,
+              838,
+              839,
+              840,
+              841,
+              842,
+              843,
+              844,
+              845,
+              846,
+              847,
+              848,
+              849,
+              850,
+              851,
+              852,
+              853,
+              854,
+              855,
+              856,
+              857,
+              858,
+              859,
+              860,
+              861,
+              862,
+              863,
+              864,
+              865,
+              866,
+              867,
+              868,
+              869,
+              870,
+              871,
+              872,
+              873,
+              874,
+              875,
+              876,
+              877,
+              878,
+              879,
+              880,
+              881,
+              882,
+              883,
+              884,
+              885,
+              886,
+              887,
+              895,
+              896,
+              897,
+              898,
+              899,
+              900,
+              901,
+              902,
+              903,
+              904,
+              905,
+              906,
+              907,
+              908,
+              909,
+              910,
+              911,
+              912,
+              913,
+              914,
+              915,
+              916,
+              917,
+              918,
+              919,
+              920,
+              921,
+              922,
+              923,
+              924,
+              925,
+              926,
+              927,
+              928,
+              929,
+              930,
+              931,
+              932,
+              933,
+              934,
+              935,
+              936,
+              937,
+              938,
+              939,
+              940,
+              941,
+              942,
+              943,
+              944,
+              945
+            ],
+            "extractedText": "i. Min. dimension of each piece\nii. Max. no. of laminated pieces in stiles/ rails\niii. Max. no. of laminated pieces in door frames"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              454.31643214285714,
+              341.56999999999994,
+              525.035872,
+              395.32999499999994
+            ],
+            "finderCellIndexes": [
+              15
+            ],
+            "rawCharIndexes": [
+              829,
+              830,
+              831,
+              832,
+              833,
+              834,
+              888,
+              889,
+              890,
+              891,
+              892,
+              893,
+              894,
+              946,
+              947,
+              948,
+              949,
+              950,
+              951,
+              952
+            ],
+            "extractedText": "25 mm\n2 nos.\n4 nos."
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.5639996,
+          322.48999499999996,
+          454.31643214285714,
+          395.32999499999994
+        ],
+        "cells": [
+          [
+            177.5639996,
+            322.48999499999996,
+            454.31643214285714,
+            341.56999999999994
+          ],
+          [
+            177.5639996,
+            341.56999999999994,
+            454.31643214285714,
+            395.32999499999994
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          454.31643214285714,
+          322.48999499999996,
+          525.035872,
+          395.32999499999994
+        ],
+        "cells": [
+          [
+            454.31643214285714,
+            322.48999499999996,
+            525.035872,
+            341.56999999999994
+          ],
+          [
+            454.31643214285714,
+            341.56999999999994,
+            525.035872,
+            395.32999499999994
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            14
+          ],
+          [
+            15
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "a. Composite jointed (Laminated) timber:",
+        ""
+      ],
+      [
+        "i. Min. dimension of each piece\nii. Max. no. of laminated pieces in stiles/ rails\niii. Max. no. of laminated pieces in door frames",
+        "25 mm\n2 nos.\n4 nos."
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

@@ -1,0 +1,47 @@
+Global:
+  model_name: PP-OCRv4_mobile_seal_det
+PreProcess:
+  limit_side_len: 736
+  limit_type: min
+  max_side_limit: 4000
+  mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  std:
+  - 0.229
+  - 0.224
+  - 0.225
+  img_mode: BGR
+PostProcess:
+  name: DBPostProcess
+  thresh: 0.2
+  box_thresh: 0.6
+  unclip_ratio: 0.5
+  max_candidates: 1000
+  box_type: poly
+  use_dilation: false
+Export:
+  dtype: float32
+  opset: 17
+  rtol: 0.0001
+  atol: 1.0e-05
+  comparisons:
+  - input_shape:
+    - 1
+    - 3
+    - 256
+    - 320
+    max_abs: 9.512771015351973e-08
+  - input_shape:
+    - 1
+    - 3
+    - 384
+    - 256
+    max_abs: 1.2817301353607036e-07
+  - input_shape:
+    - 2
+    - 3
+    - 256
+    - 320
+    max_abs: 1.0384474791180764e-07

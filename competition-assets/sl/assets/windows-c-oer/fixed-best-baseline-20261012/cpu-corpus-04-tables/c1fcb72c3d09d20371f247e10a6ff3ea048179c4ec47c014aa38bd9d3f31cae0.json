@@ -1,0 +1,238 @@
+{
+  "id": "physical-table:c1fcb72c3d09d20371f247e10a6ff3ea048179c4ec47c014aa38bd9d3f31cae0",
+  "sectionId": "building_services:ELE35",
+  "originalPage": 3415,
+  "localPage": 18,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      51.72,
+      188.77999999999997,
+      546.34,
+      200.29999999999995
+    ],
+    "cells": [
+      [
+        51.72,
+        188.77999999999997,
+        57.12,
+        200.29999999999995
+      ],
+      [
+        57.12,
+        188.77999999999997,
+        540.9399999999999,
+        200.29999999999995
+      ],
+      [
+        540.9399999999999,
+        188.77999999999997,
+        546.34,
+        200.29999999999995
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        3
+      ],
+      [
+        6
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          51.72,
+          188.77999999999997,
+          546.34,
+          200.29999999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              51.72,
+              188.77999999999997,
+              57.12,
+              200.29999999999995
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              57.12,
+              188.77999999999997,
+              540.9399999999999,
+              200.29999999999995
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              446,
+              447,
+              448,
+              449,
+              450,
+              451,
+              452,
+              453,
+              454,
+              455,
+              456
+            ],
+            "extractedText": "Electrical"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              540.9399999999999,
+              188.77999999999997,
+              546.34,
+              200.29999999999995
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [],
+            "extractedText": ""
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          51.72,
+          188.77999999999997,
+          57.12,
+          200.29999999999995
+        ],
+        "cells": [
+          [
+            51.72,
+            188.77999999999997,
+            57.12,
+            200.29999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          57.12,
+          188.77999999999997,
+          540.9399999999999,
+          200.29999999999995
+        ],
+        "cells": [
+          [
+            57.12,
+            188.77999999999997,
+            540.9399999999999,
+            200.29999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          540.9399999999999,
+          188.77999999999997,
+          546.34,
+          200.29999999999995
+        ],
+        "cells": [
+          [
+            540.9399999999999,
+            188.77999999999997,
+            546.34,
+            200.29999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            6
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "",
+        "Electrical",
+        ""
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

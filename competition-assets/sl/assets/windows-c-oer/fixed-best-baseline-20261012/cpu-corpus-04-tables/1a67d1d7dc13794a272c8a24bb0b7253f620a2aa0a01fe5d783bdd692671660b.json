@@ -1,0 +1,472 @@
+{
+  "id": "physical-table:1a67d1d7dc13794a272c8a24bb0b7253f620a2aa0a01fe5d783bdd692671660b",
+  "sectionId": "architectural:WAT6",
+  "originalPage": 1826,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 12,
+    "bbox": [
+      190.99181818181816,
+      493.51,
+      538.1800000000001,
+      533.8299999999999
+    ],
+    "cells": [
+      [
+        190.99181818181816,
+        493.51,
+        538.1800000000001,
+        506.83
+      ],
+      [
+        209.93,
+        506.83,
+        538.1800000000001,
+        520.51
+      ],
+      [
+        209.93,
+        520.51,
+        419.83000000000004,
+        533.8299999999999
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        24
+      ],
+      [
+        28
+      ],
+      [
+        29
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          190.99181818181816,
+          493.51,
+          538.1800000000001,
+          506.83
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              190.99181818181816,
+              493.51,
+              538.1800000000001,
+              506.83
+            ],
+            "finderCellIndexes": [
+              24
+            ],
+            "rawCharIndexes": [
+              1111,
+              1112,
+              1113,
+              1114,
+              1115,
+              1116,
+              1117,
+              1118,
+              1119,
+              1120,
+              1121,
+              1122,
+              1123,
+              1124,
+              1125,
+              1126,
+              1127,
+              1128,
+              1129,
+              1130,
+              1131,
+              1132,
+              1133,
+              1134,
+              1135,
+              1136,
+              1137,
+              1138,
+              1139,
+              1140,
+              1141,
+              1142,
+              1143,
+              1144,
+              1145,
+              1146,
+              1147,
+              1148,
+              1149,
+              1150,
+              1151,
+              1152,
+              1153,
+              1154,
+              1155,
+              1156,
+              1157,
+              1158,
+              1159,
+              1160,
+              1161,
+              1162,
+              1163,
+              1164,
+              1165,
+              1166,
+              1167,
+              1168,
+              1169,
+              1170,
+              1171,
+              1172,
+              1173,
+              1174,
+              1175,
+              1176,
+              1177,
+              1178,
+              1179,
+              1180,
+              1181,
+              1182,
+              1183
+            ],
+            "extractedText": "i. Apply the number of coats of waterproofing material, with a minimum of"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          209.93,
+          506.83,
+          538.1800000000001,
+          520.51
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              209.93,
+              506.83,
+              538.1800000000001,
+              520.51
+            ],
+            "finderCellIndexes": [
+              28
+            ],
+            "rawCharIndexes": [
+              1185,
+              1186,
+              1187,
+              1188,
+              1189,
+              1190,
+              1191,
+              1192,
+              1193,
+              1194,
+              1195,
+              1196,
+              1197,
+              1198,
+              1199,
+              1200,
+              1201,
+              1202,
+              1203,
+              1204,
+              1205,
+              1206,
+              1207,
+              1208,
+              1209,
+              1210,
+              1211,
+              1212,
+              1213,
+              1214,
+              1215,
+              1216,
+              1217,
+              1218,
+              1219,
+              1220,
+              1221,
+              1222,
+              1223,
+              1224,
+              1225,
+              1226,
+              1227,
+              1228,
+              1229,
+              1230,
+              1231,
+              1232,
+              1233,
+              1234,
+              1235,
+              1236,
+              1237,
+              1238,
+              1239,
+              1240,
+              1241,
+              1242,
+              1243,
+              1244,
+              1245,
+              1246,
+              1247,
+              1248,
+              1249,
+              1250,
+              1251,
+              1252,
+              1253,
+              1254,
+              1255,
+              1256,
+              1257,
+              1258,
+              1259
+            ],
+            "extractedText": "two coats, and in thickness(es), both in accordance with the manufacturer's"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          209.93,
+          520.51,
+          419.83000000000004,
+          533.8299999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              209.93,
+              520.51,
+              419.83000000000004,
+              533.8299999999999
+            ],
+            "finderCellIndexes": [
+              29
+            ],
+            "rawCharIndexes": [
+              1261,
+              1262,
+              1263,
+              1264,
+              1265,
+              1266,
+              1267,
+              1268,
+              1269,
+              1270,
+              1271,
+              1272,
+              1273,
+              1274,
+              1275,
+              1276,
+              1277,
+              1278,
+              1279,
+              1280,
+              1281,
+              1282,
+              1283,
+              1284,
+              1285,
+              1286,
+              1287,
+              1288,
+              1289,
+              1290,
+              1291,
+              1292,
+              1293,
+              1294,
+              1295,
+              1296,
+              1297,
+              1298,
+              1299,
+              1300,
+              1301,
+              1302,
+              1303,
+              1304,
+              1305,
+              1306,
+              1307,
+              1308,
+              1309
+            ],
+            "extractedText": "recommendation, on the standard test piece tiles;"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          190.99181818181816,
+          493.51,
+          538.1800000000001,
+          506.83
+        ],
+        "cells": [
+          [
+            190.99181818181816,
+            493.51,
+            538.1800000000001,
+            506.83
+          ],
+          null,
+          null
+        ],
+        "finderCellIndexes": [
+          [
+            24
+          ],
+          null,
+          null
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          209.93,
+          506.83,
+          538.1800000000001,
+          533.8299999999999
+        ],
+        "cells": [
+          null,
+          [
+            209.93,
+            506.83,
+            538.1800000000001,
+            520.51
+          ],
+          [
+            209.93,
+            520.51,
+            419.83000000000004,
+            533.8299999999999
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            28
+          ],
+          [
+            29
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "i. Apply the number of coats of waterproofing material, with a minimum of",
+        null
+      ],
+      [
+        null,
+        "two coats, and in thickness(es), both in accordance with the manufacturer's"
+      ],
+      [
+        null,
+        "recommendation, on the standard test piece tiles;"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

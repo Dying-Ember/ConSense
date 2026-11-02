@@ -1,0 +1,2 @@
+function o(f,r,a=!1){function n(t){if(t.nodeType===3){const e=t.textContent??"";r({text:e,node:t,startOffset:0,endOffset:e.length,isText:!0});return}if(t.nodeType!==1)return;const s=t;if(!(a&&s.hasAttribute("data-native-math"))){if(s.tagName==="BR"){const e=t.parentNode;if(e){const i=Array.from(e.childNodes).indexOf(t);r({text:`
+`,node:e,startOffset:i,endOffset:i+1,isText:!1})}return}for(const e of Array.from(t.childNodes))n(e)}}n(f)}function c(f,r=!1){let a="";return o(f,n=>{a+=n.text},r),a}export{c as d,o as w};

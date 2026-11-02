@@ -1,0 +1,251 @@
+{
+  "id": "physical-table:2f45d00e6b7e1ddc9b16d1f80bae9edf71c8c0ef9a36ad2383df53eedd9a308a",
+  "sectionId": "building_services:ELE31",
+  "originalPage": 3370,
+  "localPage": 10,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      177.62,
+      287.56999499999995,
+      521.38002,
+      336.17000999999993
+    ],
+    "cells": [
+      [
+        177.62,
+        287.56999499999995,
+        521.38002,
+        316.8499949999999
+      ],
+      [
+        177.62,
+        316.8499949999999,
+        521.38002,
+        336.17000999999993
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.62,
+          287.56999499999995,
+          521.38002,
+          316.8499949999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.62,
+              287.56999499999995,
+              521.38002,
+              316.8499949999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              979,
+              980,
+              981,
+              982,
+              983,
+              984,
+              985,
+              986,
+              987,
+              988,
+              989,
+              990,
+              991,
+              992,
+              993,
+              994,
+              995,
+              996,
+              997,
+              998,
+              999,
+              1000,
+              1001,
+              1002,
+              1003,
+              1004,
+              1005,
+              1006,
+              1007,
+              1008,
+              1009,
+              1010,
+              1011,
+              1012,
+              1013,
+              1014,
+              1015,
+              1016,
+              1017,
+              1018,
+              1019,
+              1020,
+              1021,
+              1022,
+              1023,
+              1024,
+              1025,
+              1026,
+              1027,
+              1028,
+              1029,
+              1030,
+              1031,
+              1032,
+              1033
+            ],
+            "extractedText": "PLEASE KEEP DOOR OPEN WHEN EXHAUST FAN IS IN\nOPERATION"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.62,
+          316.8499949999999,
+          521.38002,
+          336.17000999999993
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.62,
+              316.8499949999999,
+              521.38002,
+              336.17000999999993
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              1034,
+              1035,
+              1036,
+              1037,
+              1038,
+              1039,
+              1040,
+              1041,
+              1042,
+              1043,
+              1044,
+              1045,
+              1046,
+              1047,
+              1048
+            ],
+            "extractedText": "抽氣扇運行時請保持房門開啟."
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.62,
+          287.56999499999995,
+          521.38002,
+          336.17000999999993
+        ],
+        "cells": [
+          [
+            177.62,
+            287.56999499999995,
+            521.38002,
+            316.8499949999999
+          ],
+          [
+            177.62,
+            316.8499949999999,
+            521.38002,
+            336.17000999999993
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "PLEASE KEEP DOOR OPEN WHEN EXHAUST FAN IS IN\nOPERATION"
+      ],
+      [
+        "抽氣扇運行時請保持房門開啟."
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

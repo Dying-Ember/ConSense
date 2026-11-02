@@ -1,0 +1,708 @@
+{
+  "id": "physical-table:6dbb187229a56f633c9bc28927b0c5c320423da977779dede5f49882755a3fbc",
+  "sectionId": "building_services:ELE23",
+  "originalPage": 3188,
+  "localPage": 13,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 2,
+    "bbox": [
+      177.55846153846153,
+      572.83001,
+      525.0305297368421,
+      686.25999125
+    ],
+    "cells": [
+      [
+        177.55846153846153,
+        572.83001,
+        298.130005,
+        591.43001
+      ],
+      [
+        177.55846153846153,
+        591.43001,
+        298.130005,
+        609.19001
+      ],
+      [
+        177.55846153846153,
+        609.19001,
+        298.130005,
+        638.47001
+      ],
+      [
+        177.55846153846153,
+        638.47001,
+        298.130005,
+        667.78001
+      ],
+      [
+        177.55846153846153,
+        667.78001,
+        298.130005,
+        686.25999125
+      ],
+      [
+        298.130005,
+        572.83001,
+        525.0305297368421,
+        591.43001
+      ],
+      [
+        298.130005,
+        591.43001,
+        525.0305297368421,
+        609.19001
+      ],
+      [
+        298.130005,
+        609.19001,
+        525.0305297368421,
+        638.47001
+      ],
+      [
+        298.130005,
+        638.47001,
+        525.0305297368421,
+        667.78001
+      ],
+      [
+        298.130005,
+        667.78001,
+        525.0305297368421,
+        686.25999125
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        29
+      ],
+      [
+        30
+      ],
+      [
+        31
+      ],
+      [
+        32
+      ],
+      [
+        33
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.55846153846153,
+          572.83001,
+          525.0305297368421,
+          591.43001
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.55846153846153,
+              572.83001,
+              298.130005,
+              591.43001
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              1054,
+              1055,
+              1056,
+              1057,
+              1058,
+              1059,
+              1060,
+              1061,
+              1062,
+              1063,
+              1064,
+              1065,
+              1066,
+              1067,
+              1068,
+              1069,
+              1070
+            ],
+            "extractedText": "Frequency Range"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              572.83001,
+              525.0305297368421,
+              591.43001
+            ],
+            "finderCellIndexes": [
+              29
+            ],
+            "rawCharIndexes": [
+              1071,
+              1072,
+              1073,
+              1074,
+              1075,
+              1076,
+              1077,
+              1078,
+              1079,
+              1080,
+              1081,
+              1082,
+              1083,
+              1084
+            ],
+            "extractedText": "88 to 108 MHz"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.55846153846153,
+          591.43001,
+          525.0305297368421,
+          609.19001
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.55846153846153,
+              591.43001,
+              298.130005,
+              609.19001
+            ],
+            "finderCellIndexes": [
+              13
+            ],
+            "rawCharIndexes": [
+              1085,
+              1086,
+              1087,
+              1088,
+              1089,
+              1090,
+              1091,
+              1092,
+              1093,
+              1094,
+              1095,
+              1096,
+              1097,
+              1098,
+              1099,
+              1100,
+              1101,
+              1102,
+              1103,
+              1104,
+              1105
+            ],
+            "extractedText": "Loss within Passband"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              591.43001,
+              525.0305297368421,
+              609.19001
+            ],
+            "finderCellIndexes": [
+              30
+            ],
+            "rawCharIndexes": [
+              1106,
+              1107,
+              1108,
+              1109,
+              1110,
+              1111,
+              1112,
+              1113,
+              1114,
+              1115,
+              1116,
+              1117,
+              1118,
+              1119,
+              1120,
+              1121,
+              1122,
+              1123,
+              1124,
+              1125,
+              1126
+            ],
+            "extractedText": "Not more than 1.5 dB"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          177.55846153846153,
+          609.19001,
+          525.0305297368421,
+          638.47001
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              177.55846153846153,
+              609.19001,
+              298.130005,
+              638.47001
+            ],
+            "finderCellIndexes": [
+              14
+            ],
+            "rawCharIndexes": [
+              1127,
+              1128,
+              1129,
+              1130,
+              1131,
+              1132,
+              1133,
+              1134,
+              1135,
+              1136,
+              1137,
+              1138,
+              1139,
+              1140,
+              1141,
+              1142,
+              1143,
+              1144,
+              1145,
+              1146,
+              1147,
+              1148,
+              1149,
+              1150,
+              1151,
+              1152,
+              1153,
+              1154,
+              1155,
+              1156
+            ],
+            "extractedText": "Selectivity (at –20 dB\npoint)"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              609.19001,
+              525.0305297368421,
+              638.47001
+            ],
+            "finderCellIndexes": [
+              31
+            ],
+            "rawCharIndexes": [
+              1157,
+              1158,
+              1159,
+              1160,
+              1161,
+              1162,
+              1163,
+              1164,
+              1165,
+              1166,
+              1167,
+              1168,
+              1169,
+              1170,
+              1171,
+              1172,
+              1173,
+              1174,
+              1175,
+              1176,
+              1177
+            ],
+            "extractedText": "Not more than 60 MHz"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          177.55846153846153,
+          638.47001,
+          525.0305297368421,
+          667.78001
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              177.55846153846153,
+              638.47001,
+              298.130005,
+              667.78001
+            ],
+            "finderCellIndexes": [
+              15
+            ],
+            "rawCharIndexes": [
+              1178,
+              1179,
+              1180,
+              1181,
+              1182,
+              1183,
+              1184,
+              1185,
+              1186,
+              1187,
+              1188,
+              1189,
+              1190,
+              1191,
+              1192,
+              1193,
+              1194,
+              1195,
+              1196,
+              1197,
+              1198,
+              1199,
+              1200,
+              1201,
+              1202,
+              1203,
+              1204
+            ],
+            "extractedText": "Impedance (Input &\nOutput)"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              638.47001,
+              525.0305297368421,
+              667.78001
+            ],
+            "finderCellIndexes": [
+              32
+            ],
+            "rawCharIndexes": [
+              1205,
+              1206,
+              1207,
+              1208,
+              1209,
+              1210,
+              1211
+            ],
+            "extractedText": "75 ohm"
+          }
+        ]
+      },
+      {
+        "rowIndex": 4,
+        "bbox": [
+          177.55846153846153,
+          667.78001,
+          525.0305297368421,
+          686.25999125
+        ],
+        "slots": [
+          {
+            "rowIndex": 4,
+            "columnIndex": 0,
+            "bbox": [
+              177.55846153846153,
+              667.78001,
+              298.130005,
+              686.25999125
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              1212,
+              1213,
+              1214,
+              1215,
+              1216,
+              1217,
+              1218,
+              1219,
+              1220,
+              1221,
+              1222,
+              1223,
+              1224,
+              1225,
+              1226,
+              1227,
+              1228
+            ],
+            "extractedText": "Screening Factor"
+          },
+          {
+            "rowIndex": 4,
+            "columnIndex": 1,
+            "bbox": [
+              298.130005,
+              667.78001,
+              525.0305297368421,
+              686.25999125
+            ],
+            "finderCellIndexes": [
+              33
+            ],
+            "rawCharIndexes": [
+              1229,
+              1230,
+              1231,
+              1232,
+              1233,
+              1234,
+              1235,
+              1236,
+              1237,
+              1238,
+              1239,
+              1240,
+              1241,
+              1242,
+              1243,
+              1244,
+              1245,
+              1246,
+              1247,
+              1248
+            ],
+            "extractedText": "Not less than 60 dB"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.55846153846153,
+          572.83001,
+          298.130005,
+          686.25999125
+        ],
+        "cells": [
+          [
+            177.55846153846153,
+            572.83001,
+            298.130005,
+            591.43001
+          ],
+          [
+            177.55846153846153,
+            591.43001,
+            298.130005,
+            609.19001
+          ],
+          [
+            177.55846153846153,
+            609.19001,
+            298.130005,
+            638.47001
+          ],
+          [
+            177.55846153846153,
+            638.47001,
+            298.130005,
+            667.78001
+          ],
+          [
+            177.55846153846153,
+            667.78001,
+            298.130005,
+            686.25999125
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            12
+          ],
+          [
+            13
+          ],
+          [
+            14
+          ],
+          [
+            15
+          ],
+          [
+            16
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          298.130005,
+          572.83001,
+          525.0305297368421,
+          686.25999125
+        ],
+        "cells": [
+          [
+            298.130005,
+            572.83001,
+            525.0305297368421,
+            591.43001
+          ],
+          [
+            298.130005,
+            591.43001,
+            525.0305297368421,
+            609.19001
+          ],
+          [
+            298.130005,
+            609.19001,
+            525.0305297368421,
+            638.47001
+          ],
+          [
+            298.130005,
+            638.47001,
+            525.0305297368421,
+            667.78001
+          ],
+          [
+            298.130005,
+            667.78001,
+            525.0305297368421,
+            686.25999125
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            29
+          ],
+          [
+            30
+          ],
+          [
+            31
+          ],
+          [
+            32
+          ],
+          [
+            33
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Frequency Range",
+        "88 to 108 MHz"
+      ],
+      [
+        "Loss within Passband",
+        "Not more than 1.5 dB"
+      ],
+      [
+        "Selectivity (at –20 dB\npoint)",
+        "Not more than 60 MHz"
+      ],
+      [
+        "Impedance (Input &\nOutput)",
+        "75 ohm"
+      ],
+      [
+        "Screening Factor",
+        "Not less than 60 dB"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

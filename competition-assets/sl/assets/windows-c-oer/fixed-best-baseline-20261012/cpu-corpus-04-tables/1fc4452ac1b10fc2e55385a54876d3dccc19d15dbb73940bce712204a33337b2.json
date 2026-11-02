@@ -1,0 +1,422 @@
+{
+  "id": "physical-table:1fc4452ac1b10fc2e55385a54876d3dccc19d15dbb73940bce712204a33337b2",
+  "sectionId": "building_services:LTE2",
+  "originalPage": 3850,
+  "localPage": 41,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      175.86571333333333,
+      72.83999999999992,
+      517.9277038461539,
+      191.29999999999995
+    ],
+    "cells": [
+      [
+        175.86571333333333,
+        72.83999999999992,
+        305.50874250000004,
+        126.14000499999997
+      ],
+      [
+        175.86571333333333,
+        126.14000499999997,
+        305.50874250000004,
+        191.29999999999995
+      ],
+      [
+        305.50874250000004,
+        72.83999999999992,
+        447.28000000000003,
+        126.14000499999997
+      ],
+      [
+        305.50874250000004,
+        126.14000499999997,
+        447.28000000000003,
+        191.29999999999995
+      ],
+      [
+        447.28000000000003,
+        72.83999999999992,
+        517.9277038461539,
+        126.14000499999997
+      ],
+      [
+        447.28000000000003,
+        126.14000499999997,
+        517.9277038461539,
+        191.29999999999995
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          175.86571333333333,
+          72.83999999999992,
+          517.9277038461539,
+          126.14000499999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              175.86571333333333,
+              72.83999999999992,
+              305.50874250000004,
+              126.14000499999997
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              196,
+              197,
+              198,
+              199,
+              200,
+              201,
+              202,
+              203,
+              204,
+              205,
+              206
+            ],
+            "extractedText": "\"DANGER\""
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              305.50874250000004,
+              72.83999999999992,
+              447.28000000000003,
+              126.14000499999997
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              207,
+              208,
+              209,
+              210
+            ],
+            "extractedText": "危險"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              447.28000000000003,
+              72.83999999999992,
+              517.9277038461539,
+              126.14000499999997
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217,
+              218
+            ],
+            "extractedText": "10 mm"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          175.86571333333333,
+          126.14000499999997,
+          517.9277038461539,
+          191.29999999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              175.86571333333333,
+              126.14000499999997,
+              305.50874250000004,
+              191.29999999999995
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              227,
+              228,
+              229,
+              230,
+              231,
+              232,
+              233,
+              234,
+              235,
+              236,
+              237,
+              238,
+              239,
+              240,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251
+            ],
+            "extractedText": "\"DO NOT FORCE OPEN\nLIFT DOORS\""
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              305.50874250000004,
+              126.14000499999997,
+              447.28000000000003,
+              191.29999999999995
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              258,
+              259,
+              260,
+              261,
+              262,
+              263
+            ],
+            "extractedText": "切勿強行打開升降機門"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              447.28000000000003,
+              126.14000499999997,
+              517.9277038461539,
+              191.29999999999995
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270
+            ],
+            "extractedText": "10 mm"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          175.86571333333333,
+          72.83999999999992,
+          305.50874250000004,
+          191.29999999999995
+        ],
+        "cells": [
+          [
+            175.86571333333333,
+            72.83999999999992,
+            305.50874250000004,
+            126.14000499999997
+          ],
+          [
+            175.86571333333333,
+            126.14000499999997,
+            305.50874250000004,
+            191.29999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          305.50874250000004,
+          72.83999999999992,
+          447.28000000000003,
+          191.29999999999995
+        ],
+        "cells": [
+          [
+            305.50874250000004,
+            72.83999999999992,
+            447.28000000000003,
+            126.14000499999997
+          ],
+          [
+            305.50874250000004,
+            126.14000499999997,
+            447.28000000000003,
+            191.29999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          447.28000000000003,
+          72.83999999999992,
+          517.9277038461539,
+          191.29999999999995
+        ],
+        "cells": [
+          [
+            447.28000000000003,
+            72.83999999999992,
+            517.9277038461539,
+            126.14000499999997
+          ],
+          [
+            447.28000000000003,
+            126.14000499999997,
+            517.9277038461539,
+            191.29999999999995
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "\"DANGER\"",
+        "危險",
+        "10 mm"
+      ],
+      [
+        "\"DO NOT FORCE OPEN\nLIFT DOORS\"",
+        "切勿強行打開升降機門",
+        "10 mm"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

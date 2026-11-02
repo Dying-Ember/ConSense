@@ -1,0 +1,276 @@
+{
+  "id": "physical-table:039eb29449a38e052dd337ce45dd49753d4eb5d7215693a2f69362fcf3145625",
+  "sectionId": "drainage_external:DRA1",
+  "originalPage": 1870,
+  "localPage": 6,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 1,
+    "bbox": [
+      212.81,
+      742.1759975,
+      525.0469633898305,
+      761.616
+    ],
+    "cells": [
+      [
+        212.81,
+        742.1759975,
+        309.41,
+        761.616
+      ],
+      [
+        309.41,
+        742.1759975,
+        411.43,
+        761.616
+      ],
+      [
+        411.43,
+        742.1759975,
+        525.0469633898305,
+        761.616
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        12
+      ],
+      [
+        23
+      ],
+      [
+        34
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          212.81,
+          742.1759975,
+          525.0469633898305,
+          761.616
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              212.81,
+              742.1759975,
+              309.41,
+              761.616
+            ],
+            "finderCellIndexes": [
+              12
+            ],
+            "rawCharIndexes": [
+              2537,
+              2538,
+              2539,
+              2540,
+              2541,
+              2542,
+              2543,
+              2544,
+              2545,
+              2546,
+              2547,
+              2548,
+              2549,
+              2550,
+              2551,
+              2552,
+              2553,
+              2554,
+              2555
+            ],
+            "extractedText": "Verification Items"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              309.41,
+              742.1759975,
+              411.43,
+              761.616
+            ],
+            "finderCellIndexes": [
+              23
+            ],
+            "rawCharIndexes": [
+              2556,
+              2557,
+              2558,
+              2559,
+              2560,
+              2561,
+              2562
+            ],
+            "extractedText": "Method"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              411.43,
+              742.1759975,
+              525.0469633898305,
+              761.616
+            ],
+            "finderCellIndexes": [
+              34
+            ],
+            "rawCharIndexes": [
+              2563,
+              2564,
+              2565,
+              2566,
+              2567,
+              2568,
+              2569,
+              2570,
+              2571,
+              2572,
+              2573,
+              2574,
+              2575,
+              2576,
+              2577,
+              2578,
+              2579,
+              2580,
+              2581,
+              2582,
+              2583
+            ],
+            "extractedText": "Acceptance Standards"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          212.81,
+          742.1759975,
+          309.41,
+          761.616
+        ],
+        "cells": [
+          [
+            212.81,
+            742.1759975,
+            309.41,
+            761.616
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            12
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          309.41,
+          742.1759975,
+          411.43,
+          761.616
+        ],
+        "cells": [
+          [
+            309.41,
+            742.1759975,
+            411.43,
+            761.616
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            23
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          411.43,
+          742.1759975,
+          525.0469633898305,
+          761.616
+        ],
+        "cells": [
+          [
+            411.43,
+            742.1759975,
+            525.0469633898305,
+            761.616
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            34
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Verification Items",
+        "Method",
+        "Acceptance Standards"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

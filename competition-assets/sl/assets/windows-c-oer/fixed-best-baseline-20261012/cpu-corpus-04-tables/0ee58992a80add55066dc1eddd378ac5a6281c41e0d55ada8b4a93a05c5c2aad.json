@@ -1,0 +1,594 @@
+{
+  "id": "physical-table:0ee58992a80add55066dc1eddd378ac5a6281c41e0d55ada8b4a93a05c5c2aad",
+  "sectionId": "structural:CON4",
+  "originalPage": 2270,
+  "localPage": 6,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      163.61428285714288,
+      331.2500037499999,
+      533.8252238095238,
+      431.69
+    ],
+    "cells": [
+      [
+        163.61428285714288,
+        331.2500037499999,
+        533.8252238095238,
+        350.56999999999994
+      ],
+      [
+        163.61428285714288,
+        350.56999999999994,
+        238.90925000000001,
+        383.44999999999993
+      ],
+      [
+        163.61428285714288,
+        383.44999999999993,
+        238.90925000000001,
+        431.69
+      ],
+      [
+        238.90925000000001,
+        350.56999999999994,
+        338.89050000000003,
+        383.44999999999993
+      ],
+      [
+        238.90925000000001,
+        383.44999999999993,
+        338.89050000000003,
+        431.69
+      ],
+      [
+        338.89050000000003,
+        350.56999999999994,
+        533.8252238095238,
+        383.44999999999993
+      ],
+      [
+        338.89050000000003,
+        383.44999999999993,
+        533.8252238095238,
+        431.69
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          163.61428285714288,
+          331.2500037499999,
+          533.8252238095238,
+          350.56999999999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              163.61428285714288,
+              331.2500037499999,
+              533.8252238095238,
+              350.56999999999994
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              668,
+              669,
+              670,
+              671,
+              672,
+              673,
+              674,
+              675
+            ],
+            "extractedText": "Lintels"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          163.61428285714288,
+          350.56999999999994,
+          533.8252238095238,
+          383.44999999999993
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              163.61428285714288,
+              350.56999999999994,
+              238.90925000000001,
+              383.44999999999993
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              676,
+              677,
+              678,
+              679,
+              680,
+              681,
+              682,
+              683,
+              684,
+              685,
+              686,
+              687,
+              688,
+              689,
+              690,
+              691,
+              692,
+              693,
+              694,
+              695,
+              696,
+              697
+            ],
+            "extractedText": "Clear Span\n(metres)"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              238.90925000000001,
+              350.56999999999994,
+              338.89050000000003,
+              383.44999999999993
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              698,
+              699,
+              700,
+              701,
+              702,
+              703,
+              704,
+              705,
+              706,
+              707,
+              708,
+              709,
+              710,
+              711,
+              712,
+              713,
+              714,
+              715,
+              716,
+              717,
+              718
+            ],
+            "extractedText": "Depth of Lintel\n(mm)"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              338.89050000000003,
+              350.56999999999994,
+              533.8252238095238,
+              383.44999999999993
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              719,
+              720,
+              721,
+              722,
+              723,
+              724,
+              725,
+              726,
+              727,
+              728,
+              729,
+              730,
+              731,
+              732,
+              733,
+              734,
+              735,
+              736,
+              737,
+              738,
+              739,
+              740,
+              741,
+              742,
+              743,
+              744,
+              745,
+              746,
+              747,
+              748,
+              749,
+              750,
+              751,
+              752,
+              753,
+              754,
+              755,
+              756,
+              757,
+              758,
+              759,
+              760,
+              761,
+              762,
+              763,
+              764,
+              765,
+              766,
+              767,
+              768,
+              769,
+              770,
+              771,
+              772,
+              773,
+              774,
+              775,
+              776,
+              777,
+              778,
+              779,
+              780,
+              781,
+              782,
+              783,
+              784
+            ],
+            "extractedText": "No. and diameter of mild\nsteel bars per 105 mm (or part) in width"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          163.61428285714288,
+          383.44999999999993,
+          533.8252238095238,
+          431.69
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              163.61428285714288,
+              383.44999999999993,
+              238.90925000000001,
+              431.69
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              785,
+              786,
+              787,
+              788,
+              789,
+              790,
+              791,
+              792,
+              793,
+              794,
+              795,
+              796,
+              797,
+              798,
+              799,
+              800,
+              801,
+              802
+            ],
+            "extractedText": "0 - 1\n1 - 2\n2 - 3"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              238.90925000000001,
+              383.44999999999993,
+              338.89050000000003,
+              431.69
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              803,
+              804,
+              805,
+              806,
+              807,
+              808,
+              809,
+              810,
+              811,
+              812,
+              813,
+              814
+            ],
+            "extractedText": "150\n225\n300"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              338.89050000000003,
+              383.44999999999993,
+              533.8252238095238,
+              431.69
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              815,
+              816,
+              817,
+              818,
+              819,
+              820,
+              821,
+              822,
+              823,
+              824,
+              825,
+              826,
+              827,
+              828,
+              829,
+              830,
+              831,
+              832,
+              833,
+              834,
+              835,
+              836,
+              837,
+              838,
+              839,
+              840,
+              841,
+              842,
+              843,
+              844
+            ],
+            "extractedText": "one 12 mm\none 16 mm\none 20 mm"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          163.61428285714288,
+          331.2500037499999,
+          533.8252238095238,
+          431.69
+        ],
+        "cells": [
+          [
+            163.61428285714288,
+            331.2500037499999,
+            533.8252238095238,
+            350.56999999999994
+          ],
+          [
+            163.61428285714288,
+            350.56999999999994,
+            238.90925000000001,
+            383.44999999999993
+          ],
+          [
+            163.61428285714288,
+            383.44999999999993,
+            238.90925000000001,
+            431.69
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          238.90925000000001,
+          350.56999999999994,
+          338.89050000000003,
+          431.69
+        ],
+        "cells": [
+          null,
+          [
+            238.90925000000001,
+            350.56999999999994,
+            338.89050000000003,
+            383.44999999999993
+          ],
+          [
+            238.90925000000001,
+            383.44999999999993,
+            338.89050000000003,
+            431.69
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            3
+          ],
+          [
+            4
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          338.89050000000003,
+          350.56999999999994,
+          533.8252238095238,
+          431.69
+        ],
+        "cells": [
+          null,
+          [
+            338.89050000000003,
+            350.56999999999994,
+            533.8252238095238,
+            383.44999999999993
+          ],
+          [
+            338.89050000000003,
+            383.44999999999993,
+            533.8252238095238,
+            431.69
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Lintels",
+        null,
+        null
+      ],
+      [
+        "Clear Span\n(metres)",
+        "Depth of Lintel\n(mm)",
+        "No. and diameter of mild\nsteel bars per 105 mm (or part) in width"
+      ],
+      [
+        "0 - 1\n1 - 2\n2 - 3",
+        "150\n225\n300",
+        "one 12 mm\none 16 mm\none 20 mm"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

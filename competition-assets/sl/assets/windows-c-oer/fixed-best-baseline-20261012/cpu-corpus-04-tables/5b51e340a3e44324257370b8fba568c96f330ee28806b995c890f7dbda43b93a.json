@@ -1,0 +1,997 @@
+{
+  "id": "physical-table:5b51e340a3e44324257370b8fba568c96f330ee28806b995c890f7dbda43b93a",
+  "sectionId": "drainage_external:EXT1",
+  "originalPage": 1973,
+  "localPage": 8,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      177.07793103448276,
+      177.85999999999999,
+      527.3220544827586,
+      315.24199999999996
+    ],
+    "cells": [
+      [
+        177.07793103448276,
+        177.85999999999999,
+        527.3220544827586,
+        197.65999499999998
+      ],
+      [
+        177.07793103448276,
+        197.65999499999998,
+        242.35340000000002,
+        283.1179999999999
+      ],
+      [
+        177.07793103448276,
+        283.1179999999999,
+        242.35340000000002,
+        315.24199999999996
+      ],
+      [
+        242.35340000000002,
+        197.65999499999998,
+        527.3220544827586,
+        216.14
+      ],
+      [
+        242.35340000000002,
+        216.14,
+        302.39000000000004,
+        283.1179999999999
+      ],
+      [
+        242.35340000000002,
+        283.1179999999999,
+        302.39000000000004,
+        315.24199999999996
+      ],
+      [
+        302.39000000000004,
+        216.14,
+        362.4105,
+        283.1179999999999
+      ],
+      [
+        302.39000000000004,
+        283.1179999999999,
+        362.4105,
+        315.24199999999996
+      ],
+      [
+        362.4105,
+        216.14,
+        452.43925,
+        283.1179999999999
+      ],
+      [
+        362.4105,
+        283.1179999999999,
+        452.43925,
+        315.24199999999996
+      ],
+      [
+        452.43925,
+        216.14,
+        527.3220544827586,
+        283.1179999999999
+      ],
+      [
+        452.43925,
+        283.1179999999999,
+        527.3220544827586,
+        315.24199999999996
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        20
+      ],
+      [
+        21
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          177.07793103448276,
+          177.85999999999999,
+          527.3220544827586,
+          197.65999499999998
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              177.07793103448276,
+              177.85999999999999,
+              527.3220544827586,
+              197.65999499999998
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              739,
+              740,
+              741,
+              742,
+              743,
+              744,
+              745,
+              746,
+              747,
+              748,
+              749,
+              750,
+              751,
+              752,
+              753,
+              754,
+              755,
+              756,
+              757,
+              758,
+              759,
+              760,
+              761,
+              762,
+              763,
+              764,
+              765,
+              766,
+              767,
+              768,
+              769,
+              770,
+              771,
+              772,
+              773,
+              774,
+              775,
+              776,
+              777,
+              778,
+              779,
+              780,
+              781,
+              782,
+              783,
+              784,
+              785,
+              786,
+              787,
+              788,
+              789,
+              790,
+              791,
+              792
+            ],
+            "extractedText": "Allowable contamination of recycled sub-base material"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          177.07793103448276,
+          197.65999499999998,
+          527.3220544827586,
+          283.1179999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              177.07793103448276,
+              197.65999499999998,
+              242.35340000000002,
+              283.1179999999999
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              793,
+              816,
+              817,
+              818,
+              819,
+              820,
+              821,
+              822,
+              823,
+              824,
+              825,
+              826,
+              827,
+              828,
+              829
+            ],
+            "extractedText": "Sub-base\ntype"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              242.35340000000002,
+              197.65999499999998,
+              527.3220544827586,
+              216.14
+            ],
+            "finderCellIndexes": [
+              8
+            ],
+            "rawCharIndexes": [
+              794,
+              795,
+              796,
+              797,
+              798,
+              799,
+              800,
+              801,
+              802,
+              803,
+              804,
+              805,
+              806,
+              807,
+              808,
+              809,
+              810,
+              811,
+              812,
+              813,
+              814,
+              815
+            ],
+            "extractedText": "Type of contamination"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 3,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 4,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          242.35340000000002,
+          216.14,
+          527.3220544827586,
+          283.1179999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": null,
+            "finderCellIndexes": null,
+            "rawCharIndexes": null,
+            "extractedText": null
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              242.35340000000002,
+              216.14,
+              302.39000000000004,
+              283.1179999999999
+            ],
+            "finderCellIndexes": [
+              9
+            ],
+            "rawCharIndexes": [
+              830,
+              831,
+              832,
+              833,
+              834,
+              835,
+              836,
+              837,
+              838,
+              839,
+              840,
+              841,
+              842,
+              843,
+              844,
+              845,
+              846,
+              847,
+              848,
+              849,
+              850,
+              851,
+              852,
+              853,
+              854,
+              855,
+              856,
+              857,
+              858,
+              859,
+              860,
+              861,
+              862
+            ],
+            "extractedText": "Maximum\nsulphate\ncontent by\nmass"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 2,
+            "bbox": [
+              302.39000000000004,
+              216.14,
+              362.4105,
+              283.1179999999999
+            ],
+            "finderCellIndexes": [
+              16
+            ],
+            "rawCharIndexes": [
+              863,
+              864,
+              865,
+              866,
+              867,
+              868,
+              869,
+              870,
+              871,
+              872,
+              873,
+              874,
+              875,
+              876,
+              877,
+              878,
+              879,
+              880,
+              881,
+              882,
+              883,
+              884,
+              885,
+              886,
+              887,
+              888,
+              889,
+              890,
+              891,
+              892,
+              893
+            ],
+            "extractedText": "Maximum\nmetals\ncontent by\nmass"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 3,
+            "bbox": [
+              362.4105,
+              216.14,
+              452.43925,
+              283.1179999999999
+            ],
+            "finderCellIndexes": [
+              20
+            ],
+            "rawCharIndexes": [
+              894,
+              895,
+              896,
+              897,
+              898,
+              899,
+              900,
+              901,
+              902,
+              903,
+              904,
+              905,
+              906,
+              907,
+              908,
+              909,
+              910,
+              911,
+              912,
+              913,
+              914,
+              915,
+              916,
+              917,
+              918,
+              919,
+              920,
+              921,
+              922,
+              923,
+              924,
+              925,
+              926,
+              927,
+              928,
+              929,
+              930,
+              931,
+              932,
+              933,
+              934,
+              935,
+              936,
+              937,
+              938,
+              939,
+              940,
+              941,
+              942,
+              943,
+              944,
+              945,
+              946,
+              947,
+              948,
+              949,
+              950,
+              951,
+              952,
+              953,
+              954,
+              955,
+              956,
+              957,
+              958,
+              959,
+              960,
+              961,
+              962,
+              963,
+              964,
+              965
+            ],
+            "extractedText": "Maximum foreign\nmaterial content\ne.g. glass, soft\nmaterial etc. by\nmass"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 4,
+            "bbox": [
+              452.43925,
+              216.14,
+              527.3220544827586,
+              283.1179999999999
+            ],
+            "finderCellIndexes": [
+              24
+            ],
+            "rawCharIndexes": [
+              966,
+              967,
+              968,
+              969,
+              970,
+              971,
+              972,
+              973,
+              974,
+              975,
+              976,
+              977,
+              978,
+              979,
+              980,
+              981,
+              982,
+              983,
+              984,
+              985,
+              986,
+              987,
+              988,
+              989,
+              990,
+              991,
+              992,
+              993,
+              994,
+              995,
+              996,
+              997,
+              998,
+              999,
+              1000,
+              1001,
+              1002,
+              1003,
+              1004,
+              1005,
+              1006
+            ],
+            "extractedText": "Maximum\norganic material\ncontent by mass"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          177.07793103448276,
+          283.1179999999999,
+          527.3220544827586,
+          315.24199999999996
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              177.07793103448276,
+              283.1179999999999,
+              242.35340000000002,
+              315.24199999999996
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              1007,
+              1008,
+              1009,
+              1010,
+              1011,
+              1012,
+              1013,
+              1014,
+              1015,
+              1016,
+              1017,
+              1018,
+              1019,
+              1020,
+              1021,
+              1022,
+              1023,
+              1024
+            ],
+            "extractedText": "Recycled\nsub-base"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              242.35340000000002,
+              283.1179999999999,
+              302.39000000000004,
+              315.24199999999996
+            ],
+            "finderCellIndexes": [
+              10
+            ],
+            "rawCharIndexes": [
+              1025,
+              1026,
+              1027
+            ],
+            "extractedText": "1%"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 2,
+            "bbox": [
+              302.39000000000004,
+              283.1179999999999,
+              362.4105,
+              315.24199999999996
+            ],
+            "finderCellIndexes": [
+              17
+            ],
+            "rawCharIndexes": [
+              1028,
+              1029,
+              1030
+            ],
+            "extractedText": "1%"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 3,
+            "bbox": [
+              362.4105,
+              283.1179999999999,
+              452.43925,
+              315.24199999999996
+            ],
+            "finderCellIndexes": [
+              21
+            ],
+            "rawCharIndexes": [
+              1031,
+              1032,
+              1033
+            ],
+            "extractedText": "1%"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 4,
+            "bbox": [
+              452.43925,
+              283.1179999999999,
+              527.3220544827586,
+              315.24199999999996
+            ],
+            "finderCellIndexes": [
+              25
+            ],
+            "rawCharIndexes": [
+              1034,
+              1035,
+              1036,
+              1037,
+              1038
+            ],
+            "extractedText": "0.5%"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          177.07793103448276,
+          177.85999999999999,
+          527.3220544827586,
+          315.24199999999996
+        ],
+        "cells": [
+          [
+            177.07793103448276,
+            177.85999999999999,
+            527.3220544827586,
+            197.65999499999998
+          ],
+          [
+            177.07793103448276,
+            197.65999499999998,
+            242.35340000000002,
+            283.1179999999999
+          ],
+          null,
+          [
+            177.07793103448276,
+            283.1179999999999,
+            242.35340000000002,
+            315.24199999999996
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          null,
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          242.35340000000002,
+          197.65999499999998,
+          527.3220544827586,
+          315.24199999999996
+        ],
+        "cells": [
+          null,
+          [
+            242.35340000000002,
+            197.65999499999998,
+            527.3220544827586,
+            216.14
+          ],
+          [
+            242.35340000000002,
+            216.14,
+            302.39000000000004,
+            283.1179999999999
+          ],
+          [
+            242.35340000000002,
+            283.1179999999999,
+            302.39000000000004,
+            315.24199999999996
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          302.39000000000004,
+          216.14,
+          362.4105,
+          315.24199999999996
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            302.39000000000004,
+            216.14,
+            362.4105,
+            283.1179999999999
+          ],
+          [
+            302.39000000000004,
+            283.1179999999999,
+            362.4105,
+            315.24199999999996
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            16
+          ],
+          [
+            17
+          ]
+        ]
+      },
+      {
+        "columnIndex": 3,
+        "bbox": [
+          362.4105,
+          216.14,
+          452.43925,
+          315.24199999999996
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            362.4105,
+            216.14,
+            452.43925,
+            283.1179999999999
+          ],
+          [
+            362.4105,
+            283.1179999999999,
+            452.43925,
+            315.24199999999996
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            20
+          ],
+          [
+            21
+          ]
+        ]
+      },
+      {
+        "columnIndex": 4,
+        "bbox": [
+          452.43925,
+          216.14,
+          527.3220544827586,
+          315.24199999999996
+        ],
+        "cells": [
+          null,
+          null,
+          [
+            452.43925,
+            216.14,
+            527.3220544827586,
+            283.1179999999999
+          ],
+          [
+            452.43925,
+            283.1179999999999,
+            527.3220544827586,
+            315.24199999999996
+          ]
+        ],
+        "finderCellIndexes": [
+          null,
+          null,
+          [
+            24
+          ],
+          [
+            25
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Allowable contamination of recycled sub-base material",
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        "Sub-base\ntype",
+        "Type of contamination",
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        "Maximum\nsulphate\ncontent by\nmass",
+        "Maximum\nmetals\ncontent by\nmass",
+        "Maximum foreign\nmaterial content\ne.g. glass, soft\nmaterial etc. by\nmass",
+        "Maximum\norganic material\ncontent by mass"
+      ],
+      [
+        "Recycled\nsub-base",
+        "1%",
+        "1%",
+        "1%",
+        "0.5%"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

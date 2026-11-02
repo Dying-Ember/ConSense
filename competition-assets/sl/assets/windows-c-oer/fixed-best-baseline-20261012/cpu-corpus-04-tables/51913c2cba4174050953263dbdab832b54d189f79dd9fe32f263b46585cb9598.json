@@ -1,0 +1,212 @@
+{
+  "id": "physical-table:51913c2cba4174050953263dbdab832b54d189f79dd9fe32f263b46585cb9598",
+  "sectionId": "architectural:WAT6",
+  "originalPage": 1827,
+  "localPage": 11,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 7,
+    "bbox": [
+      309.77,
+      629.913991,
+      390.914,
+      655.472
+    ],
+    "cells": [
+      [
+        309.77,
+        629.913991,
+        390.914,
+        643.99
+      ],
+      [
+        309.77,
+        643.99,
+        369.51133333333337,
+        655.472
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        48
+      ],
+      [
+        49
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          309.77,
+          629.913991,
+          390.914,
+          643.99
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              309.77,
+              629.913991,
+              390.914,
+              643.99
+            ],
+            "finderCellIndexes": [
+              48
+            ],
+            "rawCharIndexes": [
+              2096,
+              2097,
+              2098,
+              2099,
+              2100,
+              2101,
+              2102,
+              2103,
+              2104,
+              2105,
+              2106,
+              2107,
+              2108,
+              2109,
+              2110,
+              2111,
+              2112
+            ],
+            "extractedText": "Check information"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          309.77,
+          643.99,
+          369.51133333333337,
+          655.472
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              309.77,
+              643.99,
+              369.51133333333337,
+              655.472
+            ],
+            "finderCellIndexes": [
+              49
+            ],
+            "rawCharIndexes": [
+              2114,
+              2115,
+              2116,
+              2117,
+              2118,
+              2119,
+              2120,
+              2121,
+              2122,
+              2123,
+              2124,
+              2125,
+              2126,
+              2127
+            ],
+            "extractedText": "printed on the"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          309.77,
+          629.913991,
+          390.914,
+          655.472
+        ],
+        "cells": [
+          [
+            309.77,
+            629.913991,
+            390.914,
+            643.99
+          ],
+          [
+            309.77,
+            643.99,
+            369.51133333333337,
+            655.472
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            48
+          ],
+          [
+            49
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Check information"
+      ],
+      [
+        "printed on the"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

@@ -1,0 +1,499 @@
+{
+  "id": "physical-table:aa51cfbfae138cf4620b54c38807d6b81ee70268fa2437fd1007b4a7ae1ebe89",
+  "sectionId": "structural:CON5",
+  "originalPage": 2285,
+  "localPage": 11,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      183.6542857142857,
+      240.19999999999993,
+      531.9052238095237,
+      297.34999999999997
+    ],
+    "cells": [
+      [
+        183.6542857142857,
+        240.19999999999993,
+        347.374,
+        259.5799999999999
+      ],
+      [
+        183.6542857142857,
+        259.5799999999999,
+        347.374,
+        278.17999999999995
+      ],
+      [
+        183.6542857142857,
+        278.17999999999995,
+        347.374,
+        297.34999999999997
+      ],
+      [
+        347.374,
+        240.19999999999993,
+        531.9052238095237,
+        259.5799999999999
+      ],
+      [
+        347.374,
+        259.5799999999999,
+        531.9052238095237,
+        278.17999999999995
+      ],
+      [
+        347.374,
+        278.17999999999995,
+        531.9052238095237,
+        297.34999999999997
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          183.6542857142857,
+          240.19999999999993,
+          531.9052238095237,
+          259.5799999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              183.6542857142857,
+              240.19999999999993,
+              347.374,
+              259.5799999999999
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              768,
+              769,
+              770,
+              771,
+              772,
+              773,
+              774,
+              775,
+              776,
+              777,
+              778,
+              779,
+              780,
+              781,
+              782,
+              783,
+              784,
+              785,
+              786,
+              787,
+              788
+            ],
+            "extractedText": "PVC Conduit Fittings"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              347.374,
+              240.19999999999993,
+              531.9052238095237,
+              259.5799999999999
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              789,
+              790,
+              791,
+              792,
+              793,
+              794,
+              795,
+              796,
+              797,
+              798,
+              799,
+              800,
+              801,
+              802,
+              803,
+              804,
+              805,
+              806
+            ],
+            "extractedText": "British Standards"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          183.6542857142857,
+          259.5799999999999,
+          531.9052238095237,
+          278.17999999999995
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              183.6542857142857,
+              259.5799999999999,
+              347.374,
+              278.17999999999995
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              807,
+              808,
+              809,
+              810,
+              811,
+              812,
+              813,
+              814,
+              815,
+              816,
+              817,
+              818,
+              819,
+              820,
+              821,
+              822,
+              823,
+              824,
+              825,
+              826,
+              827,
+              828,
+              829,
+              830,
+              831,
+              832,
+              833,
+              834,
+              835,
+              836,
+              837,
+              838
+            ],
+            "extractedText": "Plain moulded slip type coupler"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              347.374,
+              259.5799999999999,
+              531.9052238095237,
+              278.17999999999995
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              839,
+              840,
+              841,
+              842,
+              843,
+              844,
+              845,
+              846,
+              847,
+              848,
+              849,
+              850,
+              851,
+              852,
+              853,
+              854,
+              855,
+              856,
+              857,
+              858,
+              859,
+              860,
+              861,
+              862,
+              863,
+              864
+            ],
+            "extractedText": "BS 4607:Part 5:1982(1988)"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          183.6542857142857,
+          278.17999999999995,
+          531.9052238095237,
+          297.34999999999997
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              183.6542857142857,
+              278.17999999999995,
+              347.374,
+              297.34999999999997
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              865,
+              866,
+              867,
+              868,
+              869,
+              870,
+              871,
+              872,
+              873,
+              874,
+              875,
+              876,
+              877,
+              878,
+              879,
+              880,
+              881,
+              882,
+              883,
+              884,
+              885,
+              886,
+              887,
+              888,
+              889,
+              890,
+              891,
+              892,
+              893
+            ],
+            "extractedText": "Male bush and female adaptor"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              347.374,
+              278.17999999999995,
+              531.9052238095237,
+              297.34999999999997
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              894,
+              895,
+              896,
+              897,
+              898,
+              899,
+              900,
+              901,
+              902,
+              903,
+              904,
+              905,
+              906,
+              907,
+              908,
+              909,
+              910,
+              911,
+              912,
+              913,
+              914,
+              915,
+              916,
+              917,
+              918,
+              919
+            ],
+            "extractedText": "BS 4607:Part 1:1984(1993)"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          183.6542857142857,
+          240.19999999999993,
+          347.374,
+          297.34999999999997
+        ],
+        "cells": [
+          [
+            183.6542857142857,
+            240.19999999999993,
+            347.374,
+            259.5799999999999
+          ],
+          [
+            183.6542857142857,
+            259.5799999999999,
+            347.374,
+            278.17999999999995
+          ],
+          [
+            183.6542857142857,
+            278.17999999999995,
+            347.374,
+            297.34999999999997
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          347.374,
+          240.19999999999993,
+          531.9052238095237,
+          297.34999999999997
+        ],
+        "cells": [
+          [
+            347.374,
+            240.19999999999993,
+            531.9052238095237,
+            259.5799999999999
+          ],
+          [
+            347.374,
+            259.5799999999999,
+            531.9052238095237,
+            278.17999999999995
+          ],
+          [
+            347.374,
+            278.17999999999995,
+            531.9052238095237,
+            297.34999999999997
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "PVC Conduit Fittings",
+        "British Standards"
+      ],
+      [
+        "Plain moulded slip type coupler",
+        "BS 4607:Part 5:1982(1988)"
+      ],
+      [
+        "Male bush and female adaptor",
+        "BS 4607:Part 1:1984(1993)"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

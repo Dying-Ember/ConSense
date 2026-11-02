@@ -1,0 +1,555 @@
+{
+  "id": "physical-table:857242dd70dfdad5685491ec045dcf8598359dbe3b8b2845cf1e7f9e55133028",
+  "sectionId": "drainage_external:EXT3",
+  "originalPage": 2030,
+  "localPage": 16,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      171.692,
+      252.49999812499996,
+      521.3075904,
+      326.32999499999994
+    ],
+    "cells": [
+      [
+        171.692,
+        252.49999812499996,
+        326.7500033333334,
+        271.4599999999999
+      ],
+      [
+        171.692,
+        271.4599999999999,
+        326.7500033333334,
+        289.9699949999999
+      ],
+      [
+        171.692,
+        289.9699949999999,
+        326.7500033333334,
+        307.8499949999999
+      ],
+      [
+        171.692,
+        307.8499949999999,
+        326.7500033333334,
+        326.32999499999994
+      ],
+      [
+        326.7500033333334,
+        252.49999812499996,
+        521.3075904,
+        271.4599999999999
+      ],
+      [
+        326.7500033333334,
+        271.4599999999999,
+        521.3075904,
+        289.9699949999999
+      ],
+      [
+        326.7500033333334,
+        289.9699949999999,
+        521.3075904,
+        307.8499949999999
+      ],
+      [
+        326.7500033333334,
+        307.8499949999999,
+        521.3075904,
+        326.32999499999994
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          171.692,
+          252.49999812499996,
+          521.3075904,
+          271.4599999999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              171.692,
+              252.49999812499996,
+              326.7500033333334,
+              271.4599999999999
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              855,
+              856,
+              857,
+              858,
+              859
+            ],
+            "extractedText": "Test"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              326.7500033333334,
+              252.49999812499996,
+              521.3075904,
+              271.4599999999999
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              860,
+              861,
+              862,
+              863,
+              864,
+              865,
+              866,
+              867,
+              868,
+              869,
+              870,
+              871,
+              872,
+              873,
+              874,
+              875,
+              876,
+              877,
+              878,
+              879,
+              880,
+              881,
+              882,
+              883,
+              884,
+              885,
+              886,
+              887,
+              888,
+              889,
+              890,
+              891,
+              892,
+              893,
+              894,
+              895,
+              896,
+              897
+            ],
+            "extractedText": "Number of paving units in each sample"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          171.692,
+          271.4599999999999,
+          521.3075904,
+          289.9699949999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              171.692,
+              271.4599999999999,
+              326.7500033333334,
+              289.9699949999999
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              898,
+              899,
+              900,
+              901,
+              902,
+              903,
+              904,
+              905,
+              906,
+              907,
+              908,
+              909,
+              910,
+              911,
+              912,
+              913,
+              914,
+              915,
+              916,
+              917,
+              918,
+              919,
+              920,
+              921,
+              922
+            ],
+            "extractedText": "a. Dimensional deviation"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              326.7500033333334,
+              271.4599999999999,
+              521.3075904,
+              289.9699949999999
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              923,
+              924
+            ],
+            "extractedText": "8"
+          }
+        ]
+      },
+      {
+        "rowIndex": 2,
+        "bbox": [
+          171.692,
+          289.9699949999999,
+          521.3075904,
+          307.8499949999999
+        ],
+        "slots": [
+          {
+            "rowIndex": 2,
+            "columnIndex": 0,
+            "bbox": [
+              171.692,
+              289.9699949999999,
+              326.7500033333334,
+              307.8499949999999
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              925,
+              926,
+              927,
+              928,
+              929,
+              930,
+              931,
+              932,
+              933,
+              934,
+              935,
+              936,
+              937,
+              938,
+              939,
+              940,
+              941,
+              942,
+              943,
+              944,
+              945,
+              946,
+              947,
+              948
+            ],
+            "extractedText": "b. Slip/Skid resistance"
+          },
+          {
+            "rowIndex": 2,
+            "columnIndex": 1,
+            "bbox": [
+              326.7500033333334,
+              289.9699949999999,
+              521.3075904,
+              307.8499949999999
+            ],
+            "finderCellIndexes": [
+              6
+            ],
+            "rawCharIndexes": [
+              949,
+              950
+            ],
+            "extractedText": "5"
+          }
+        ]
+      },
+      {
+        "rowIndex": 3,
+        "bbox": [
+          171.692,
+          307.8499949999999,
+          521.3075904,
+          326.32999499999994
+        ],
+        "slots": [
+          {
+            "rowIndex": 3,
+            "columnIndex": 0,
+            "bbox": [
+              171.692,
+              307.8499949999999,
+              326.7500033333334,
+              326.32999499999994
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              951,
+              952,
+              953,
+              954,
+              955,
+              956,
+              957,
+              958,
+              959,
+              960,
+              961,
+              962,
+              963,
+              964,
+              965,
+              966,
+              967,
+              968,
+              969,
+              970,
+              971,
+              972,
+              973,
+              974,
+              975,
+              976
+            ],
+            "extractedText": "c. Water absorption value"
+          },
+          {
+            "rowIndex": 3,
+            "columnIndex": 1,
+            "bbox": [
+              326.7500033333334,
+              307.8499949999999,
+              521.3075904,
+              326.32999499999994
+            ],
+            "finderCellIndexes": [
+              7
+            ],
+            "rawCharIndexes": [
+              977,
+              978,
+              979
+            ],
+            "extractedText": "10"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          171.692,
+          252.49999812499996,
+          326.7500033333334,
+          326.32999499999994
+        ],
+        "cells": [
+          [
+            171.692,
+            252.49999812499996,
+            326.7500033333334,
+            271.4599999999999
+          ],
+          [
+            171.692,
+            271.4599999999999,
+            326.7500033333334,
+            289.9699949999999
+          ],
+          [
+            171.692,
+            289.9699949999999,
+            326.7500033333334,
+            307.8499949999999
+          ],
+          [
+            171.692,
+            307.8499949999999,
+            326.7500033333334,
+            326.32999499999994
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          326.7500033333334,
+          252.49999812499996,
+          521.3075904,
+          326.32999499999994
+        ],
+        "cells": [
+          [
+            326.7500033333334,
+            252.49999812499996,
+            521.3075904,
+            271.4599999999999
+          ],
+          [
+            326.7500033333334,
+            271.4599999999999,
+            521.3075904,
+            289.9699949999999
+          ],
+          [
+            326.7500033333334,
+            289.9699949999999,
+            521.3075904,
+            307.8499949999999
+          ],
+          [
+            326.7500033333334,
+            307.8499949999999,
+            521.3075904,
+            326.32999499999994
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "Test",
+        "Number of paving units in each sample"
+      ],
+      [
+        "a. Dimensional deviation",
+        "8"
+      ],
+      [
+        "b. Slip/Skid resistance",
+        "5"
+      ],
+      [
+        "c. Water absorption value",
+        "10"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}

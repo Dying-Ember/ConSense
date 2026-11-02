@@ -1,0 +1,567 @@
+{
+  "id": "physical-table:0fb09a8cecae4738ce476a11b870381806cf1dff28a20da04960caba7ad4d76a",
+  "sectionId": "building_services:FWP14",
+  "originalPage": 3735,
+  "localPage": 17,
+  "coordinateFrame": {
+    "units": "PDF points, no resizing or coordinate conversion",
+    "bboxOrder": "[x0, top, x1, bottom] as emitted by pdfplumber",
+    "pointOrder": "[x, top] as emitted by TableFinder",
+    "rawChars": "Retain x0/x1, top/bottom and native y0/y1 as emitted; no frame rewriting",
+    "doctop": "Relative to extracted complete unit PDF, not parent SL document",
+    "pageWidth": 595.32,
+    "pageHeight": 841.92,
+    "pageBBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "mediaBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "cropBox": [
+      0,
+      0.0,
+      595.32,
+      841.92
+    ],
+    "rotation": 0
+  },
+  "originalSourceSha256": "6331c283da806846a06644814fa2271182314dbc2235c711a16e8492faaa0492",
+  "rawPageArtifact": {
+    "path": "C:\\Users\\Administrator\\.codex\\local-state\\consense-oer\\sl-pdfplumber-table-baseline-full151-20261012\\prepare-01\\root-control-full151-01\\full151-pdfplumber-default-table-pages.jsonl",
+    "bytes": 3293686230,
+    "sha256": "2bf24a1678d4d8faaf42fa40b25d3ada6f6564ad67d329a5b6eb35628a1b4bca"
+  },
+  "table": {
+    "tableIndex": 0,
+    "bbox": [
+      174.03411764705882,
+      726.460015,
+      523.8853082352941,
+      788.015985
+    ],
+    "cells": [
+      [
+        174.03411764705882,
+        726.460015,
+        276.10875,
+        745.776
+      ],
+      [
+        174.03411764705882,
+        745.776,
+        276.10875,
+        788.015985
+      ],
+      [
+        276.10875,
+        726.460015,
+        404.65000000000003,
+        745.776
+      ],
+      [
+        276.10875,
+        745.776,
+        404.65000000000003,
+        788.015985
+      ],
+      [
+        404.65000000000003,
+        726.460015,
+        523.8853082352941,
+        745.776
+      ],
+      [
+        404.65000000000003,
+        745.776,
+        523.8853082352941,
+        788.015985
+      ]
+    ],
+    "finderCellIndexes": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "rows": [
+      {
+        "rowIndex": 0,
+        "bbox": [
+          174.03411764705882,
+          726.460015,
+          523.8853082352941,
+          745.776
+        ],
+        "slots": [
+          {
+            "rowIndex": 0,
+            "columnIndex": 0,
+            "bbox": [
+              174.03411764705882,
+              726.460015,
+              276.10875,
+              745.776
+            ],
+            "finderCellIndexes": [
+              0
+            ],
+            "rawCharIndexes": [
+              2784,
+              2785,
+              2786,
+              2787,
+              2788,
+              2789,
+              2790,
+              2791,
+              2792,
+              2793,
+              2794,
+              2795,
+              2796,
+              2797,
+              2798,
+              2799,
+              2800
+            ],
+            "extractedText": "System Component"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 1,
+            "bbox": [
+              276.10875,
+              726.460015,
+              404.65000000000003,
+              745.776
+            ],
+            "finderCellIndexes": [
+              2
+            ],
+            "rawCharIndexes": [
+              2801,
+              2802,
+              2803,
+              2804,
+              2805,
+              2806,
+              2807,
+              2808,
+              2809,
+              2810,
+              2811,
+              2812,
+              2813,
+              2814,
+              2815,
+              2816,
+              2817,
+              2818,
+              2819,
+              2820,
+              2821,
+              2822,
+              2823,
+              2824,
+              2825
+            ],
+            "extractedText": "Inspection / Maintenance"
+          },
+          {
+            "rowIndex": 0,
+            "columnIndex": 2,
+            "bbox": [
+              404.65000000000003,
+              726.460015,
+              523.8853082352941,
+              745.776
+            ],
+            "finderCellIndexes": [
+              4
+            ],
+            "rawCharIndexes": [
+              2826,
+              2827,
+              2828,
+              2829,
+              2830,
+              2831,
+              2832,
+              2833,
+              2834,
+              2835,
+              2836,
+              2837,
+              2838,
+              2839,
+              2840,
+              2841,
+              2842,
+              2843
+            ],
+            "extractedText": "Required Schedule"
+          }
+        ]
+      },
+      {
+        "rowIndex": 1,
+        "bbox": [
+          174.03411764705882,
+          745.776,
+          523.8853082352941,
+          788.015985
+        ],
+        "slots": [
+          {
+            "rowIndex": 1,
+            "columnIndex": 0,
+            "bbox": [
+              174.03411764705882,
+              745.776,
+              276.10875,
+              788.015985
+            ],
+            "finderCellIndexes": [
+              1
+            ],
+            "rawCharIndexes": [
+              2844,
+              2845,
+              2846,
+              2847,
+              2848,
+              2849,
+              2850,
+              2851,
+              2852,
+              2853,
+              2854,
+              2855,
+              2856,
+              2857,
+              2858,
+              2859,
+              2860,
+              2861,
+              2862,
+              2863,
+              2864,
+              2865,
+              2866
+            ],
+            "extractedText": "a. Gutters /\ndownpipes"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 1,
+            "bbox": [
+              276.10875,
+              745.776,
+              404.65000000000003,
+              788.015985
+            ],
+            "finderCellIndexes": [
+              3
+            ],
+            "rawCharIndexes": [
+              2867,
+              2868,
+              2869,
+              2870,
+              2871,
+              2872,
+              2873,
+              2874,
+              2875,
+              2876,
+              2877,
+              2878,
+              2879,
+              2880,
+              2881,
+              2882,
+              2883,
+              2884,
+              2885,
+              2886,
+              2887,
+              2888,
+              2889,
+              2890,
+              2891,
+              2892,
+              2893,
+              2894,
+              2895,
+              2896,
+              2897,
+              2898,
+              2899,
+              2900,
+              2901,
+              2902,
+              2903,
+              2904,
+              2905,
+              2906,
+              2907,
+              2908,
+              2909,
+              2910,
+              2911,
+              2912,
+              2913,
+              2914,
+              2915,
+              2916,
+              2917,
+              2918,
+              2919,
+              2920,
+              2921,
+              2922,
+              2923,
+              2924,
+              2925,
+              2926,
+              2927,
+              2928,
+              2929,
+              2930,
+              2931,
+              2932,
+              2933,
+              2934,
+              2935,
+              2936
+            ],
+            "extractedText": "Check that there is no\nleakage or blockage due to\nbuild up of debris;"
+          },
+          {
+            "rowIndex": 1,
+            "columnIndex": 2,
+            "bbox": [
+              404.65000000000003,
+              745.776,
+              523.8853082352941,
+              788.015985
+            ],
+            "finderCellIndexes": [
+              5
+            ],
+            "rawCharIndexes": [
+              2937,
+              2938,
+              2939,
+              2940,
+              2941,
+              2942,
+              2943,
+              2944,
+              2945,
+              2946,
+              2947,
+              2948,
+              2949,
+              2950,
+              2951,
+              2952,
+              2953,
+              2954,
+              2955,
+              2956,
+              2957,
+              2958,
+              2959,
+              2960,
+              2961,
+              2962,
+              2963,
+              2964,
+              2965,
+              2966,
+              2967,
+              2968,
+              2969,
+              2970,
+              2971,
+              2972,
+              2973,
+              2974,
+              2975,
+              2976,
+              2977,
+              2978,
+              2979,
+              2980,
+              2981,
+              2982,
+              2983,
+              2984,
+              2985,
+              2986,
+              2987,
+              2988,
+              2989,
+              2990,
+              2991,
+              2992,
+              2993,
+              2994,
+              2995,
+              2996,
+              2997,
+              2998,
+              2999,
+              3000,
+              3001,
+              3002,
+              3003
+            ],
+            "extractedText": "Monthly (Apr – Sept)\nBi-monthly (Oct – Mar)\nor the other months as"
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "columnIndex": 0,
+        "bbox": [
+          174.03411764705882,
+          726.460015,
+          276.10875,
+          788.015985
+        ],
+        "cells": [
+          [
+            174.03411764705882,
+            726.460015,
+            276.10875,
+            745.776
+          ],
+          [
+            174.03411764705882,
+            745.776,
+            276.10875,
+            788.015985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "columnIndex": 1,
+        "bbox": [
+          276.10875,
+          726.460015,
+          404.65000000000003,
+          788.015985
+        ],
+        "cells": [
+          [
+            276.10875,
+            726.460015,
+            404.65000000000003,
+            745.776
+          ],
+          [
+            276.10875,
+            745.776,
+            404.65000000000003,
+            788.015985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "columnIndex": 2,
+        "bbox": [
+          404.65000000000003,
+          726.460015,
+          523.8853082352941,
+          788.015985
+        ],
+        "cells": [
+          [
+            404.65000000000003,
+            726.460015,
+            523.8853082352941,
+            745.776
+          ],
+          [
+            404.65000000000003,
+            745.776,
+            523.8853082352941,
+            788.015985
+          ]
+        ],
+        "finderCellIndexes": [
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    ],
+    "extractedMatrix": [
+      [
+        "System Component",
+        "Inspection / Maintenance",
+        "Required Schedule"
+      ],
+      [
+        "a. Gutters /\ndownpipes",
+        "Check that there is no\nleakage or blockage due to\nbuild up of debris;",
+        "Monthly (Apr – Sept)\nBi-monthly (Oct – Mar)\nor the other months as"
+      ]
+    ],
+    "extractCall": "table.extract()",
+    "charMappingRule": "pdfplumber 0.11.9 Table.extract half-open midpoint rule",
+    "cellTopologySource": "official tolerance-based TableFinder inference",
+    "continuousVisibleInkAccepted": false,
+    "semanticOwner": null,
+    "footnoteOwner": null,
+    "crossPageGroup": null,
+    "trueBlankAccepted": null,
+    "sourceQualityAccepted": false
+  },
+  "sourceQualityAccepted": false,
+  "semanticOwner": null,
+  "footnoteOwner": null,
+  "crossPageGroup": null
+}
