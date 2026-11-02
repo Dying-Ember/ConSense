@@ -1,3 +1,6 @@
+<!-- competition-image-resource-32g-20261102 -->
+**比赛镜像资源更新（2026-11-02，用户最新明确）：**本次重新核对并打包镜像，App 和 H2 的 Java 最大堆均为 32 GiB，写入镜像默认值；本次镜像调整是对下方 12:00 截止规则的明确例外。GPU、CPU 和容器内存实际分配由赛方平台控制，单卡 80 GB 不代表每进程独享。新归档身份与旧运行／扫描记录分开，Docker、赛方 Kubernetes 和 H800 的验证按实际证据报告。
+
 <!-- competition-delivery-file-size-20261102 -->
 
 <!-- competition-resource-noon-priority-20261102 -->

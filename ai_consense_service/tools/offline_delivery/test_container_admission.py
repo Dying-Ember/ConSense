@@ -97,6 +97,14 @@ class AdmissionTest(unittest.TestCase):
         with self.assertRaises(admission.AdmissionError):
             admission._inspect(result, profile, self.cid, False)
 
+    def test_inspect_rejects_environment_mismatch_without_role(self):
+        profile = copy.deepcopy(self.profile)
+        profile.pop('role')
+        result = self.inspect('created', profile)
+        result['Config']['Env'].append('unexpected=value')
+        with self.assertRaises(admission.AdmissionError):
+            admission._inspect(result, profile, self.cid, False)
+
     def reject(self, profile=None, daemon=None, known=None, docker=None, ports=None):
         profile = self.profile if profile is None else profile
         daemon = self.daemon if daemon is None else daemon
@@ -739,6 +747,76 @@ class AppBindingTest(unittest.TestCase):
                 self.profile['config']['Env'].append(name + '=injected')
                 self.assert_no_create()
                 self.profile['config']['Env'].pop()
+
+    def test_app_accepts_only_the_pinned_java_heap_option(self):
+        env = self.profile['config']['Env']
+        for value in ('-Xmx2g', '-Xmx16g', '-Xmx32G', '-Xmx32g -javaagent:/tmp/x.jar', ''):
+            with self.subTest(value=value):
+                env.append('JAVA_TOOL_OPTIONS=' + value)
+                self.assert_no_create()
+                env.pop()
+        env.append('JAVA_TOOL_OPTIONS=-Xmx32g')
+        with mock.patch.object(admission, '_lock', return_value=nullcontext()), \
+             mock.patch.object(admission, '_request', side_effect=self.docker), \
+             mock.patch.object(admission, '_process_identity', return_value=None), \
+             mock.patch.object(admission, '_ports_available', return_value=None):
+            self.assertEqual('running', admission.start(self.profile, pin(self.profile), {}, self.daemon)['status'])
+        env.append('_JAVA_OPTIONS=-javaagent:/tmp/x.jar')
+        self.calls.clear()
+        self.assert_no_create()
+
+    def test_app_rejects_a_different_merged_image_environment(self):
+        self.profile['config']['Env'].append('JAVA_TOOL_OPTIONS=-Xmx32g')
+        def mismatched(method, path, expected, payload=None):
+            result = self.docker(method, path, expected, payload)
+            if path.endswith('/json') and path != '/containers/json?all=1':
+                result['Config']['Env'] = [
+                    'JAVA_TOOL_OPTIONS=-Xmx2g' if item == 'JAVA_TOOL_OPTIONS=-Xmx32g' else item
+                    for item in result['Config']['Env']]
+            return result
+        self.reject(docker=mismatched)
+        self.assertTrue(any(path.startswith('/containers/create?') for _, path, _ in self.calls))
+        self.assertFalse(any(path.endswith('/start') for _, path, _ in self.calls))
+
+    def test_app_inherits_only_the_pinned_image_heap_default(self):
+        default = 'JAVA_TOOL_OPTIONS=-Xmx32g'
+        image_path = '/images/' + admission.quote(self.image, safe=':') + '/json'
+        image = {'Id': self.image, 'Config': {'Env': ['PATH=/usr/bin:/bin', default]}}
+        additional = [default]
+        def merged(method, path, expected, payload=None):
+            if path == image_path:
+                self.calls.append((method, path, payload))
+                return copy.deepcopy(image)
+            result = self.docker(method, path, expected, payload)
+            if path.endswith('/json') and path != '/containers/json?all=1':
+                result['Config']['Env'].extend(additional)
+            return result
+        with mock.patch.object(admission, '_lock', return_value=nullcontext()), \
+             mock.patch.object(admission, '_request', side_effect=merged), \
+             mock.patch.object(admission, '_process_identity', return_value=None), \
+             mock.patch.object(admission, '_ports_available', return_value=None):
+            self.assertEqual('running', admission.start(self.profile, pin(self.profile), {}, self.daemon)['status'])
+        self.assertTrue(any(path == image_path for _, path, _ in self.calls))
+        import jre_probe_admission as jre
+        probe = 'c' * 64
+        def with_probe(method, path, expected, payload=None):
+            if path == '/containers/json?all=1':
+                return [{'Id': self.cid}, {'Id': probe}]
+            return merged(method, path, expected, payload)
+        with mock.patch.object(admission, '_request', side_effect=with_probe), \
+             mock.patch.object(admission, '_process_identity', return_value=None):
+            jre._check_inventory([self.cid], probe, {'app': {'id': self.cid, 'profile': self.profile}}, self.daemon)
+        for wrong_id, defaults, merged_env in (
+                ('sha256:' + 'c' * 64, [default], [default]),
+                (self.image, ['JAVA_TOOL_OPTIONS=-Xmx2g'], [default]),
+                (self.image, [default, 'JAVA_TOOL_OPTIONS=-javaagent:/tmp/x.jar'], [default]),
+                (self.image, [default], [default, 'LD_PRELOAD=/tmp/x.so']),
+                (self.image, [default], [default, default])):
+            with self.subTest(wrong_id=wrong_id, defaults=defaults, merged_env=merged_env):
+                image['Id'], image['Config']['Env'], additional[:] = wrong_id, defaults, merged_env
+                self.calls.clear()
+                self.reject(docker=merged)
+                self.assertFalse(any(path.endswith('/start') for _, path, _ in self.calls))
 
     def test_execution_manifest_and_selected_binary_must_match_pins(self):
         execution = self.profile['appBinding']['execution']

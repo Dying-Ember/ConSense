@@ -2,4 +2,4 @@ ARG EXTERNAL_RUNTIME_BASE
 FROM ${EXTERNAL_RUNTIME_BASE}
 USER consense:consense
 ENTRYPOINT ["/runtime/jre/bin/java"]
-CMD ["-Xmx16g", "-Dh2.bindAddress=127.0.0.1", "-Djava.io.tmpdir=/runtime/data/h2/tmp", "-cp", "/runtime/lib/h2.jar", "org.h2.tools.Server", "-tcp", "-tcpPort", "28682", "-ifExists", "-baseDir", "/runtime/data/h2"]
+CMD ["-Xmx32g", "-Dh2.bindAddress=127.0.0.1", "-Djava.io.tmpdir=/runtime/data/h2/tmp", "-cp", "/runtime/lib/h2.jar", "org.h2.tools.Server", "-tcp", "-tcpPort", "28682", "-ifExists", "-baseDir", "/runtime/data/h2"]

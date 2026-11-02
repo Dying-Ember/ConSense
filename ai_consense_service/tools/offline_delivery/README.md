@@ -12,7 +12,7 @@
 
 比赛部署时，在 `SPRING_PROFILES_ACTIVE` 中包含 `competition`，并将 `CONSENSE_QWEN_BASE_URL` 设置为实际 vLLM 服务的基础地址，**不要带 `/v1`**；现有 Qwen 客户端会自行追加 `/v1/models` 和 `/v1/chat/completions`。通过现有外置配置设置模型和凭据。此 profile 下地址缺失或为空时，Qwen 配置保持未就绪，请求会明确失败，不会回退到通用云端地址。该 profile 不会自动启用 Qwen，也不会更改 OCR、检索或 GPU 准入。`app-source` / `rehearsal-source` 是本机协议替身预演配置，不能作为比赛 vLLM 地址隐式沿用。优先级更高的 Spring 属性可以覆盖 profile；部署时应核对最终生效值及其来源。配置了 URL 不等于 vLLM 已就绪。
 
-独立比赛预演使用 `Dockerfile.app-role-external`、`Dockerfile.h2-external`、`Dockerfile.qdrant-external`、`Dockerfile.source-external` 和 `Dockerfile.gpu-worker-external`。前三者是最小角色镜像，启动脚本或可执行文件、Java、Qdrant、发布文件、配置与状态由磁盘挂载。创建容器时仍须明确指定绑定挂载、限制、回环监听及密钥。H2 镜像默认最大堆于 2026-11-01 调整为 16 GiB；已有容器在替换前保留原命令。GPU 镜像为固定容器准入契约保留原 Python 启动参数，分别放在 `ENTRYPOINT` 和 `CMD`。构建及运行回执位于被 Git 忽略的 `.local/container-rehearsal-20261029/serial-role-images-20261030/`。2026-10-30 构建五个镜像及运行三个 CPU 角色，并不能证明五容器稳定运行或真实模型验收通过。当前预演状态请查看本地票据看板，并独立检查登记实例。
+独立比赛预演使用 `Dockerfile.app-role-external`、`Dockerfile.h2-external`、`Dockerfile.qdrant-external`、`Dockerfile.source-external` 和 `Dockerfile.gpu-worker-external`。前三者是最小角色镜像，启动脚本或可执行文件、Java、Qdrant、发布文件、配置与状态由磁盘挂载。创建容器时仍须明确指定绑定挂载、限制、回环监听及密钥。2026-11-02 用户明确 App 和 H2 镜像默认最大堆均为 32 GiB；已有容器在替换前保留原设置，部署方显式环境或命令可覆盖镜像默认值。GPU 镜像为固定容器准入契约保留原 Python 启动参数，分别放在 `ENTRYPOINT` 和 `CMD`。历史构建及运行回执位于被 Git 忽略的 `.local/container-rehearsal-20261029/serial-role-images-20261030/`；新归档不继承旧运行验收。当前预演状态请查看本地票据看板，并独立检查登记实例。
 
 ### App 字体运行环境
 

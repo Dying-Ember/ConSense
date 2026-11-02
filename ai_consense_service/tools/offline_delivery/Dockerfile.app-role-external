@@ -1,5 +1,6 @@
 ARG EXTERNAL_RUNTIME_BASE
 FROM ${EXTERNAL_RUNTIME_BASE}
 USER consense:consense
+ENV JAVA_TOOL_OPTIONS=-Xmx32g
 ENTRYPOINT ["/bin/sh"]
 CMD ["/artifacts/app-entrypoint.sh"]

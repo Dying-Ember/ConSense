@@ -12,31 +12,25 @@
 
 ## 1. 镜像导入
 
-当前预演所用的五份镜像归档在专用预演机的 `/srv/consense-rehearsal-20261029/evidence/local01/grype-db-import-20261031-a1/input/`。准备赛方硬盘时，将以下五份归档放到部署人员选定的 `IMAGE_DIR`，并以实际核对的文件及镜像 ID 为准。镜像扫描记录不覆盖外置文件，也不代替赛方扫描受理。
+2026-11-02 用户要求 App 和 H2 的 Java 最大堆均为 32 GiB，已写入本次交付归档的默认镜像配置。五个归档位于 `competition-assets/images/`，`SHA256SUMS` 按实际文件核对。五包已在独立 containerd 2.2.1 中以 `--no-unpack` 导入，并从内容存储读回两项 32 GiB 默认值；未创建容器或任务。历史预演归档及旧运行证据保留，这次导入不证明 Docker 导入、业务运行或赛方环境验收。以下为归档内 OCI manifest 身份，和镜像配置对象的 SHA 不同：
 
-| 职责 | 归档 | 预演镜像 ID | 建议标签 |
-| --- | --- | --- | --- |
-| App | `app-image-scan-attempt1.tar` | `sha256:7ef8a66d1ea612a044b60a4e89e16257b5dbefb349e0f55122e211ce23412395` | `consense-competition/app:demo` |
-| H2 | `h2-image-scan-attempt1.tar` | `sha256:965d5a05d1c4de1cdb0cb0a1e334b3a980dc290846195e1085a83eac96c03e21` | `consense-competition/h2:demo` |
-| Qdrant | `qdrant-image-scan-attempt1.tar` | `sha256:ee7f83e41b488aa85aabe49cbcee89bfbc50b05fb3b7db80859bdc8f83364bb9` | `consense-competition/qdrant:demo` |
-| Source | `source-image-scan-attempt1.tar` | `sha256:c66fd5f63456746f52bb419a47b5ae9c8090eeadd7747e2a547a4c20d5132ecf` | `consense-competition/source:demo` |
-| GPU | `gpu-image-scan-attempt1.tar` | `sha256:36e5d4e408c6ff56d0ff20afe179a59fdde3a393b82ca99daf3e837bc4f954d4` | `consense-competition/gpu:demo` |
-
-四份归档没有内置 RepoTag，不能假设导入后自动出现上表标签。以下是目标机的导入示例；导入和按 ID 打标签尚未在目标机验证：
+| 职责 | 当前交付归档 | OCI manifest 摘要 |
+| --- | --- | --- |
+| App | `app.tar` | `sha256:e9161abc26282818aaaa7b5a600a2ee45ac33345ad6049b7d96e97105b081b4e` |
+| H2 | `h2.tar` | `sha256:7516642587573ac6bf253b5772cbb5749d9b273bf664e50a159cb8bd08498c1f` |
+| Qdrant | `qdrant.tar` | `sha256:ee7f83e41b488aa85aabe49cbcee89bfbc50b05fb3b7db80859bdc8f83364bb9` |
+| Source | `source.tar` | `sha256:c66fd5f63456746f52bb419a47b5ae9c8090eeadd7747e2a547a4c20d5132ecf` |
+| GPU | `gpu.tar` | `sha256:36e5d4e408c6ff56d0ff20afe179a59fdde3a393b82ca99daf3e837bc4f954d4` |
 
 ```sh
+cd "$IMAGE_DIR"
+sha256sum -c SHA256SUMS
 for role in app h2 qdrant source gpu; do
-  docker load -i "$IMAGE_DIR/$role-image-scan-attempt1.tar"
+  docker load -i "$role.tar"
 done
-docker image tag sha256:7ef8a66d1ea612a044b60a4e89e16257b5dbefb349e0f55122e211ce23412395 consense-competition/app:demo
-docker image tag sha256:965d5a05d1c4de1cdb0cb0a1e334b3a980dc290846195e1085a83eac96c03e21 consense-competition/h2:demo
-docker image tag sha256:ee7f83e41b488aa85aabe49cbcee89bfbc50b05fb3b7db80859bdc8f83364bb9 consense-competition/qdrant:demo
-docker image tag sha256:c66fd5f63456746f52bb419a47b5ae9c8090eeadd7747e2a547a4c20d5132ecf consense-competition/source:demo
-docker image tag sha256:36e5d4e408c6ff56d0ff20afe179a59fdde3a393b82ca99daf3e837bc4f954d4 consense-competition/gpu:demo
 ```
 
-表内 ID 是当前预演 Docker 识别的镜像身份；归档中的 OCI manifest 身份与该运行镜像已核对。不同版本的导入工具可能显示配置对象的另一摘要，不能仅按显示形式推断内容相同；如目标机不接受以上 ID，先核对导入结果与归档 manifest 的对应关系，再使用目标机识别的 ID 打标签。不要以此处示例代替实际导入核验。
-
+四份归档无 RepoTag，Source 带历史 tag；由导入工具返回的镜像身份与标签逐个核对并按赛方要求标记。OCI manifest SHA、镜像配置 SHA、归档 SHA 不是同一身份，不以旧预演镜像 ID 替代导入读回。赛方若使用 Kubernetes，以赛方提供的镜像导入方式为准。所有运行时、模型、配置和持久数据仍按职责外置并正确挂载；镜像扫描不覆盖这些外部文件。
 ## 2. 硬盘资产清单
 
 表中容器路径是本机实际程序使用的路径；赛方宿主目录自行指定并挂载，不需要复用本机绝对路径。`T` 指本机预演根 `/srv/consense-rehearsal-20261029`，仅供定位现有资产，不是赛方路径。不要覆盖运行中的数据库、来源、模型或发布目录；需要历史数据时使用已确认的一致副本。
@@ -65,7 +59,7 @@ OCR 模型的实际映射包括 `ocr-support-20261030-attempt1/paddle-layout`、
 
 ## 3. 现场配置和创建角色
 
-先由现场准备各角色的只读配置和受限凭据文件，再通过 `competition-create-role.sh` 创建。脚本只调用 `docker create`，不复制文件、不生成密钥、不启动或删除容器；它使用上表标签，保留现有各角色入口，并为 H2 显式设置 16 GiB 最大堆。旧 H2 镜像归档自身默认值为 2 GiB，不能只依赖镜像默认命令。若现场需要 32 GiB，可设置 `H2_HEAP=32g`；内存、CPU、进程和线程上限依据冻结基准及现场配额确定，不照搬预演中临时设置的限制。
+先由现场准备各角色的只读配置和受限凭据文件，再通过 `competition-create-role.sh` 创建。脚本只调用 `docker create`，不复制文件、不生成密钥、不启动或删除容器；它保留现有角色入口，H2 脚本和新归档默认最大堆均为 32 GiB。内存、CPU、进程和线程上限依据冻结基准及现场配额确定，不照搬预演中临时设置的限制。
 
 脚本的其余参数会原样传给 `docker create`，用于现场的 `--mount`、`--env-file`、网络和 GPU 设备等配置。例如，以下仅演示 H2 的路径参数；执行前设置这几个变量并确认实际文件及权限：
 
@@ -89,7 +83,7 @@ sh competition-create-role.sh h2 --network host --read-only \
 | Source | `/runtime/envs/source/bin/python -u /runtime/tools/offline_delivery/source_service_entrypoint.py` | Source 配置、Vetting/Advisory 状态、所需模型和环境；完整 OCR 配置及其 SHA、GPU profile manifest 及其 SHA、共享 socket、Qdrant 地址与受限凭据；确保 Source 和 GPU 的 socket 路径及 UID/GID 对应 |
 | GPU | `/usr/bin/python3 /runtime/tools/offline_delivery/fixed_gpu_worker.py --config /runtime/config/gpu.json` | 实际设备/驱动、可用 Python 和编译器、各模型/环境、任务目录及可写 tmp；使用现场容器 ID、GPU UUID、cgroup 委派和 socket 生成 `gpu.json`，并同步 Source 配置及其 SHA |
 
-App 的 Java 路径可设 `PATH=/runtime/jre/bin:/usr/bin:/bin`，堆和临时目录可设 `JAVA_TOOL_OPTIONS=-Xmx16g -Djava.io.tmpdir=/runtime/tmp/app -Duser.home=/runtime/tmp/app`；其中环境文件中的整行是一个变量值。Source 入口必填 `CONSENSE_WORKSPACE_ROOT`、`CONSENSE_SL_SCOPE_MANIFEST`、`CONSENSE_SOURCE_VETTING_STATE`、`CONSENSE_SOURCE_ADVISORY_STATE`、`CONSENSE_SOURCE_VETTING_PORT` 和 `CONSENSE_SOURCE_ADVISORY_PORT`；工作目录和 scope 文件须存在，两状态目录须独立且可写，端口须不同。其他实际配置键包括 `CONSENSE_QDRANT_URL`、`CONSENSE_QDRANT_API_KEY_FILE`、`CONSENSE_COMPLETE_OCR_CONFIG` / `CONSENSE_COMPLETE_OCR_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_URL` / `CONSENSE_FIXED_GPU_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_PROFILE_MANIFEST` / `CONSENSE_FIXED_GPU_PROFILE_MANIFEST_SHA256`，以及现有模型 manifest 和凭据文件配置。Source 使用 Qdrant 时，密钥文件须由 Source 实际 UID/GID 拥有、权限为 `0600`，且不能把密钥直接放入 `CONSENSE_QDRANT_API_KEY` 环境变量。须按现场实际配置生成对应值，不能把本机的 hash 当成改动后配置的 hash。
+App 的 Java 路径可设 `PATH=/runtime/jre/bin:/usr/bin:/bin`，App 新镜像默认 `JAVA_TOOL_OPTIONS=-Xmx32g`；部署环境中的同名变量会覆盖该默认值，不得沿用旧的 16 GiB 预演值。临时目录与用户目录按挂载和运行配置单独核对。Source 入口必填 `CONSENSE_WORKSPACE_ROOT`、`CONSENSE_SL_SCOPE_MANIFEST`、`CONSENSE_SOURCE_VETTING_STATE`、`CONSENSE_SOURCE_ADVISORY_STATE`、`CONSENSE_SOURCE_VETTING_PORT` 和 `CONSENSE_SOURCE_ADVISORY_PORT`；工作目录和 scope 文件须存在，两状态目录须独立且可写，端口须不同。其他实际配置键包括 `CONSENSE_QDRANT_URL`、`CONSENSE_QDRANT_API_KEY_FILE`、`CONSENSE_COMPLETE_OCR_CONFIG` / `CONSENSE_COMPLETE_OCR_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_URL` / `CONSENSE_FIXED_GPU_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_PROFILE_MANIFEST` / `CONSENSE_FIXED_GPU_PROFILE_MANIFEST_SHA256`，以及现有模型 manifest 和凭据文件配置。Source 使用 Qdrant 时，密钥文件须由 Source 实际 UID/GID 拥有、权限为 `0600`，且不能把密钥直接放入 `CONSENSE_QDRANT_API_KEY` 环境变量。须按现场实际配置生成对应值，不能把本机的 hash 当成改动后配置的 hash。
 
 本机 Source 同时使用了 OCR、本机 Qwen 替身和检索配置；不能为了移除替身而直接丢掉整份配置。赛方须保留或重设 OCR 指向 Source 的 `consense.ocr.mode=local`、`consense.ocr.base-url` 和检索/证据服务地址，同时启用 `competition` profile 并通过 `CONSENSE_QWEN_BASE_URL` 提供实际 vLLM 基址（不含 `/v1`）与认证。核对配置优先级，不能让本机 Source 回环地址成为赛方 Qwen 的默认目标。预演的 `cpu-protocol-stub` 和占位权重不是真实 Qwen。
 

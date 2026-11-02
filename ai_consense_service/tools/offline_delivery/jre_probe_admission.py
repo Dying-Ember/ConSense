@@ -156,7 +156,7 @@ def _check_inventory(before, cid, known, daemon):
                       'container inventory changed')
     for item in known.values():
         admission._inspect(admission._request('GET', '/containers/' + item['id'] + '/json', daemon),
-                           item['profile'], item['id'], True)
+                           item['profile'], item['id'], True, daemon)
 
 
 def _identity(info):

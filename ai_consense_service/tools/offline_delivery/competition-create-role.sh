@@ -18,7 +18,7 @@ case "$role" in
             --entrypoint /bin/sh "$image_prefix/app:demo" /artifacts/app-entrypoint.sh
         ;;
     h2)
-        h2_heap=${H2_HEAP:-16g}
+        h2_heap=${H2_HEAP:-32g}
         h2_bind=${H2_BIND_ADDRESS:-127.0.0.1}
         h2_port=${H2_TCP_PORT:-28682}
         exec "$docker_bin" create --name "$name" "$@" --user consense:consense \

@@ -231,7 +231,8 @@ def _app_binding(profile, expected_daemon):
     expected_env = {'APP_ARTIFACT_ROOT': '/runtime/release', 'APP_JAR': jar, 'APP_WEB_DIRECTORY': web,
                     'APP_FILE_MANIFEST': '/runtime/release/' + app_files}
     require(all(env.get(key) == value for key, value in expected_env.items()), 'app environment differs from registered release')
-    require(not any(key in INJECTION_ENV or key.startswith('LD_') for key in env), 'executable injection environment forbidden')
+    require(not any((key in INJECTION_ENV and (key != 'JAVA_TOOL_OPTIONS' or value != '-Xmx32g'))
+                    or key.startswith('LD_') for key, value in env.items()), 'executable injection environment forbidden')
     mounts = config['HostConfig']['Mounts']
     release_mounts = [m for m in mounts if m['Target'] == '/runtime/release']
     require(len(release_mounts) == 1 and release_mounts[0]['Source'] == binding['root']
@@ -469,12 +470,24 @@ def _process_identity(pid):
             'actual process security identity differs')
 
 
-def _inspect(result, profile, cid, running):
+def _inspect(result, profile, cid, running, daemon=None):
     require(isinstance(result, dict) and result.get('Id') == cid and result.get('Name') == '/' + profile['name']
             and result.get('Image') == profile['config']['Image'], 'container identity differs')
     cfg, host = result.get('Config'), result.get('HostConfig')
     expected = profile['config']
-    require(isinstance(cfg, dict) and all(cfg.get(k) == v for k, v in expected.items() if k != 'HostConfig')
+    env_matches = isinstance(cfg, dict) and cfg.get('Env') == expected['Env']
+    default = 'JAVA_TOOL_OPTIONS=-Xmx32g'
+    if (not env_matches and profile.get('role') == 'app' and daemon is not None and isinstance(cfg, dict)
+            and isinstance(cfg.get('Env'), list) and cfg['Env'].count(default) == 1
+            and all(item.partition('=')[0] != 'JAVA_TOOL_OPTIONS' for item in expected['Env'])
+            and [item for item in cfg['Env'] if item != default] == expected['Env']):
+        image = _request('GET', '/images/' + quote(expected['Image'], safe=':') + '/json', daemon)
+        image_env = image.get('Config', {}).get('Env') if isinstance(image, dict) and isinstance(image.get('Config'), dict) else None
+        env_matches = (isinstance(image_env, list) and all(isinstance(item, str) for item in image_env)
+                       and image.get('Id') == expected['Image']
+                       and [item for item in image_env if item.partition('=')[0] == 'JAVA_TOOL_OPTIONS'] == [default])
+    require(isinstance(cfg, dict) and env_matches
+            and all(cfg.get(k) == v for k, v in expected.items() if k not in ('HostConfig', 'Env'))
             and isinstance(host, dict) and all(
                 ((type(host.get(k)) is int and host[k] == v) or (type(v) is int and v == 0
                   and k in host and host[k] is None)) if k == 'PidsLimit' else host.get(k) == v
@@ -532,7 +545,7 @@ def _inventory(known, daemon, pending_gpu=None):
     for cid in ids:
         inspected = _request('GET', '/containers/' + cid + '/json', daemon)
         if cid in recorded:
-            _inspect(inspected, recorded[cid], cid, cid != pending_id)
+            _inspect(inspected, recorded[cid], cid, cid != pending_id, daemon)
             if cid != pending_id:
                 running.append(cid)
         else:
@@ -580,7 +593,7 @@ def start(profile, profile_sha256, known_containers, expected_daemon, defer_star
         require(isinstance(cid, str) and re.fullmatch('[a-f0-9]{64}', cid) and cid not in before,
                 'invalid created identity; inspect the exact requested name before retry')
         try:
-            _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, False)
+            _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, False, expected_daemon)
             require(_gpu_device(profile['config']['HostConfig']) == gpu_device, 'GPU device changed before start')
             if defer_start:
                 pending = {'id': cid, 'profile': profile, 'profileSha256': profile_sha256}
@@ -589,7 +602,7 @@ def start(profile, profile_sha256, known_containers, expected_daemon, defer_star
                 return {'role': 'gpu', 'id': cid, 'profileSha256': profile_sha256,
                         'gpuDevice': list(gpu_device), 'status': 'created'}
             _request('POST', '/containers/' + cid + '/start', expected_daemon)
-            pid = _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, True)
+            pid = _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, True, expected_daemon)
             require(_gpu_device(profile['config']['HostConfig']) == gpu_device, 'GPU device changed during start')
             now = dict(known_containers)
             now[profile['role']] = {'id': cid, 'profile': profile, 'profileSha256': profile_sha256}
@@ -702,11 +715,11 @@ def start_created_gpu(profile, profile_sha256, created, config_sha256, known_con
         require(_gpu_device(profile['config']['HostConfig']) == tuple(created['gpuDevice']),
                 'GPU device changed after create')
         _gpu_cgroup_parent(profile)
-        _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, False)
+        _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, False, expected_daemon)
         config_identity = _gpu_config_pin(profile, config_sha256, cid)
         try:
             _request('POST', '/containers/' + cid + '/start', expected_daemon)
-            pid = _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, True)
+            pid = _inspect(_request('GET', '/containers/' + cid + '/json', expected_daemon), profile, cid, True, expected_daemon)
             child = _gpu_running_cgroup(profile, cid, pid)
             os.chown(child, 10001, 10001)
             os.chown(child / 'cgroup.procs', 10001, 10001)
