@@ -28,7 +28,7 @@ class CanonicalNativePdfFamilyEvidenceServiceTest {
             ObjectNode oer=health.putObject("oer");oer.put("inputContract","canonical-source-chunks-upstream-scope-and-parser-projection-v1");oer.put("assetReturnContract","source-and-projection-bound-content-addressed-assets-v1");oer.put("canonicalProjectionEndpoint","/project");oer.putObject("scopePolicy").put("manifestSha256",root.path("manifest").path("scope").path("scopePolicySha256").asText());oer.set("nativePdfSourceFamily",NativePdfSourceFamilyFixture.capability());
             ObjectNode algorithms=health.putObject("retrieval").putObject("sourceWindows").putObject("algorithms");root.path("manifest").path("software").fields().forEachRemaining(e->algorithms.set(e.getKey(),e.getValue().path("sha256")));
             for(String f:Arrays.asList("unified_source_registry.py","retrieval_source_units.py","oer_unified_server.py"))algorithms.put(f,"a".repeat(64));
-            when(backend.health()).thenAnswer(i->JsonUtils.write(health));when(backend.snapshot(anyString(),anyString())).thenReturn(raw);
+            when(backend.health(anyString())).thenAnswer(i->JsonUtils.write(health));when(backend.snapshot(anyString(),anyString())).thenReturn(raw);
             when(backend.snapshotIfChanged(anyString(),anyString(),anyString(),anyBoolean())).thenAnswer(i->new CanonicalEvidenceBackend.Reply(
                 com.consense.common.Utf8.bytes(raw),"application/json","\""+com.consense.common.Utf8.sha256(raw)+"\"",document.getSourceSha256(),root.path("projectionSha256").asText()));
             when(repository.findByProjectIdAndDocumentIdAndProjectionSha256(anyString(),anyLong(),anyString())).thenAnswer(i->rows.stream().findFirst());

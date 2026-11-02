@@ -2,6 +2,89 @@
 
 This directory implements UNI-09 preparation and recovery boundaries. It does not apply resources, build images, contact an active database, run models, change Local05, or establish Linux/MySQL/Kubernetes/H800 acceptance. Every generated receipt retains `targetAccepted: false`.
 
+## Local five-role Docker rehearsal
+
+[比赛五角色交付与启动](competition-delivery-guide.md) 汇总镜像归档、外置资产、现场配置和参数化创建入口；目标环境尚未验证。
+
+[资料打不开时的人工排查](source-troubleshooting.md)涵盖路径、权限、项目版本和服务状态。
+
+For competition deployment, include `competition` in `SPRING_PROFILES_ACTIVE` and configure
+`CONSENSE_QWEN_BASE_URL` with the actual vLLM service base URL **without** `/v1`; the existing
+Qwen client appends `/v1/models` and `/v1/chat/completions`. Set the model and credentials
+through the existing external configuration. With this profile, an absent or blank endpoint
+leaves the Qwen profile unconfigured and a Qwen request fails explicitly instead of falling
+back to the generic cloud endpoint. The profile does not enable Qwen or change OCR, retrieval,
+or GPU admission. The `app-source` / `rehearsal-source` configuration is for the local
+protocol-stub rehearsal and must not be carried into the competition as an implicit vLLM address.
+An explicitly supplied higher-priority Spring property may override the profile; verify its
+effective source and value when deploying. A configured URL alone does not prove vLLM readiness.
+
+The separate competition rehearsal uses `Dockerfile.app-role-external`, `Dockerfile.h2-external`, `Dockerfile.qdrant-external`, `Dockerfile.source-external`, and `Dockerfile.gpu-worker-external`. The first three are minimal role images whose startup script or executable, Java, Qdrant, release files, configuration, and state are mounted from the hard disk. Runtime bind mounts, limits, loopback listeners, and secrets remain explicit at container creation. The H2 image default was updated to a 16 GiB maximum heap on 2026-11-01; an existing container retains its previous command until replaced. The GPU image keeps the same Python startup arguments split between `ENTRYPOINT` and `CMD` for the fixed-container admission contract. Build and runtime receipts are in the ignored `.local/container-rehearsal-20261029/serial-role-images-20261030/` directory. On 2026-10-30, five built images and three running CPU roles did not establish five stable containers or real model acceptance. For the current rehearsal status, consult the local ticket board and independently check the registered instances.
+
+### App font runtime
+
+For the five-role App, place the font runtime on disk outside the App release and mount it read-only at `/runtime/font-runtime`. Prepare `fonts.conf`, `manifest.json`, `lib/`, `fonts/`, and `licenses/`. The seven-library candidate contains `libfontconfig.so.1`, `libfreetype.so.6`, `libharfbuzz.so.0`, `libgraphite2.so.3`, `libpng16.so.16`, `libjpeg.so.8`, and `liblcms2.so.2`; its fonts are DejaVu Sans, Sans Bold, Serif, Sans Mono and WenQuanYi Zen Hei. Include the accompanying package copyright and licence files for all libraries and fonts. Record the selected files and versions with the deployment; the ignored local candidate is not itself part of the repository.
+
+Set `FONTCONFIG_FILE=/runtime/font-runtime/fonts.conf` and include `/runtime/font-runtime/lib` in `LD_LIBRARY_PATH`, preserving any other required library paths. The supplied fontconfig file looks for fonts under `/runtime/font-runtime/fonts` and uses `/runtime/tmp/app/fontconfig` as its cache; that cache directory, or its existing parent, must be writable by the App's non-root user. Keep the font runtime read-only and the writable cache outside it. Configure the bind mount and environment when creating the App container; `Dockerfile.app-role-external` alone does not add them, and an existing container cannot acquire them merely by restarting.
+
+The local App container has drawn Chinese and English text with the original five-library runtime. PDFBox rendering of a real source page subsequently exposed missing JPEG and lcms2 libraries; an independent original-page probe passed with the seven-library candidate. That runtime is now mounted in the local rehearsal App, where the same JRE and PDFBox rendered the first page of document 50. The business upload retry has begun; its dual OCR result is not yet verified. The libraries came from Ubuntu 24.04; compatibility with the competition image, its system libraries and ABI, and target-environment rendering remain unverified. Check those on the actual target rather than assuming the local result proves competition readiness.
+
+### Linux offline build entry
+
+Prepare a separate source copy and supply absolute paths to the local JDK, Maven, Node, npm cache and Maven repository. `npm ci` removes and reinstalls `node_modules`; the build updates `dist` and `target` in the supplied source directory:
+
+```sh
+sh scripts/build-competition-offline.sh /path/to/source-copy /path/to/jdk /path/to/maven /path/to/node /path/to/npm-cache /path/to/maven-repository
+```
+
+The script uses npm and Maven offline modes and skips Maven test execution; run the required tests separately. Those flags do not prevent network access by dependency lifecycle scripts: for an actual offline rehearsal, isolate the build process and its children from external networking. Record the supplied tool and dependency identities, source version and generated JAR/web files, then prepare a new release as described below. Missing cache entries fail the build. This entry has not yet been validated as a full offline build in the competition runtime.
+
+### Local dedicated App release inventory
+
+Assemble a **new** dedicated App release directory on disk; never overwrite an existing or running release. Its top level contains `app-entrypoint.sh`, `app.jar`, `web/` and `manifest/`. The manifest initially has a sorted `web-files` list and a `sha256sums` file covering exactly the JAR and all web files. Only declared regular files and directories belong in this root. Keep databases, uploads, model assets, secrets, temporary files and generated deployment output outside it. Preserve the old release for recovery.
+
+From this directory (`ai_consense_service/tools/offline_delivery`), after the files have been independently identified, use the pinned expected entrypoint SHA and the **new, not yet in-use** release path to generate the complete list and two digests:
+
+```sh
+python3 -c 'import json,sys,delivery; print(json.dumps(delivery.prepare_local_app_release_inventory(sys.argv[1],sys.argv[2]), sort_keys=True))' /absolute/path/to/new-app-release EXPECTED_ENTRYPOINT_SHA256
+```
+
+The function refuses an existing `manifest/release-files`, unlisted files and mismatched content; it creates that list once and returns `releaseFilesSha256` and `contentManifestSha256`. Independently verify the complete release and preserve both values and the entrypoint identity in a separate trusted deployment record. Do not derive the expected pin from a possibly changed release at startup. The caller must pass `APP_RELEASE_DIRECTORY=.`, `APP_RELEASE_FILES_SHA256=<releaseFilesSha256>`, and `APP_CONTENT_MANIFEST_SHA256=<contentManifestSha256>` along with `APP_JAR=app.jar` and `APP_WEB_DIRECTORY=web`; mount the exact dedicated root read-only at `/artifacts` and its `manifest` subdirectory read-only at `/app-files`. Missing inventory or pins causes startup to fail. An actual creation or restart caller must verify the exact release, mount, command and trusted values; historical one-off rehearsal scripts are not reusable deployment callers.
+
+### Start and diagnose the registered local App
+
+These steps apply to an **already created**, registered App container in the dedicated rehearsal daemon; they are not a command to recreate it. Select the full container ID, image digest, dedicated release path, entrypoint digest, both manifest digests and effective configuration from the independently reviewed deployment record. Do not obtain expected digests from the release being checked or print credentials. The previously used one-off candidate hard-codes historical CIDs and PIDs; do not replay it as a current startup command.
+
+In the dedicated WSL distribution, first confirm the daemon and registered H2 and Qdrant instances are available, the App's port is free, no other App instance would overlap it, and the total remains within five running containers. Inspect the selected stopped App object against the record: image and command, `consense:consense` / UID:GID 10001:10001, read-only root filesystem, read-only `/artifacts` and `/app-files` mounts from the same registered release, writable App data and temporary mounts, private configuration, and the `APP_JAR`, `APP_WEB_DIRECTORY`, `APP_RELEASE_DIRECTORY` and both digest values. Compare secret-bearing environment or configuration locally without displaying them. Do not start an object with mismatched or unknown settings. An existing Docker object has immutable mount and environment settings; changing the release or its pins needs a separately reviewed new object, not `docker start` on the old one.
+
+Set `APP_CID` to the full verified ID, `APP_RELEASE` to its registered host release directory, and `ENTRYPOINT_SHA256`, `APP_RELEASE_FILES_SHA256` and `APP_CONTENT_MANIFEST_SHA256` to the independently recorded expected values. With those values set, check the release and start that exact object:
+
+```sh
+set -eu
+: "${APP_CID:?}" "${APP_RELEASE:?}" "${ENTRYPOINT_SHA256:?}" "${APP_RELEASE_FILES_SHA256:?}" "${APP_CONTENT_MANIFEST_SHA256:?}"
+test "$(sha256sum "$APP_RELEASE/app-entrypoint.sh" | cut -d' ' -f1)" = "$ENTRYPOINT_SHA256"
+test "$(sha256sum "$APP_RELEASE/manifest/release-files" | cut -d' ' -f1)" = "$APP_RELEASE_FILES_SHA256"
+test "$(sha256sum "$APP_RELEASE/manifest/sha256sums" | cut -d' ' -f1)" = "$APP_CONTENT_MANIFEST_SHA256"
+(cd "$APP_RELEASE" && sha256sum --strict -c manifest/sha256sums)
+docker --host unix:///run/consense-docker/docker.sock start "$APP_CID"
+docker --host unix:///run/consense-docker/docker.sock inspect --format '{{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}}' "$APP_CID"
+for attempt in $(seq 1 30); do
+    if curl --fail --silent --output /dev/null http://127.0.0.1:28680/; then break; fi
+    if [ "$attempt" = 30 ]; then echo 'App page did not become ready' >&2; exit 1; fi
+    sleep 1
+done
+```
+
+The separate object inspection is essential: these shell variables do **not** update the container's existing environment. Check the actual process identity and registered mounts after start, then use the permitted browser path to perform and read back the ticket's existing business operation. HTTP success alone does not prove a business save or private-path isolation.
+
+If startup exits, inspect the recorded exit status and exact mounts and compare the trusted entrypoint and manifest digests first; missing files, wrong pins or an extra release file can make the entrypoint exit before Java and may produce no useful application log. If it stays running but the page fails, check the App loopback listener and the registered H2/Qdrant endpoints and configuration, then inspect the relevant private logs for the error category. Logs may contain sensitive values: keep them access-restricted and do not paste them into a public issue. Preserve the failed object and its evidence; do not overwrite the release, remove the object, or blindly repeat an operation with an unknown outcome.
+
+**Evidence boundary:** the 2026-10-31 one-time switch ran a registered release and checked its process identity, web worker, projects, a synthetic Qdrant point and one PDF; a separate actual-container extra-file negative exited 1. The 2026-10-30 browser save/readback used an earlier App instance. The instructions above, including the chosen current object, its configuration and business operation, have not yet been executed end to end for the current environment. Do not treat those historical checks as present availability or full ticket acceptance.
+
+The shell runtime must supply GNU `find` (`-printf`), `sort` (`-z`), `sha256sum` (`--strict`), `tr`, `cmp`, `cut`, `grep`, `mktemp`, `cat`, `rm`, `/bin/sh`, and the selected Java runtime. Verify those utilities in the deployed runtime. `Dockerfile.backend-external` copies the entrypoint into its image, so an entrypoint change requires rebuilding that image; the local App role instead reads the entrypoint from its external release. Neither changing source nor preparing a release updates a running container.
+
+For the older shared `/artifacts` volume, the App scope is the common directory of the JAR and web directory. When that scope is the volume root, **all** files in it must be registered in the release inventory and generated output must be outside it; a shared worker or model file is allowed only if registered. If the complete root cannot be bounded and inventoried, use a dedicated App subdirectory rather than silently skipping the check. The check is a startup snapshot and binds JAR/web content to the supplied manifest pin; it does not continuously protect the host files, authenticate the caller or validate the contents of every other registered file. In the local layout the shell has already begun executing the entrypoint itself, so protect and verify that file and the pin source separately.
+
 `delivery.py` verifies a complete artifact inventory and renders CPU resources separately from five GPU Job templates. Applying `kubernetes.json` starts MySQL, Qdrant Server and the backend; the default mode also starts the web app, and the optional coordinator is started only when configured. GPU templates are created individually by `gpu_stage.py`; they are never included in the CPU List. Model/source artifacts mount read-only. NetworkPolicy denies external egress; DNS and traffic within the namespace remain available. The target CNI must actually enforce NetworkPolicy before offline acceptance.
 
 ## External application release (opt-in)
@@ -78,3 +161,5 @@ Identity observation uses CPU RapidOCR separately from the detailed Paddle/Miner
 
 
 Preparation reports implemented adapters and missing runtime configuration separately. `completeNewSourcePipeline` and `targetAccepted` remain false: a configured manifest, authored CPU contract, model-ready response or successful source merge cannot prove the actual offline model/source/MySQL/Kubernetes/H800 chain. No runtime profiles, target ClusterIPs, image digests or model identities have been invented or adopted by these tools.
+
+[External App diagnostic logging](app-competition-logging.md) describes the optional persistent logs and framework exception routing.

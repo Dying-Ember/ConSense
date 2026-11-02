@@ -42,7 +42,7 @@ function findAll(node, predicate) { return [...(predicate(node) ? [node] : []), 
 async function flushCanonical() { for (let i = 0; i < 12; i++) { await new Promise(resolve => setImmediate(resolve)); await settle() } }
 
 async function harness({ stale = false, currentSources = [source], sourceGate, evidenceGate, initialView = 'vetting', importedProject, storageDenied = false,
-  canonicalEvidence, adviceMessages = [], browserCrypto = require('node:crypto').webcrypto, respondOverride, canonicalRespond, answerRendererBoundaries = {}, sessionStore } = {}) {
+  canonicalEvidence, adviceMessages = [], browserCrypto = require('node:crypto').webcrypto, respondOverride, canonicalRespond, answerRendererBoundaries = {}, sessionStore, streamResponse } = {}) {
   const requests = [], stored = sessionStore ?? new Map(), canonicalRequests = [], createdUrls = [], revokedUrls = []
   for (const message of adviceMessages) for (const citation of message.sources ?? []) if (citation.canonicalEvidence?.length && citation.sourceRole === undefined) citation.sourceRole = 'tender'
   const currentEvidence = canonicalEvidence ? { ...evidence, items: evidence.items.map(item => ({ ...item,
@@ -60,6 +60,8 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
     let data
     if (url.includes('/findings/F001/evidence')) data = evidenceGate ? evidenceGate.promise : currentEvidence
     else if (url.includes('/findings')) data = [finding]
+    else if (url.endsWith('/oer/fixed-baseline/status')) data = { configured: false }
+    else if (url.endsWith('/oer/sl-library/status')) data = { versions: [], job: { status: 'idle' }, retrievalAvailable: false }
     else if (url.endsWith('/files')) data = []
     else if (url.endsWith('/metrics')) data = { reference: 0, conflict: 0, risk: 1, language: 0, ocrReady: true, message: localized('') }
     else if (url.endsWith('/runs/latest')) data = stale ? { id: 'run-1', status: 'COMPLETED', sourceSetStale: true } : null
@@ -77,6 +79,7 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
     if (url.includes('/ask/stream') && options?.method === 'POST') {
       const body = options.body ? JSON.parse(options.body) : undefined
       if (url.includes('/stop?')) { requests.push({ method: 'post', url: url.slice(4), body, config: { headers: options.headers } }); return new Response(JSON.stringify({ code: 0 }), { headers: { 'Content-Type': 'application/json' } }) }
+      if (streamResponse) return streamResponse({ body, requestId: options.headers['X-ConSense-Advice-Request'] })
       const response = await respond('post', url.slice(4), body, { headers: options.headers })
       if (response.data.code !== 0) return new Response(JSON.stringify(response.data), { headers: { 'Content-Type': 'application/json' } })
       return new Response(`event: complete\ndata: ${JSON.stringify({ requestId: options.headers['X-ConSense-Advice-Request'], response: response.data.data })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
@@ -375,6 +378,67 @@ test('a citation does not mark arbitrary question words as supporting sentences'
     assert.equal(text(pane), passage, 'Original text including literal markup is displayed as text')
     assert.match(text(h.root), /Select a citation to read the source passage/i)
   } finally { h.dispose() }
+})
+
+test('stop closes the local stream and does not claim the remote task has ended', async () => {
+  let wire, cancelled = false
+  const h = await harness({ initialView: 'advice', streamResponse: () =>
+    new Response(new ReadableStream({ start(controller) { wire = controller }, cancel() { cancelled = true } }),
+      { headers: { 'Content-Type': 'text/event-stream' } })
+  })
+  try {
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Explain the project clause'); await settle()
+    const asking = button(h, 'Ask').props.onClick(); await settle()
+    assert.ok(wire)
+    const stopping = button(h, 'Stop').props.onClick()
+    await stopping; await asking; await settle()
+    assert.equal(cancelled, true, 'local stream reader must be cancelled')
+    assert.equal(h.requests.filter(request => request.url.includes('/stop?')).length, 1)
+    assert.match(text(h.root), /Stop requested.*display.*stopped.*not yet confirmed/i)
+  } finally { h.dispose() }
+})
+
+test('stream completion reconciles only the pending answer citation pane', async () => {
+  const source = (evidenceId, content) => ({ evidenceId, fileLabel: content, pageNo: 'P1', content, score: 0.9 })
+  const oldSource = source('[9]', 'HISTORICAL SOURCE')
+  const history = { id: 7, sessionId: 'session-1', role: 'assistant', title: localized('History'), content: localized('Historical answer [9]'), citations: ['[9]'], sources: [oldSource] }
+  for (const mode of ['same-id', 'removed-id', 'history']) {
+    let wire, requestId, sessionId
+    const h = await harness({ initialView: 'advice', sessionStore: new Map([['consense.advice.session.project-A', 'session-1']]),
+      respondOverride: ({ url, method }) => {
+        if (url.endsWith('/sessions') && method === 'get') return [{ id: 'session-1', projectId: 'project-A', scope: 'fullset', basisScope: 'project_contract', createdAt: '2026-10-13T00:01:00Z' }]
+        if (/\/messages(?:\?|$)/.test(url) && method === 'get') return [history]
+      },
+      streamResponse: ({ body, requestId: id }) => {
+        requestId = id; sessionId = body.sessionId
+        return new Response(new ReadableStream({ start(controller) { wire = controller } }), { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+    })
+    try {
+      find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Explain the project clause'); await settle()
+      const asking = button(h, 'Ask').props.onClick(); await settle()
+      assert.ok(wire)
+      const event = (name, body) => `event: ${name}\ndata: ${JSON.stringify({ requestId, ...body })}\n\n`
+      wire.enqueue(new TextEncoder().encode(event('section', { content: 'Draft [1]', citations: ['[1]'], sources: [source('[1]', 'PROVISIONAL SOURCE')] })))
+      await new Promise(resolve => setImmediate(resolve)); await settle()
+      const selectedId = mode === 'history' ? '[9]' : '[1]'
+      const citation = find(h.root, node => node.tag === 'button' && node.props.class === 'citation' && text(node).trim() === selectedId)
+      assert.ok(citation); citation.props.onClick(); await settle()
+      const finalSource = mode === 'removed-id' ? source('[2]', 'DIFFERENT FINAL SOURCE') : source('[1]', 'FINAL SOURCE')
+      wire.enqueue(new TextEncoder().encode(event('complete', { response: { sessionId, grounded: true, title: localized('Final'), content: localized(`Final ${finalSource.evidenceId}`), citations: [finalSource.evidenceId], sources: [finalSource], unknownScope: null, evidenceId: null } })))
+      wire.close(); await asking; await settle()
+      const pane = find(h.root, node => node.props?.class === 'sv-para')
+      if (mode === 'removed-id') {
+        assert.equal(pane, undefined, 'Removed provisional citation must be cleared')
+        find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Ask a second question'); await settle()
+        const nextAsk = button(h, 'Ask').props.onClick(); await settle()
+        const nextSource = source('[3]', 'SECOND ANSWER SOURCE')
+        wire.enqueue(new TextEncoder().encode(event('complete', { response: { sessionId, grounded: true, title: localized('Second answer'), content: localized('Second [3]'), citations: ['[3]'], sources: [nextSource], unknownScope: null, evidenceId: null } })))
+        wire.close(); await nextAsk; await settle()
+        assert.equal(text(find(h.root, node => node.props?.class === 'sv-para')), 'SECOND ANSWER SOURCE')
+      } else assert.equal(text(pane), mode === 'history' ? 'HISTORICAL SOURCE' : 'FINAL SOURCE')
+    } finally { h.dispose() }
+  }
 })
 
 test('real Advice citation displays every explicit canonical member and complete table assets on LAN without auto-asking', async () => {
@@ -1461,8 +1525,8 @@ test('stopping before an answer has only the stopped state, without a completed 
     find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Question to stop'); await settle()
     const asking = button(h, 'Ask').props.onClick(); await settle()
     await button(h, 'Stop').props.onClick(); await settle()
-    const stopped = find(h.root, node => node.tag === 'div' && node.props.class?.includes('bubble') && text(node).includes('Stopped.'))
-    assert.ok(stopped); assert.match(text(stopped), /Stopped\. Any displayed portions are not a completed answer/)
+    const stopped = find(h.root, node => node.tag === 'div' && node.props.class?.includes('bubble') && text(node).includes('Stop requested;'))
+    assert.ok(stopped); assert.match(text(stopped), /task has ended is not yet confirmed.*not a completed answer/)
     assert.doesNotMatch(text(stopped), /I don.t know|No saved model identity|No model identity|没有保存模型标识/)
     pending.resolve({ sessionId: 'session-A', grounded: true, title: localized('Late'), content: localized('LATE STOPPED ANSWER'), sources: [], citations: [] }); await asking; await settle()
     assert.doesNotMatch(text(h.root), /LATE STOPPED ANSWER/); assert.doesNotMatch(text(stopped), /I don.t know|No saved model identity/)
@@ -1822,4 +1886,60 @@ test('pending advice status is shared across manual recheck and same-scope sessi
     assert.equal(reads, 3, 'A failed check does not poison the next explicit request')
     assert.match(text(h.root), /AUTHORED fresh after failure/)
   } finally { h.dispose() }
+})
+const singleManifest='f'.repeat(64), firstSl='a'.repeat(64), secondSl='b'.repeat(64)
+function fixedBackend(initial) {
+  let selection=initial
+  return ({method,url,body})=>{
+    if(url==='/oer/fixed-baseline/status')return {configured:true}
+    if(url==='/oer/sl-library/status')return {versions:[],job:{status:'idle'},retrievalAvailable:true}
+    if(url.includes('/oer/fixed-baseline/projects/')&&url.endsWith('/selection')) {
+      if(method==='put')selection=body
+      return {manifestSha256:singleManifest,availableSlSources:[{editionId:'first',sha256:firstSl},{editionId:'second',sha256:secondSl}],selection}
+    }
+    if(url.endsWith('/files'))return [{key:'SCC',role:localized('Tender'),fileName:'source.docx',basis:'',status:'PARSED',generated:false,parsed:true,pageCount:1}]
+  }
+}
+const historicalMultiple={manifestSha256:singleManifest,slSources:[{editionId:'first',sha256:firstSl},{editionId:'second',sha256:secondSl}]}
+async function chooseSecondEdition(h) {
+  const open=find(h.root,n=>n.tag==='button'&&Object.hasOwn(n.props||{},'data-sl-library-open'));assert.ok(open);await open.props.onClick();await settle()
+  const radio=find(h.root,n=>n.tag==='input'&&n.props.value===secondSl);assert.ok(radio);radio.props['onUpdate:modelValue'](secondSl);await settle()
+  const save=find(h.root,n=>n.tag==='button'&&Object.hasOwn(n.props||{},'data-sl-editions-save'));assert.ok(save);await save.props.onClick();await settle()
+}
+test('Vetting main review rejects old multiple selection until an explicit single edition is saved', async () => {
+  const h=await harness({initialView:'vetting',respondOverride:fixedBackend(historicalMultiple)})
+  try {
+    const run=button(h,'Run vetting');assert.ok(run);assert.equal(run.props.disabled,true)
+    await run.props.onClick();await settle();assert.equal(h.requests.some(x=>x.method==='post'&&/\/runs\?/.test(x.url)),false)
+    await chooseSecondEdition(h);assert.equal(button(h,'Run vetting').props.disabled,false)
+  } finally {h.dispose()}
+})
+test('Advice blocks submission for historical multiple selection, preserves the question and enables after saving one', async () => {
+  const h=await harness({initialView:'advice',respondOverride:fixedBackend(historicalMultiple)})
+  try {
+    const input=find(h.root,n=>n.tag==='textarea');input.props['onUpdate:modelValue']('My authored question');await settle()
+    const ask=button(h,'Ask');assert.ok(ask);assert.equal(ask.props.disabled,true)
+    await ask.props.onClick();await settle();assert.equal(h.requests.some(x=>x.url.endsWith('/ask/stream')),false)
+    assert.equal(input.value,'My authored question')
+    await chooseSecondEdition(h);assert.equal(button(h,'Ask').props.disabled,false)
+  } finally {h.dispose()}
+})
+
+test('Advice blocks stale cross-project selection during a pending read and resumes only for the current project', async () => {
+  const pending=deferred(), valid={manifestSha256:singleManifest,slSources:[{editionId:'first',sha256:firstSl}]}
+  const backend=fixedBackend(valid)
+  const h=await harness({initialView:'advice',respondOverride:args=>args.url.includes('/projects/project-B/selection')?pending.promise:backend(args)})
+  try {
+    let input=find(h.root,n=>n.tag==='textarea');input.props['onUpdate:modelValue']('Question A');await settle();assert.equal(button(h,'Ask').props.disabled,false)
+    h.store.activeProjectId='project-B';await settle();input=find(h.root,n=>n.tag==='textarea');input.props['onUpdate:modelValue']('Question B');await settle()
+    assert.equal(button(h,'Ask').props.disabled,true);await button(h,'Ask').props.onClick();await settle()
+    assert.equal(h.requests.some(x=>x.url.endsWith('/ask/stream')),false);assert.equal(input.value,'Question B')
+    pending.resolve({manifestSha256:singleManifest,availableSlSources:[{editionId:'first',sha256:firstSl},{editionId:'second',sha256:secondSl}],selection:valid});await settle()
+    assert.equal(button(h,'Ask').props.disabled,false)
+  } finally {h.dispose()}
+})
+test('Advice stays usable when the fixed library is explicitly disabled', async () => {
+  const h=await harness({initialView:'advice'})
+  try {const input=find(h.root,n=>n.tag==='textarea');input.props['onUpdate:modelValue']('Ordinary project question');await settle();assert.equal(button(h,'Ask').props.disabled,false)}
+  finally {h.dispose()}
 })

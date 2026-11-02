@@ -102,6 +102,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     final AtomicReference<Runnable> availabilityMutation=new AtomicReference<>();
     final List<JsonNode> availabilityRequests=new CopyOnWriteArrayList<>();
     final AtomicReference<java.util.function.Consumer<ObjectNode>> availabilityResponseMutation=new AtomicReference<>();
+    final AtomicBoolean initializationPermitted=new AtomicBoolean(true);
     final AtomicReference<Runnable> semanticPrepareMutation=new AtomicReference<>();
     final AtomicReference<Runnable> canonicalCatalogMutation=new AtomicReference<>();
     final AtomicReference<Runnable> statusMutation=new AtomicReference<>();
@@ -118,6 +119,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         snapshots.clear();rawSnapshots.clear();originals.clear();casTamperTargets.clear();casLedgers.clear();normalCasRoots.clear();events.clear();conditionalSnapshotTags.clear();perDocumentSnapshotReads.clear();healthMutation.set(null);
         indexMutation.set(null);retrieveMutation.set(null);snapshotMutation.set(null);chatMutation.set(null);normalMutation.set(null);
         availabilityMutation.set(null);availabilityResponseMutation.set(null);availabilityRequests.clear();retrieveResponseMutation.set(null);
+        initializationPermitted.set(true);
         semanticPrepareMutation.set(null);canonicalCatalogMutation.set(null);semanticPrepareCalls.set(0);semanticCatalogCalls.set(0);semanticScanCalls.set(0);semanticEntryReads.set(0);normalPublications.set(0);
         statusMutation.set(null);NormalSourceSql.bindingReads.clear();
         indexRequest.set(null);remoteIndexes.clear();canonicalProps.getSourcePageRenderEvidenceIdentities().clear();canonicalProps.getRetrievalBaseUrls().remove("vetting");
@@ -182,11 +184,14 @@ class CanonicalRecheckAdviceRealSeamTest {
                     JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));events.add("availability:start");
                     availabilityRequests.add(request.deepCopy());boolean bootstrap=request.path("coldBootstrap").asBoolean();
                     ObjectNode stored=remoteIndexes.get(request.path("projectId").asText());
-                    assertEquals("advisory",request.path("module").asText());
+                    assertTrue(Arrays.asList("advisory","vetting").contains(request.path("module").asText()));
                     if(bootstrap){assertEquals("source-verified-cold-canonical-availability-v1",health.path("oer").path("indexAvailabilityBootstrapContract").asText());assertFalse(request.has("expectedSignature"));assertFalse(request.has("expectedGeneration"));}
                     if(stored!=null){if(!bootstrap)assertEquals(stored.path("signature"),request.path("expectedSignature"));assertEquals(stored.path("canonicalProjections"),request.path("projectionSha256"));}
                     if(stored==null&&health.path("oer").has("indexAvailabilityBootstrapContract")){
-                        status=404;response="{\"detail\":\"Project is not indexed\"}".getBytes(StandardCharsets.UTF_8);events.add("availability:end");
+                        if(request.path("initializationDecision").isBoolean()&&request.path("initializationDecision").asBoolean())
+                            response=JsonUtils.write(initializationDecision(request)).getBytes(StandardCharsets.UTF_8);
+                        else{status=404;response="{\"detail\":\"Project is not indexed\"}".getBytes(StandardCharsets.UTF_8);}
+                        events.add("availability:end");
                     }else{
                     ObjectNode result=stored==null?JsonUtils.mapper().createObjectNode():stored.deepCopy();
                     result.put("ready",stored!=null);result.put("readOnly",true);result.put("fullVectorIntegrityChecked",false);
@@ -200,10 +205,14 @@ class CanonicalRecheckAdviceRealSeamTest {
                     JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));events.add("status:start");
                     runOnce(statusMutation);
                     ObjectNode stored=remoteIndexes.get(request.path("projectId").asText());
+                    if(stored==null&&request.path("initializationDecision").isBoolean()&&request.path("initializationDecision").asBoolean()){
+                        response=JsonUtils.write(initializationDecision(request)).getBytes(StandardCharsets.UTF_8);events.add("status:end");
+                    }else{
                     ObjectNode result=stored==null?JsonUtils.mapper().createObjectNode():stored.deepCopy();
                     result.put("ready",stored!=null);result.put("readOnly",true);result.put("vectorPoints",stored==null?0:stored.path("indexed").asInt());
                     result.put("indexStatusContract","read-only-existing-canonical-index-v1");
                     response=JsonUtils.write(result).getBytes(StandardCharsets.UTF_8);events.add("status:end");
+                    }
                 }else if("/retrieve".equals(path)){
                     retrieveCalls.incrementAndGet();JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));
                     events.add("retrieve:start");runOnce(retrieveMutation);events.add("retrieve:end");ObjectNode result=retrieveFixture(request.path("projectId").asText());
@@ -230,6 +239,32 @@ class CanonicalRecheckAdviceRealSeamTest {
         resetCounters();
     }
     @AfterEach void stop(){if(server!=null)server.stop(0);if(normalServer!=null)normalServer.stop(0);if(httpWorkers!=null)httpWorkers.shutdownNow();}
+
+    @Test void availabilityWithoutInitializationNegotiationRetainsLegacy404() throws Exception {
+        ((ObjectNode)health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("projectId","AUTHORED absent index");
+        request.put("module","advisory");request.put("coldBootstrap",true);request.putArray("projectionSha256");
+        java.net.HttpURLConnection connection=(java.net.HttpURLConnection)new java.net.URL("http://127.0.0.1:"+server.getAddress().getPort()+"/index-canonical/availability").openConnection();
+        try{connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setConnectTimeout(2000);connection.setReadTimeout(2000);
+            try(OutputStream output=connection.getOutputStream()){output.write(JsonUtils.write(request).getBytes(StandardCharsets.UTF_8));}
+            assertEquals(404,connection.getResponseCode());
+            assertEquals("Project is not indexed",JsonUtils.parse(new String(readAll(connection.getErrorStream()),StandardCharsets.UTF_8)).path("detail").asText());
+        }finally{connection.disconnect();}
+    }
+
+    @Test void refreshingAbsentAdviceIndexInitializesAndRefreshingExistingIndexRebuilds() {
+        initializationPermitted.set(false);
+        assertThrows(RuntimeException.class,()->advice.rebuildIndex(PROJECT,"fullset"));
+        assertEquals(0,indexCalls.get(),"An unknown index state must not trigger a rebuild or initialization");
+        initializationPermitted.set(true);
+        assertTrue(advice.rebuildIndex(PROJECT,"fullset").isVectorReady());
+        assertTrue(indexRequest.get().path("initializationDecision").asBoolean());
+        assertFalse(indexRequest.get().path("rebuild").asBoolean());
+        resetCounters();
+        assertTrue(advice.rebuildIndex(PROJECT,"fullset").isVectorReady());
+        assertTrue(indexRequest.get().path("rebuild").asBoolean());
+        assertFalse(indexRequest.get().path("initializationDecision").asBoolean());
+    }
 
     @Test void successfulRebuildRecordsFullEquivalentResponseAndActualBoundaryCounts() throws Exception {
         long started=System.nanoTime();IndexStatusVO result=advice.rebuildIndex(PROJECT,"fullset");long wall=System.nanoTime()-started;
@@ -1039,7 +1074,14 @@ class CanonicalRecheckAdviceRealSeamTest {
         normalCasRoots.put(Long.valueOf(request.path("candidateGraph").path("source").path("documentId").asText()),directory.resolve("cas"));
         return Files.readString(output,StandardCharsets.UTF_8);
     }
-    ObjectNode scope(){ObjectNode s=JsonUtils.mapper().createObjectNode();s.put("targetModule","advisory");s.put("inputContract",INPUT);s.put("sourceQualityChanged",false);s.putObject("policyIdentity").put("manifestSha256",POLICY);return s;}
+    ObjectNode initializationDecision(JsonNode request){ObjectNode result=JsonUtils.mapper().createObjectNode();
+        result.put("initializationContract","consense.canonical-index-initialization.v1");result.put("projectId",request.path("projectId").asText());
+        String module=request.path("module").asText();result.put("targetModule",module);result.put("ready",false);result.put("readOnly",true);result.put("initializationAllowed",initializationPermitted.get());
+        result.set("canonicalProjections",request.path("projectionSha256").deepCopy());
+        result.set("sourcePageEvidence",request.has("sourcePageEvidence")?request.path("sourcePageEvidence").deepCopy():JsonUtils.mapper().createObjectNode());
+        result.set("competitionScope",scope(module));return result;}
+    ObjectNode scope(){return scope("advisory");}
+    ObjectNode scope(String module){ObjectNode s=JsonUtils.mapper().createObjectNode();s.put("targetModule",module);s.put("inputContract",INPUT);s.put("sourceQualityChanged",false);s.putObject("policyIdentity").put("manifestSha256",POLICY);return s;}
     ObjectNode retrieveFixture(String key)throws Exception{
         ObjectNode result=(ObjectNode)VettingDualStructureHealthTest.resource("authored_canonical_wire.json").path("retrieve").deepCopy();result.put("projectId",key);result.put("indexSignature",SIGNATURE);
         result.put("mode",VettingRetrievalHealth.STRUCTURAL_CONTRACT);result.set("competitionScope",scope());JsonNode seed=snapshots.get(42L).path("chunks").get(0);
@@ -1107,6 +1149,40 @@ class CanonicalRecheckAdviceRealSeamTest {
         ObjectNode read=(ObjectNode)health.path("oer").path("sourceRead");read.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);read.putArray("views").add("semantic_units");read.putArray("operations").add("prepare");
         String url="http://127.0.0.1:"+normalServer.getAddress().getPort();canonicalProps.getRetrievalBaseUrls().put("vetting",url);
         resetCounters();semanticPrepareCalls.set(0);semanticCatalogCalls.set(0);semanticScanCalls.set(0);semanticEntryReads.set(0);normalPublications.set(0);
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void sequentialAdvisoryBuildRequiresExplicitInitializationDecision(boolean permitted)throws Exception{
+        clearLocalIndexReceipts();resetCounters();initializationPermitted.set(permitted);
+        // Stop at the actual HTTP build boundary; no synthetic build receipt is accepted.
+        indexMutation.set(()->{throw new IllegalStateException("AUTHORED stop at build");});
+        java.util.function.Supplier<List<SourceDocument>> selected=()->documents.findScopeSourcesByProjectId(PROJECT);
+        Object target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(business);
+        if(permitted){RuntimeException stopped=assertThrows(RuntimeException.class,()->org.springframework.test.util.ReflectionTestUtils.invokeMethod(target,"sequentialAdvisoryRead",PROJECT,selected,true,false));assertTrue(stopped.getMessage().contains("HTTP 502"),stopped.getMessage());assertTrue(stopped.getMessage().contains("syntheticError"),stopped.getMessage());}
+        else{RuntimeException rejected=assertThrows(RuntimeException.class,()->org.springframework.test.util.ReflectionTestUtils.invokeMethod(target,"sequentialAdvisoryRead",PROJECT,selected,true,false));assertTrue(rejected.getMessage().contains("initialization is not authorized"),rejected.getMessage());}
+        assertTrue(events.contains("status:end"),"The status decision must reach the actual HTTP endpoint");
+        assertEquals(permitted?1:0,indexCalls.get());
+        if(permitted){assertNotNull(indexRequest.get());assertTrue(indexRequest.get().path("initializationDecision").isBoolean());assertTrue(indexRequest.get().path("initializationDecision").asBoolean());assertEquals("advisory",indexRequest.get().path("module").asText());}
+        else assertNull(indexRequest.get());
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void semanticReviewBuildRequiresExplicitInitializationDecision(boolean permitted)throws Exception{
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("consense.test.python")!=null,"requires configured offline Python producer, no model");
+        replaceReviewedDocxWithUnregisteredNormal();configureVettingSemanticPreparation();assertTrue(evidence.prepareNormalObserved(PROJECT,43L,"vetting"));
+        ((ObjectNode)health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        ((ObjectNode)health.path("oer").path("sourceRead")).putObject("semanticPreparation").put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+        List<SourceDocument> selected=Collections.singletonList(documents.findById(43L).orElseThrow());
+        OerBusinessEvidence.Session session=business.loadSemantic(PROJECT,"vetting",selected);
+        CanonicalSourceBinding binding=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0);
+        OerCanonicalRetrievalClient.SemanticSources sources=org.springframework.test.util.ReflectionTestUtils.invokeMethod(OerSemanticBusinessEvidenceTest.class,"semanticSources",binding,1,false,256,true,true);
+        org.springframework.test.util.ReflectionTestUtils.setField(session,"semanticSources",sources);
+        clearLocalIndexReceipts();resetCounters();availabilityRequests.clear();initializationPermitted.set(permitted);
+        indexMutation.set(()->{throw new IllegalStateException("AUTHORED stop at build");});
+        RuntimeException rejected=assertThrows(RuntimeException.class,()->business.retrieveReviewTextForPreview(session,"AUTHORED review query","tender",()->{}));
+        assertEquals(1,availabilityRequests.size(),"The review must reach the actual availability decision endpoint");
+        assertTrue(availabilityRequests.get(0).path("initializationDecision").isBoolean());assertTrue(availabilityRequests.get(0).path("initializationDecision").asBoolean());
+        assertEquals(permitted?1:0,indexCalls.get());
+        if(permitted){assertTrue(rejected.getMessage().contains("HTTP 502"),rejected.getMessage());assertTrue(rejected.getMessage().contains("syntheticError"),rejected.getMessage());assertNotNull(indexRequest.get());assertTrue(indexRequest.get().path("initializationDecision").isBoolean());assertTrue(indexRequest.get().path("initializationDecision").asBoolean());assertEquals("vetting",indexRequest.get().path("module").asText());}
+        else{assertNull(indexRequest.get());assertTrue(rejected.getMessage().contains("canonical initialization decision differs"),rejected.getMessage());}
     }
     com.consense.web.dto.VettingDtos.VettingProgressVO awaitVettingTerminal(String id)throws Exception{
         long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
@@ -1572,9 +1648,12 @@ class CanonicalRecheckAdviceRealSeamTest {
         try{
             IndexStatusVO result=advice.status(PROJECT,"fullset");
             assertEquals("none".equals(change)||"unsupported_catalog".equals(change),result.isVectorReady());
-            if("missing_index".equals(change)||"unsupported_catalog".equals(change)){
-                assertTrue(snapshotReads.get()>=66,"A genuinely missing index or unsupported catalog retains the sequential full proof fallback");
+            if("unsupported_catalog".equals(change)){
+                assertTrue(snapshotReads.get()>=66,"An unsupported catalog retains the sequential full proof fallback");
                 assertFalse(NormalSourceSql.bindingReads.isEmpty());
+            }else if("missing_index".equals(change)){
+                assertEquals(0,snapshotReads.get(),"An already verified missing-index result must not reread every source body");
+                assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());assertEquals(1,sourceReadCalls.get());
             }else{
                 assertEquals(0,snapshotReads.get());assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());
                 assertEquals("none".equals(change)||"cas_exit".equals(change)?2:1,sourceReadCalls.get(),"Ready status must complete catalog exit proof; drift must reject before publication");
@@ -1615,7 +1694,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         boolean ready=Arrays.asList("cold","unlinked","known_unlinked","capability_absent").contains(change);NormalSourceSql.capture=true;
         try{
             IndexStatusVO result=advice.status(PROJECT,"fullset");assertEquals(ready,result.isVectorReady());
-            if("missing_index".equals(change))assertTrue(snapshotReads.get()>=66,"A genuinely missing index retains the prior complete proof fallback");
+            if("missing_index".equals(change)){assertEquals(0,snapshotReads.get(),"A verified missing index must not repeat the complete source proof");assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());}
             else{assertEquals(0,snapshotReads.get());assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());}
             int expectedAvailability="capability_absent".equals(change)||"invalidated".equals(change)?0:1;
             assertEquals(expectedAvailability,availabilityRequests.size());
@@ -1849,6 +1928,132 @@ class CanonicalRecheckAdviceRealSeamTest {
         com.consense.service.llm.QwenChatUsagePreflight.Operation operation=new com.consense.service.llm.QwenChatUsagePreflight(configured,ledger).capture(model,"advice",historyLimit);
         java.lang.reflect.Constructor<AdviceService.QwenOperation> constructor=AdviceService.QwenOperation.class.getDeclaredConstructor(com.consense.service.llm.QwenChatUsagePreflight.Operation.class,String.class);constructor.setAccessible(true);
         return constructor.newInstance(operation,org.springframework.test.util.ReflectionTestUtils.invokeMethod(target,"historyConfiguration"));
+    }
+
+    @Test void streamingDraftSupplementIsSelectedAndSavedWithActualSourceGuards() throws Exception {
+        exerciseStreamingSupplement("accepted");
+    }
+
+    @Test void streamingDraftIsRetainedAndSavedWhenOptionalSupplementIsIncomplete() throws Exception {
+        exerciseStreamingSupplement("fallback");
+    }
+
+    @Test void streamingDraftSaveFailureRollsBackBothHistoryRows() throws Exception {
+        exerciseStreamingSupplement("rollback");
+    }
+
+    private void exerciseStreamingSupplement(String outcome) throws Exception {
+        advice.rebuildIndex(PROJECT,"fullset");resetCounters();
+        JsonNode seed=snapshots.get(43L).path("chunks").get(2);
+        assertEquals("header",seed.path("unitId").asText());
+        assertTrue(snapshots.get(43L).path("chunks").size()>=3,"The authored source must contain a distinct requested clause");
+        JsonNode clause=snapshots.get(43L).path("chunks").get(0);
+        assertEquals("A1",clause.path("clauseId").asText());assertEquals("heading",clause.path("unitId").asText());
+        String clauseText=clause.path("content").asText();assertTrue(clauseText.contains("unless active struck  deleted"));
+        Map<String,JsonNode> parents=new LinkedHashMap<>();
+        for(JsonNode snapshot:snapshots.values())for(JsonNode chunk:snapshot.path("chunks"))parents.put(chunk.path("id").asText(),chunk);
+        retrieveResponseMutation.set(result->{
+            ObjectNode hit=result.putArray("hits").addObject();hit.put("id",seed.path("id").asText());hit.put("score",0.9);hit.set("payload",seed.deepCopy());
+            ObjectNode unit=OerCanonicalSourceUnits.resolve(parents,seed);unit.put("originalRerankOrdinal",1);unit.put("seedScore",0.9);
+            ObjectNode units=(ObjectNode)result.path("sourceUnits");units.putArray("originalHitIds").add(seed.path("id").asText());units.putArray("units").add(unit);
+        });
+        ObjectNode draft=(ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract(
+                "{\"grounded\":true,\"answer\":\"AUTHORED draft wording [1].\",\"citations\":[\"[1]\"]}"));
+        draft.putArray("evidenceRequests").addObject().put("citation","[1]").put("kind","clause").put("clause","A1").put("reason","Read the separate authored clause.");
+        String draftWire=JsonUtils.write(draft);
+        String finalWire=com.consense.service.advice.AdviceBudgetFixture.contract(
+                "{\"grounded\":true,\"answer\":\"AUTHORED supplemented wording [2].\",\"citations\":[\"[2]\"]}");
+        List<String> sections=new ArrayList<>(),phases=new ArrayList<>(),wireRequests=new ArrayList<>();
+        AtomicBoolean providerDone=new AtomicBoolean(false);AtomicInteger streamedCalls=new AtomicInteger(),supplementCalls=new AtomicInteger();
+        AtomicBoolean userSaved=new AtomicBoolean(),assistantSaveReached=new AtomicBoolean(),injectedFailure=new AtomicBoolean();
+        com.consense.service.advice.AdviceProgress progress=new com.consense.service.advice.AdviceProgress(){
+            @Override public boolean streaming(){return true;}
+            @Override public void phase(String phase){phases.add(phase);}
+            @Override public void section(String content,List<String> aliases,List<CitationVO> sources){
+                assertFalse(providerDone.get(),"Only provisional draft sections may be sent before provider completion");
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),"A provisional section must run outside the save transaction");
+                assertEquals(0,history.count(),"A provisional section must precede the transaction");sections.add(content);
+            }
+        };
+        com.consense.ai.HttpSupport transport=mock(com.consense.ai.HttpSupport.class);
+        doAnswer(call->{
+            String body=call.getArgument(1);wireRequests.add(body);JsonNode request=JsonUtils.parse(body);
+            boolean probe=request.path("max_tokens").asInt()==1;
+            if(!probe){supplementCalls.incrementAndGet();assertFalse(request.path("stream").asBoolean(),"Supplement is a complete replacement, not appended streaming output");
+                StringBuilder turns=new StringBuilder();for(JsonNode message:request.path("messages"))turns.append(message.path("content").asText());
+                String supplied=turns.toString();int additional=supplied.indexOf("Additional current-source text from the same selected document revision and role follows.");
+                assertTrue(additional>=0,"The non-probe request must carry the supplemental source section");
+                String supplementText=supplied.substring(additional);int alias=supplementText.indexOf("[2] ");int literal=supplementText.indexOf(clauseText);
+                assertTrue(alias>=0&&literal>alias,"Supplement alias [2] must precede the exact authored A1 heading text");}
+            ObjectNode envelope=JsonUtils.mapper().createObjectNode();envelope.put("object","chat.completion");envelope.put("model","qwen3.8-27b");
+            ObjectNode choice=envelope.putArray("choices").addObject();choice.put("index",0);
+            choice.put("finish_reason",!probe&&"fallback".equals(outcome)?"length":"stop");
+            choice.putObject("message").put("role","assistant").put("content",probe?"{":finalWire);
+            envelope.putObject("usage").put("prompt_tokens",1000).put("completion_tokens",1).put("total_tokens",1001);
+            return JsonUtils.write(envelope);
+        }).when(transport).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+        doAnswer(call->{
+            streamedCalls.incrementAndGet();String body=call.getArgument(1);wireRequests.add(body);
+            assertTrue(JsonUtils.parse(body).path("stream").asBoolean());
+            @SuppressWarnings("unchecked") java.util.function.Consumer<String> emit=call.getArgument(6);
+            int split=draftWire.indexOf("\"content\":\"AUTHORED draft wording");assertTrue(split>0);
+            emit.accept(authoredStreamDelta(draftWire.substring(0,split),null));
+            assertEquals(1,sections.size(),"Opening section must reach the actual ask caller before provider completion");
+            emit.accept(authoredStreamDelta(draftWire.substring(split)+"                        ",null));
+            assertEquals(2,sections.size(),"Both provisional sections must arrive before provider completion");
+            emit.accept(authoredStreamDelta("","stop"));emit.accept("[DONE]");providerDone.set(true);
+            return "AUTHORED stream receipt";
+        }).when(transport).postJsonStream(anyString(),anyString(),anyLong(),anyString(),anyInt(),eq(true),any(),any());
+        if("rollback".equals(outcome)){
+            org.mockito.stubbing.Answer<?> delegate=mockingDetails(history).getMockCreationSettings().getDefaultAnswer();
+            doAnswer(call->{ChatMessage message=call.getArgument(0);
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive(),"Both history saves must be inside the save transaction");
+                if(ChatMessage.ROLE_ASSISTANT.equals(message.getRole())){assistantSaveReached.set(true);assertTrue(userSaved.get(),"The user save must complete before assistant save");injectedFailure.set(true);throw new IllegalStateException("AUTHORED save failure");}
+                Object saved=delegate.answer(call);if(ChatMessage.ROLE_USER.equals(message.getRole()))userSaved.set(true);return saved;}).when(history).save(any(ChatMessage.class));
+        }
+        AskResponseVO response=null;
+        try(AdviceService.QwenScope selected=advice.bindQwenOperation(authoredQwen(generationLedger,transport))){
+            if("rollback".equals(outcome)){RuntimeException failure=assertThrows(RuntimeException.class,()->advice.ask(PROJECT,new AskRequest("Explain the uploaded clause","fullset"),progress));
+                boolean injected=false;for(Throwable cause=failure;cause!=null;cause=cause.getCause())if("AUTHORED save failure".equals(cause.getMessage()))injected=true;
+                assertTrue(injected,"The surfaced exception must include the injected assistant-save failure");}
+            else response=advice.ask(PROJECT,new AskRequest("Explain the uploaded clause","fullset"),progress);
+        }
+        assertTrue(providerDone.get());assertEquals(1,streamedCalls.get());assertEquals(1,supplementCalls.get());
+        assertTrue(phases.contains("supplementing"),"The real supplemental generation branch must execute");
+        assertEquals(2,sections.size(),"Supplement output must not append a second provisional answer");
+        assertTrue(sections.get(1).contains("AUTHORED draft wording"));
+        verify(business,atLeastOnce()).prepareAdviceSupplement(any(),anyList());
+        assertTrue(sourceReadCalls.get()>0,"The actual source-read adapter must run against the synthetic source service");
+        if("rollback".equals(outcome)){assertTrue(userSaved.get());assertTrue(assistantSaveReached.get());assertTrue(injectedFailure.get());
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),"The failed save transaction must have ended before the history read");
+            assertEquals(0,history.count(),"A failed assistant save must roll back the user row too");return;}
+        assertNotNull(response);String expected="fallback".equals(outcome)?"AUTHORED draft wording":"AUTHORED supplemented wording";
+        assertTrue(response.getContent().getEn().contains(expected));
+        if("accepted".equals(outcome)){
+            assertTrue(response.getCitations().contains("[2]"),"The selected final answer must cite the supplemental alias");
+            CitationVO cited=response.getSources().stream().filter(source->"[2]".equals(source.getEvidenceId())).findFirst().orElseThrow();
+            assertEquals("43",cited.getDocumentId());assertTrue(cited.getContent().contains(clauseText),"The cited supplemental alias must carry the authored A1 heading text");
+        }
+        List<ChatMessage> rows=history.findByProjectIdOrderByIdAsc(PROJECT);assertEquals(2,rows.size());
+        assertEquals(ChatMessage.ROLE_USER,rows.get(0).getRole());assertEquals(ChatMessage.ROLE_ASSISTANT,rows.get(1).getRole());
+        assertEquals(response.getContent().getEn(),rows.get(1).getContent());assertEquals(rows.get(0).getId(),rows.get(1).getQuestionMessageId());
+        if("accepted".equals(outcome)){
+            JsonNode savedCitations=JsonUtils.parse(rows.get(1).getCitationsJson());JsonNode savedSources=JsonUtils.parse(rows.get(1).getSourcesJson());
+            assertEquals(JsonUtils.mapper().valueToTree(response.getCitations()),savedCitations);assertEquals(JsonUtils.mapper().valueToTree(response.getSources()),savedSources);
+            assertTrue(savedCitations.isArray());assertTrue(java.util.stream.StreamSupport.stream(savedCitations.spliterator(),false).anyMatch(alias->"[2]".equals(alias.asText())),"The persisted answer must cite supplemental alias [2]");
+            assertTrue(savedSources.isArray());JsonNode persisted=java.util.stream.StreamSupport.stream(savedSources.spliterator(),false).filter(source->"[2]".equals(source.path("evidenceId").asText())).findFirst().orElseThrow();
+            assertEquals("43",persisted.path("documentId").asText());assertTrue(persisted.path("content").asText().contains(clauseText),"The persisted cited source must retain the authored A1 heading text");
+            assertTrue(persisted.path("canonicalEvidence").isArray());assertTrue(java.util.stream.StreamSupport.stream(persisted.path("canonicalEvidence").spliterator(),false)
+                    .anyMatch(pointer->pointer.path("documentId").asLong()==43L&&snapshots.get(43L).path("source").path("sourceSha256").asText().equals(pointer.path("originalSourceSha256").asText())),"The saved citation must retain a canonical pointer to the same authored original");
+        }
+        assertEquals("fallback".equals(outcome)?"failed_supported_draft_retained":"supplied",JsonUtils.parse(rows.get(1).getAdviceChecksJson()).path("supplementOutcome").asText());
+    }
+
+    private static String authoredStreamDelta(String content,String finishReason){
+        ObjectNode event=JsonUtils.mapper().createObjectNode();event.put("model","qwen3.8-27b");
+        ObjectNode choice=event.putArray("choices").addObject();choice.put("index",0);choice.putObject("delta").put("content",content);
+        if(finishReason==null)choice.putNull("finish_reason");else choice.put("finish_reason",finishReason);
+        return JsonUtils.write(event);
     }
 
 

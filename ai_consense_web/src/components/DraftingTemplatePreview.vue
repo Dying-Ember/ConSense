@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { draftingApi } from '@/api'
+import { sha256Bytes } from '@/api/sha256Bytes'
 import type { DraftField, DraftPlanAction, DraftVariable, TemplateReading } from '@/api/types'
 import type { DraftValue } from '@/drafting/state'
 import { isCollectionKind, isObjectKind } from '@/drafting/field-kinds'
@@ -113,7 +114,7 @@ async function open() {
     const source = await (draftingApi as typeof draftingApi & { templateSource(projectId: string, fileKey: string): Promise<Blob> }).templateSource(props.projectId, props.fileKey)
     if (!alive || token !== generation) return
     const bytes = await source.arrayBuffer()
-    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('')
+    const digest = (await sha256Bytes(bytes)).hex
     if (!alive || token !== generation) return
     if (digest !== result.sourceHash.toLowerCase()) throw new Error(w('changed'))
     if (result.format === 'pdf') pdfUrl.value = URL.createObjectURL(source)

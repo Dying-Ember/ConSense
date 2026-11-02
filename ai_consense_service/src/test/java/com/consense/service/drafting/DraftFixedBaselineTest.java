@@ -99,6 +99,23 @@ class DraftFixedBaselineTest {
         }
     }
 
+    @Test void fixedCandidatesCanBeExtractedWithoutBeingConfirmedButChangedSourcesOrChildrenCannot() {
+        Map<String,Object> graph=DraftFixedBaseline.restore(blank());
+        Map<String,Object> root=fields(graph).stream().filter(item->id(graph,"billNos").equals(item.get("id"))).findFirst().orElseThrow();
+        String before=JsonUtils.write(graph);
+        assertTrue(DraftTemplateGraphService.fixedCandidateExtractionField(graph,root));
+        assertEquals("pending",field(graph,"billNos").get("status"));
+        assertEquals(false,map(field(graph,"billNos").get("definitionReview")).get("confirmed"));
+        assertEquals(before,JsonUtils.write(graph));
+        map(list(root.get("children")).get(0)).put("questionEn","changed definition");
+        assertFalse(DraftTemplateGraphService.fixedCandidateExtractionField(graph,root));
+        Map<String,Object> missing=JsonUtils.readMap(before);list(state(missing).get("variables")).remove(field(missing,"billNos.number"));
+        Map<String,Object> missingRoot=fields(missing).stream().filter(item->id(missing,"billNos").equals(item.get("id"))).findFirst().orElseThrow();
+        assertFalse(DraftTemplateGraphService.fixedCandidateExtractionField(missing,missingRoot));
+        Map<String,Object> sourceChanged=JsonUtils.readMap(before);source(sourceChanged,"NTT").put("sourceSha256","different");
+        assertFalse(DraftTemplateGraphService.fixedCandidateExtractionField(sourceChanged,fields(sourceChanged).get(0)));
+    }
+
     private static Map<String,Object> blank() {
         List<Object> sources=Arrays.asList(
                 original("NTT","n","60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c"),

@@ -101,7 +101,7 @@ final class VettingPacketCoverage {
         audit.setSourceRequestCount(audit.getSourceRequests().size());audit.setPendingSourceRequestCount((int)audit.getSourceRequests().stream().filter(r->!r.getReviewExecutionStatus().startsWith("decoded")).count());
         if("failed".equals(audit.getGlobalCallStatus()))audit.setAggregateReviewStatus("failed");
         else if(audit.getPacketAudits().stream().noneMatch(SemanticPacketVO::isActualGatewayCallStarted))audit.setAggregateReviewStatus("not_submitted");
-        else if(audit.getPendingSourceRequestCount()>0||audit.getFailedPacketCount()>0||audit.getNotSubmittedPacketCount()>0||audit.getPacketAudits().stream().anyMatch(p->p.getRejectedRecords()>0||!"observed_tokens".equals(p.getInputBudgetStatus())))audit.setAggregateReviewStatus("partial");
+        else if(audit.getPendingSourceRequestCount()>0||audit.getFailedPacketCount()>0||audit.getNotSubmittedPacketCount()>0||audit.getPacketAudits().stream().anyMatch(p->p.getRejectedRecords()>0||!("observed_tokens".equals(p.getInputBudgetStatus())||directDecoded(p))))audit.setAggregateReviewStatus("partial");
         else audit.setAggregateReviewStatus("observed_requests_decoded_scope_unknown");
         VettingEvidenceNeedResolution.Result resolution=VettingEvidenceNeedResolution.resolve(audit.getPacketAudits());
         List<String> unassessed=unassessedIds(audit,resolution);
@@ -114,6 +114,10 @@ final class VettingPacketCoverage {
         else if(!effective.isEmpty()&&effective.stream().allMatch("not_applicable"::equals)&&audit.getPendingSourceRequestCount()==0)audit.setCheckState("not_applicable");
         else audit.setCheckState("not_completed");
     }
+    private static boolean directDecoded(SemanticPacketVO p) {
+        return "direct_unmeasured".equals(p.getInputBudgetStatus())&&p.isActualGatewayCallStarted()
+                &&Arrays.asList("completed","completed_empty").contains(p.getStatus());
+    }
     private static String execution(SemanticPacketVO p) {
         if("failed".equals(p.getStatus()))return "failed";
         if("completed_with_rejections".equals(p.getStatus())&&p.getAttempts().stream().anyMatch(a->"decoded".equals(a.getStatus())
@@ -123,6 +127,11 @@ final class VettingPacketCoverage {
         if("provider_estimated_fit".equals(p.getInputBudgetStatus())) {
             if("completed_with_rejections".equals(p.getStatus()))return "decoded_provider_estimate_with_rejections";
             return Arrays.asList("completed","completed_empty").contains(p.getStatus())?"decoded_provider_estimate":"not_submitted";
+        }
+        if("direct_unmeasured".equals(p.getInputBudgetStatus())) {
+            if(!p.isActualGatewayCallStarted())return "not_submitted";
+            if("completed_with_rejections".equals(p.getStatus()))return "decoded_with_rejections";
+            return directDecoded(p)?"decoded":"not_submitted";
         }
         if(!"observed_tokens".equals(p.getInputBudgetStatus()))return "over_budget".equals(p.getInputBudgetStatus())?"over_budget":"budget_unknown";
         if("completed_with_rejections".equals(p.getStatus()))return "decoded_with_rejections";

@@ -1,18 +1,22 @@
 # 01: 确定本次保留的行为和本机实际运行方案
 
+## 2026-11-01 比赛 demo 口径
+
+本票保持已完成：以冻结提交的实际功能和数据流为对照，选用五个非 root 容器、外置业务文件及现有数据库，并保护原件与活动服务。资源配置以冻结方案、比赛要求和现场容量为依据；不得自行添加偏紧的进程／线程、CPU、内存或超时限制，也不为试探重复重启。已有准备结果可复用；模型和浏览器业务实际运行分别由后续票负责，准备通过不代表赛方验收。
+
 **What to build:** 把本机作为比赛预演环境，确定 Docker 如何在五容器以内使用硬盘上的代码、配置、数据库、真实 OCR／检索资产与明确标记的 Qwen 占位运行；后续票据有明确的行为对照和接缝约定。
 
 **Blocked by:** None (can start immediately).
 
 **Status:** done — 准备门通过；02／03／04 可按登记环境和文件所有权并行实施，业务及模型验收仍属后票
 
-**准备提交：**`7bfa3c60ac9ed4e474cb79c6b2e1c3a2df755d7b`；该提交已回读核验 HEAD／main／origin/main／实际远端一致。独立关票复核为 PASS、0 blocking findings，私有回执 `.local/container-rehearsal-20261029/ticket01-close-review.json`。方案、实际映射与运行顺序见[运行决定](../../../ai_consense_service/docs/specs/competition-runtime-plan-20261029.md)、[保护登记](../../../ai_consense_service/docs/testing/competition-protected-assets-20261029.md)和[Docker 操作说明](../../../ai_consense_service/docs/testing/competition-local-docker-setup-20261029.md)。
+**准备提交（当时核验）：**`7bfa3c60ac9ed4e474cb79c6b2e1c3a2df755d7b`；该提交当时回读核验 HEAD／main／origin/main／实际远端一致，不代表当前引用仍为此提交。独立关票复核为 PASS、0 blocking findings，私有回执 `.local/container-rehearsal-20261029/ticket01-close-review.json`。方案、实际映射与运行顺序见[运行决定](../../../ai_consense_service/docs/specs/competition-runtime-plan-20261029.md)、[保护登记](../../../ai_consense_service/docs/testing/competition-protected-assets-20261029.md)和[Docker 操作说明](../../../ai_consense_service/docs/testing/competition-local-docker-setup-20261029.md)。
 
 - [x] 以完整冻结提交 `8a40dfcca04730ba7b40cdefb36b596a37bbcb53` 建立受影响功能对照，分别登记已有可用、已有失败和未验状态；此前取消的未完成工作不成为本次前置条件。
 - [x] 实查本机容器引擎、宿主与容器操作系统、显卡及显存、驱动、磁盘、网络和必要权限，记录实际结果及与比赛 H800 的差异；差异不能作为把必需链路留到赛场人工排查的理由。
 - [x] 清点现有活跃服务、任务、端口、数据库、模型资产和数据归属，确定预演专用端口与数据目录；使用数据库支持的一致性副本保护原件、人工记录、索引和历史，保留现有活动服务。
 - [x] 完成本机 Docker 引擎及运行环境准备；按受保护服务清单安装配置，以 Docker 容器核验运行、硬盘挂载、具名非 root 账户实际进程身份及 GPU 可见性。登记用户名、UID/GID，区分镜像安装／构建与容器运行身份；不额外要求 daemon rootless。先前 Podman 结果只作探索，不代替 Docker 证据。
-- [x] 根据实际依赖和协议选定显卡运行方式，写明各职责运行位置及完整容器计数；各票真实试运行共用登记的预演环境和资源所有权，不分别并行拉栈，正常运行、初始化、构建、模型任务、换版和恢复均满足不超过五容器。
+- [x] 根据实际依赖和协议选定显卡运行方式，写明各职责运行位置及五容器计数要求；各票真实试运行共用登记的预演环境和资源所有权，不分别并行拉栈。此项为方案准备完成，不代表全部历史操作均已满足计数要求；曾短时出现第六容器的事实保留。
 - [x] 为重要文件和数据登记产生者、读取者、双方可见路径、读写权限、临时目录、版本身份和生效方式，验证不同容器路径对应同一份实际文件。
 - [x] 明确镜像中确实不能外置的运行时及依赖；业务、前端、项目脚本、可调整配置及模型配套优先外置，不预先规定必须新增固定显卡系统。
 - [x] 保存本机调查与最小运行方案证据，区分事实、选择和未完成项；给出人手可执行的准备、启动、状态检查和问题定位顺序，说明文档留在本地与远端仓库。

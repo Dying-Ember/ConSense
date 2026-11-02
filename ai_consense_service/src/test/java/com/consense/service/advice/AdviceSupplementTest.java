@@ -116,6 +116,114 @@ class AdviceSupplementTest {
                 ()->{throw new BizException(4204,"Source changed during optional wait","source_stale",null);}));
     }
 
+    @Test void explicitNamedClausesRequireBothDocumentAndNumber() {
+        assertArrayEquals(new String[]{"GCC","17.1"},AdviceService.explicitNamedClause("Explain GCC Clause 17.1"));
+        assertArrayEquals(new String[]{"General Conditions of Contract","17.1"},AdviceService.explicitNamedClause("Please summarise the Housing Authority General Conditions of Contract Clause 17.1 on Avoidance and Resolution of Disputes by means of a flowchart."));
+        assertArrayEquals(new String[]{"General Conditions of Contract","17.1"},AdviceService.explicitNamedClause("Clause 17.1 of the General Conditions of Contract"));
+        assertNull(AdviceService.explicitNamedClause("Explain clause 17.1"));
+        assertNull(AdviceService.explicitNamedClause("Explain GCC generally"));
+        assertTrue(AdviceService.namedFamilyMatches("GCC","09_General Conditions of Contract.pdf"));
+        assertFalse(AdviceService.namedFamilyMatches("GCC","Special Conditions of Contract.pdf"));
+    }
+
+    @Test void explicitNamedClauseReadsFullLongSourceUntilNextChapter() {
+        List<VettingCorpus.Chunk> corpus=new ArrayList<>();
+        corpus.add(chunk("toc","A","standard","P7","17.1 Disputes ........ 65",null));
+        corpus.add(chunk("index-ref","A","standard","P7","17.1(3)-17.1(4)",null));
+        corpus.add(chunk("heading","A","standard","P65","17.1 Avoidance and resolution of disputes",null));
+        for(int i=0;i<281;i++)corpus.add(chunk("body-"+i,"A","standard","P66","operative line "+i,null));
+        corpus.set(251,chunk("quoted-article","A","standard","P69","26.2 Notwithstanding Article 26.1",null));
+        corpus.add(chunk("next","A","standard","P70","18 NOTICES",null));
+        corpus.add(chunk("next-body","A","standard","P70","Other chapter",null));
+        corpus.add(chunk("other","B","standard","P65","17.1 Different version",null));
+        List<String> origins=service.explicitClauseOrigins(corpus,Collections.singletonList(hit("A","standard","P65")),"17.1");
+        assertEquals(282,origins.size());assertEquals("heading",origins.get(0));assertEquals("body-280",origins.get(281));
+        assertTrue(origins.contains("quoted-article"));assertFalse(origins.contains("next"));assertFalse(origins.contains("toc"));assertFalse(origins.contains("other"));
+        corpus.set(101,chunk("next-clause","A","standard","P66","17.2 New clause",null));
+        assertEquals(99,service.explicitClauseOrigins(corpus,Collections.singletonList(hit("A","standard","P65")),"17.1").size());
+    }
+
+    @Test void boundedPacketRetainsARepresentative282LineClauseWithIndividualAliases() {
+        List<VectorStore.SearchHit> rows=new ArrayList<>();
+        for(int i=0;i<282;i++){
+            Map<String,Object> payload=new LinkedHashMap<>(hit("A","standard","P65").getPayload());
+            payload.put("content","An operative source line with a deadline and a procedure, "+i);
+            payload.put("anchor","pdf-page/65/line/"+i);
+            rows.add(new VectorStore.SearchHit("source-unit-"+i,1d,payload));
+        }
+        Object pack=ReflectionTestUtils.invokeMethod(service,"boundedEvidencePack",rows,96*1024);
+        List<?> kept=(List<?>)ReflectionTestUtils.getField(pack,"hits");
+        String text=(String)ReflectionTestUtils.getField(pack,"text");
+        assertEquals(282,kept.size());assertTrue(text.contains("[1]"));assertTrue(text.contains("[282]"));
+        assertTrue(text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length<96*1024);
+    }
+
+    @Test void originalRankedEvidenceWinsWhenExpandedClauseExceedsBudget() {
+        List<VectorStore.SearchHit> rows=new ArrayList<>();
+        for(int i=0;i<2;i++){
+            Map<String,Object> payload=new LinkedHashMap<>(hit("A","standard","P65").getPayload());
+            payload.put("content","original ranked text "+i);
+            rows.add(new VectorStore.SearchHit("original-"+i,1d,payload));
+        }
+        for(int i=0;i<300;i++){
+            Map<String,Object> payload=new LinkedHashMap<>(hit("A","standard","P65").getPayload());
+            payload.put("content",String.join("",Collections.nCopies(400,"x"))+i);
+            rows.add(new VectorStore.SearchHit("expanded-"+i,1d,payload));
+        }
+        Object pack=ReflectionTestUtils.invokeMethod(service,"boundedEvidencePack",rows,96*1024);
+        List<?> kept=(List<?>)ReflectionTestUtils.getField(pack,"hits");String text=(String)ReflectionTestUtils.getField(pack,"text");
+        assertTrue(kept.stream().map(row->((VectorStore.SearchHit)row).getId()).anyMatch("original-0"::equals));assertTrue(kept.stream().map(row->((VectorStore.SearchHit)row).getId()).anyMatch("original-1"::equals));assertTrue(kept.size()<rows.size());
+        assertTrue(text.contains("omitted by the request budget"));
+    }
+
+    @Test void clauseRangeReportsWhenNoBoundaryOrByteBudgetCutsItOff() {
+        List<VettingCorpus.Chunk> corpus=new ArrayList<>();
+        corpus.add(chunk("heading","A","standard","P65","17.1 Disputes",null));
+        corpus.add(chunk("line","A","standard","P65","body",null));
+        java.util.concurrent.atomic.AtomicBoolean incomplete=new java.util.concurrent.atomic.AtomicBoolean();
+        assertEquals(2,service.explicitClauseOrigins(corpus,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete).size());
+        assertTrue(incomplete.get());
+        corpus.add(chunk("next","A","standard","P70","18 NOTICES",null));
+        assertEquals(2,service.explicitClauseOrigins(corpus,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete).size());
+        assertFalse(incomplete.get());
+        corpus.add(2,chunk("huge","A","standard","P65",String.join("",Collections.nCopies(100000,"x")),null));
+        assertEquals(2,service.explicitClauseOrigins(corpus,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete).size());
+        assertTrue(incomplete.get());
+    }
+
+    @Test void nestedSectionsAndUncertainBoundariesAreNotCalledComplete() {
+        List<VettingCorpus.Chunk> rows=new ArrayList<>();
+        rows.add(chunk("heading","A","standard","P65","17.1 Heading",null));
+        rows.add(chunk("sub","A","standard","P65","subsection","17.1(8)"));
+        rows.add(chunk("next","A","standard","P66","18.1 Next chapter",null));
+        java.util.concurrent.atomic.AtomicBoolean incomplete=new java.util.concurrent.atomic.AtomicBoolean();
+        assertEquals(Arrays.asList("heading","sub"),service.explicitClauseOrigins(rows,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete));
+        assertTrue(incomplete.get());
+        rows.set(0,chunk("combined","A","standard","P65","17.1 Heading\ntext\n17.2 Next clause",null));
+        assertEquals(Collections.singletonList("combined"),service.explicitClauseOrigins(rows,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete));
+        assertTrue(incomplete.get());
+        rows.set(0,chunk("heading","A","standard","P65","17.1 Heading",null));
+        rows.set(1,chunk("mixed","A","standard","P65","17.1(8) Continued\n17.2 Next clause",null));
+        assertEquals(Arrays.asList("heading","mixed"),service.explicitClauseOrigins(rows,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete));
+        assertTrue(incomplete.get());
+    }
+
+    @Test void equallyPlausibleNamedHeadingsAreNotGuessed() {
+        List<VettingCorpus.Chunk> rows=Arrays.asList(chunk("a","A","standard","P65","17.1 First",null),
+                chunk("b","A","standard","P65","17.1 Second",null));
+        java.util.concurrent.atomic.AtomicBoolean incomplete=new java.util.concurrent.atomic.AtomicBoolean();
+        assertTrue(service.explicitClauseOrigins(rows,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete).isEmpty());
+        assertTrue(incomplete.get());
+    }
+
+    @Test void externalArticleClauseIdDoesNotClaimTheRangeIsComplete() {
+        List<VettingCorpus.Chunk> rows=Arrays.asList(chunk("heading","A","standard","P65","17.1 Heading",null),
+                chunk("other-rule","A","standard","P65","26.2 Arbitration Rules","26.2"));
+        java.util.concurrent.atomic.AtomicBoolean incomplete=new java.util.concurrent.atomic.AtomicBoolean();
+        assertEquals(Collections.singletonList("heading"),service.explicitClauseOrigins(rows,Collections.singletonList(hit("A","standard","P65")),"17.1",incomplete));
+        assertTrue(incomplete.get());
+    }
+
     private static AdviceService.EvidenceRequest request(String citation,String kind,String clause,String reason){return new AdviceService.EvidenceRequest(citation,kind,clause,reason);}
 
     private static VettingCorpus.Chunk chunk(String id,String revision,String role,String page,String text,String clause){

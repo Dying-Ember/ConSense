@@ -40,10 +40,11 @@ def prepare_complete_ocr(config_path, output):
     plan = {'schema': 'consense.complete-ocr-boot-plan.v1', 'configSha256': digest,
         'inputDeclarationSha256': hashlib.sha256(source.read_bytes()).hexdigest(),
         'providerOrder': ['paddleocr-vl', 'mineru'], 'timeoutSeconds': config['timeoutSeconds'],
-        'handoffStatus': 'owned_native_release_required' if all(config[name].get('ownedBoot') or config[name].get('ownedJob') for name in
+        'handoffStatus': 'owned_native_release_required' if all(config[name].get('ownedBoot') or config[name].get('ownedJob') or config[name].get('ownedFixed') for name in
             ('paddleocr-vl', 'mineru')) else 'remote_handoff_unverified',
         'providers': {name: {'baseUrl': config[name]['baseUrl'], 'identity': config[name]['identity'],
             'ownedBoot': config[name].get('ownedBoot'),
+            **({'ownedFixed': config[name]['ownedFixed']} if config[name].get('ownedFixed') is not None else {}),
             **({'nativeCaptureTransport': config[name]['nativeCaptureTransport']} if 'nativeCaptureTransport' in config[name] else {}),
             'modelReady': False} for name in ('paddleocr-vl', 'mineru')},
         'targetAccepted': False,

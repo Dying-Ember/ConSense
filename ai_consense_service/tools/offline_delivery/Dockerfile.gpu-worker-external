@@ -1,0 +1,7 @@
+ARG EXTERNAL_RUNTIME_BASE
+FROM ${EXTERNAL_RUNTIME_BASE}
+USER consense:consense
+WORKDIR /runtime
+ENV HOME=/runtime/tmp/gpu HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 CONSENSE_MODEL_OFFLINE=1
+ENTRYPOINT ["/usr/bin/python3", "/runtime/tools/offline_delivery/fixed_gpu_worker.py", "--config"]
+CMD ["/runtime/config/gpu.json"]

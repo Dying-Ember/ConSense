@@ -17,10 +17,11 @@ const readingRequests = [], sourceRequests = []
 const component = loadVue(path.join(__dirname, '../src/components/DraftingTemplatePreview.vue'), { boundaries: {
   '@/api': { draftingApi: { templateReading: async (project, fileKey) => { readingRequests.push([project, fileKey]); return pendingReading?.project === project ? pendingReading.promise : metadata }, templateSource: async (project, fileKey) => { sourceRequests.push([project, fileKey]); return source } } },
   'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') },
+  '@noble/hashes/sha256': require('@noble/hashes/sha256'),
   dompurify: { default: require('dompurify')(window) },
   'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('PDF boundary') } },
   'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-pdf-worker' }
-}, globals: { document: window.document, HTMLElement: window.HTMLElement, URL, crypto: require('node:crypto').webcrypto } }).default
+}, globals: { document: window.document, HTMLElement: window.HTMLElement, URL, crypto: {} } }).default
 ;(async () => {
   const missingLocale = vue.ref('en')
   const missingEvents = []

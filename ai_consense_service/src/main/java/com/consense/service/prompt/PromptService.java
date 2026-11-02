@@ -1,6 +1,7 @@
 package com.consense.service.prompt;
 
 import com.consense.common.BizException;
+import com.consense.common.DiagnosticSummary;
 import com.consense.common.JsonUtils;
 import com.consense.common.LocalizedText;
 import com.consense.domain.PromptTemplate;
@@ -100,7 +101,7 @@ public class PromptService {
         try {
             return String.format(template, args);
         } catch (RuntimeException ex) {
-            log.warn("提示词 String.format 失败（模板可能含非法 % 转义），退化为顺序替换: {}", ex.getMessage());
+            log.warn("提示词 String.format 失败（模板可能含非法 % 转义），退化为顺序替换: {}", DiagnosticSummary.of(ex));
             return formatByPosition(template, args);
         }
     }

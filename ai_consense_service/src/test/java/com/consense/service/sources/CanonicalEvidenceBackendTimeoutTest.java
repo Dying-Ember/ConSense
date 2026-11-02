@@ -48,6 +48,16 @@ class CanonicalEvidenceBackendTimeoutTest {
         assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,backend::health).getMessage());
     }
 
+    @Test void slowCanonicalCatalogCompletesWhileOtherCanonicalReadsStillTimeout() throws Exception {
+        CanonicalEvidenceBackend backend=backend(400,80,2000,"{}".getBytes(StandardCharsets.UTF_8));
+        String catalog="{\"module\":\"vetting\",\"operation\":\"catalog\",\"view\":\"canonical_units\"}";
+        assertEquals("{}",backend.sourceRead(catalog,"vetting",4096));
+        for(String operation:new String[]{"ids","scan"}) {
+            String request="{\"module\":\"vetting\",\"operation\":\""+operation+"\",\"view\":\"canonical_units\"}";
+            assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->backend.sourceRead(request,"vetting",4096)).getMessage());
+        }
+    }
+
     @Test void coldSemanticPreparationStillStopsAtItsFinitePublicationDeadline() throws Exception {
         CanonicalEvidenceBackend backend=backend(500,2000,100,"{}".getBytes(StandardCharsets.UTF_8));
         long started=System.nanoTime();

@@ -224,6 +224,46 @@ class ProviderTaskCacheTests(unittest.TestCase):
             hit = load_success(self.store, binding)
             self.assertEqual(hit['outputs'], outputs)
 
+    def test_fixed_gpu_cache_requires_bound_transaction_and_proven_release(self):
+        self.run_page()
+        record = next(row for row in self.records() if row['binding']['parser'] == 'paddleocr-vl')
+        binding = copy.deepcopy(record['binding'])
+        binding['provider'].pop('ownedBoot'); binding['provider']['ownedFixed'] = {'stage':'paddle'}
+        lifecycle = json.loads(self.store.read_asset(record['lifecycleRef']))
+        lifecycle.update(mode='owned_fixed_gpu', taskBinding=lifecycle['transaction']['taskBinding'],
+                         operationBindingSha256='b'*64, operationId='a'*32)
+        lifecycle['exitReceipt'] = {'status':'released', 'operationId':'a'*32,
+            'cgroupPopulated':0, 'observedGpuPids':[42], 'transactionStatus':'persisted',
+            'transactionSha256':hashlib.sha256(json.dumps(lifecycle['transaction'], sort_keys=True, ensure_ascii=False,
+                separators=(',', ':'), allow_nan=False).encode()).hexdigest()}
+        outputs = {k:self.store.read_asset(v) for k,v in record['rawOutputs'].items()}
+        assets = {k:self.store.read_asset(v) for k,v in record['assets'].items()}
+        import time
+        with patch('provider_task_cache.validate_provider'):
+            for mutate in (lambda x:x['exitReceipt'].update(status='release_unknown'),
+                           lambda x:x['exitReceipt'].update(operationId='c'*32),
+                           lambda x:x['exitReceipt'].update(observedGpuPids=[]),
+                           lambda x:x['exitReceipt'].update(transactionSha256='d'*64),
+                           lambda x:x.update(taskBinding={})):
+                invalid = copy.deepcopy(lifecycle); mutate(invalid)
+                self.assertIsNone(commit_success(self.store, binding, outputs, assets, invalid,
+                    {'status':'complete'}, record['captureMetadata'], deadline=time.monotonic()+10))
+            from provider_task_cache import _released
+            self.assertTrue(_released(lifecycle, binding['provider']))
+            lifecycle['exitReceipt'].pop('observedGpuPids')
+            lifecycle['exitReceipt'].update(ownership='delegated_cgroup_v2', processWaited=True)
+            for mutate in (lambda x:x['exitReceipt'].update(processWaited=False),
+                           lambda x:x['exitReceipt'].update(cgroupPopulated=1),
+                           lambda x:x['exitReceipt'].update(ownership='other'),
+                           lambda x:x['exitReceipt'].update(transactionSha256='d'*64),
+                           lambda x:x.update(taskBinding={})):
+                invalid = copy.deepcopy(lifecycle); mutate(invalid)
+                self.assertIsNone(commit_success(self.store, binding, outputs, assets, invalid,
+                    {'status':'complete'}, record['captureMetadata'], deadline=time.monotonic()+10))
+            self.assertIsNotNone(commit_success(self.store, binding, outputs, assets, lifecycle,
+                {'status':'complete'}, record['captureMetadata'], deadline=time.monotonic()+10))
+            self.assertEqual(load_success(self.store, binding)['outputs'], outputs)
+
     def test_deadline_after_normalization_and_during_commit_does_not_publish_success(self):
         clock = [0.0]
         original = complete_ocr.normalize_parser_run
@@ -312,6 +352,41 @@ class ProviderTaskCacheTests(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         self.assertIsNone(failure['ownedJobId'])
         self.assertEqual(failure['remoteCleanup']['status'], 'remote_submission_or_cancellation_unknown')
+
+
+class ExactOwnedFixedRecipeCompatibilityTests(unittest.TestCase):
+    def test_only_exact_owned_fixed_recipe_projects_predecessor_hashes(self):
+        import provider_task_cache as cache
+        provider = {'ownedFixed': {'socketPath': '/run/gpu.sock'}, 'identity': {'model': 'v1'}}
+        args = ('paddleocr-vl', {'sourceSha256': 'a'*64}, [{'physicalPageNo': 1}],
+                {'sha256': 'b'*64}, provider, {}, {})
+        binding = cache.task_binding(*args)
+        impl = binding['implementation']
+        self.assertEqual(impl['provider_task_cache.py'], cache._OWNED_FIXED_OLD_SELF_SHA)
+        self.assertEqual(impl['fixed_gpu_provider.py'], cache._OWNED_FIXED_OLD_PROVIDER_SHA)
+        self_raw = Path(cache.__file__).read_bytes()
+        provider_path = Path(cache.__file__).resolve().parent.parent/'offline_delivery'/'fixed_gpu_provider.py'
+        provider_sha = hashlib.sha256(provider_path.read_bytes()).hexdigest()
+        self.assertTrue(cache._approved_owned_fixed_recipe(self_raw, provider_sha))
+        self.assertFalse(cache._approved_owned_fixed_recipe(self_raw + b'# changed', provider_sha))
+        self.assertFalse(cache._approved_owned_fixed_recipe(self_raw, '0'*64))
+        original_read = Path.read_bytes
+        for changed_name in ('provider_task_cache.py', 'fixed_gpu_provider.py'):
+            def changed_read(path):
+                raw = original_read(path)
+                return raw + b'# changed' if path.name == changed_name else raw
+            with self.subTest(file=changed_name), patch.object(Path, 'read_bytes', changed_read):
+                changed = cache.task_binding(*args)
+                self.assertNotEqual(changed['implementation']['provider_task_cache.py'], cache._OWNED_FIXED_OLD_SELF_SHA)
+                self.assertNotEqual(changed['implementation']['fixed_gpu_provider.py'], cache._OWNED_FIXED_OLD_PROVIDER_SHA)
+        for position, value in ((1, {'sourceSha256': 'c'*64}),
+                                (4, {'ownedFixed': {'socketPath': '/run/other.sock'}, 'identity': {'model': 'v1'}}),
+                                (4, {'ownedFixed': {'socketPath': '/run/gpu.sock'}, 'identity': {'model': 'v2'}})):
+            changed_args = list(args); changed_args[position] = value
+            self.assertNotEqual(binding, cache.task_binding(*changed_args))
+        other = list(args); other[4] = {'ownedBoot': {}}
+        self.assertNotEqual(cache.task_binding(*other)['implementation']['provider_task_cache.py'],
+                            cache._OWNED_FIXED_OLD_SELF_SHA)
 
 
 if __name__ == '__main__':

@@ -150,9 +150,9 @@ export const api = {
     }
   },
   /** 取二进制 Blob（原件预览：PDF / 文本），不触发下载 */
-  blob: async (url: string, timeout = 300000, reportError = true): Promise<Blob> => {
+  blob: async (url: string, timeout = 300000, reportError = true, llmSelection?: LlmSelection): Promise<Blob> => {
     try {
-      const response = await http.get(url, profileConfig({ responseType: 'blob', timeout }))
+      const response = await http.get(url, profileConfig({ responseType: 'blob', timeout, llmSelection }))
       return await requireBinary(response.data as Blob)
     } catch (error) {
       const message = toMessage(error)

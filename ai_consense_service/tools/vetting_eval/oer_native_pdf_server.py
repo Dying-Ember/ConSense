@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import importlib
 import json
 import math
 import os
 import re
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -55,6 +57,9 @@ def _strict_request_json(raw):
 
 HERE = Path(__file__).resolve().parent
 MAX_MESSAGE_BYTES = MAX_SNAPSHOT_BYTES
+# Preserve both original field limits with a finite allowance for multipart framing.
+NATIVE_CANDIDATE_REQUEST_MAXIMUM = 97 * 1024 * 1024
+BUSINESS_REQUEST_MAXIMUM = 64 * 1024 * 1024
 NATIVE_PDF_ALGORITHMS = ('native_pdf_source_registry.py', 'oer_native_pdf_server.py',
     'native_pdf_canonical_projection.py', 'native_pdf_table_projection.py', 'native_pdf_projection_transport.py', 'native_pdf_observation.py',
     'parser_capture.py', 'pdf_selected_source.py', 'selected_source_raster.py')
@@ -93,7 +98,8 @@ class NativePdfOerWindowRuntime(NativeOerWindowRuntime):
 
 class _WireLimits:
     """Buffer bounded envelopes so a large public reply never starts sending."""
-    def __init__(self, app, maximum, strict_json_paths=None, normal_maximum=None):
+    def __init__(self, app, maximum, strict_json_paths=None, normal_maximum=None, preserve_ocr=False,
+                 business_backend=None):
         fail(type(maximum) is int and 1024 <= maximum <= MAX_SNAPSHOT_BYTES,
              'NATIVE_PDF_MESSAGE_LIMIT_INVALID', 'Public message limit must stay within the hard 16MiB cap')
         if normal_maximum is not None:
@@ -101,26 +107,81 @@ class _WireLimits:
                  'NORMAL_OBSERVED_MESSAGE_LIMIT_INVALID', 'Normal whole-message limit must stay within the finite 1GiB cap')
         self.app, self.maximum, self.normal_maximum = app, maximum, normal_maximum
         self.strict_json_paths = frozenset(strict_json_paths or ('/project/native-pdf',))
+        self.preserve_ocr = preserve_ocr
+        self.business_backend = business_backend
 
     async def __call__(self, scope, receive, send):
         from fastapi.responses import JSONResponse
         if scope['type'] != 'http': return await self.app(scope, receive, send)
-        async def reject(status, kind, message):
+        ocr_route = self.preserve_ocr and ((scope['path'] in ('/ocr', '/ocr/') and scope['method'] == 'POST')
+                or (re.fullmatch(r'/ocr/tasks/[^/]+', scope['path']) and scope['method'] in ('GET', 'DELETE'))
+                or (re.fullmatch(r'/ocr/tasks/[^/]+/result', scope['path']) and scope['method'] == 'GET'))
+        native_candidate = (self.preserve_ocr and scope['path'] in ('/native-pdf/table-candidates', '/native-pdf/table-candidates/')
+                            and scope['method'] == 'POST')
+        async def reject(status, kind, message, *, bounded=False):
             response = JSONResponse({'detail': {'kind': kind, 'message': message}}, status_code=status)
-            await response(scope, receive, send)
+            if not bounded:
+                return await response(scope, receive, send)
+            task = asyncio.create_task(response(scope, receive, send))
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            try:
+                done, _ = await asyncio.wait((task,), timeout=.25)
+                if task not in done:
+                    task.cancel()
+                    return
+                return task.result()
+            except BaseException:
+                task.cancel()
+                raise
+        business = self.business_backend is not None and (
+            (scope['path'] in ('/v1/models', '/v1/models/') and scope['method'] == 'GET') or
+            (scope['path'] in ('/v1/chat/completions', '/v1/chat/completions/', '/v1/responses',
+                               '/v1/responses/', '/v1/responses/input_tokens', '/v1/responses/input_tokens/')
+             and scope['method'] == 'POST'))
+        deadline = None
+        if business:
+            from fastapi import HTTPException, Request
+            admitted_at = time.monotonic()
+            try:
+                config, client = self.business_backend._fixed_business_configuration(Request(scope))
+                deadline = admitted_at + config['timeout']
+                scope['consense.business.preflight'] = self.business_backend._business_configuration_snapshot(config, client)
+                scope['consense.business.deadline'] = deadline
+            except HTTPException as error:
+                return await reject(error.status_code, 'BUSINESS_AUTH_OR_CONFIGURATION', 'Business authorization or configuration is unavailable', bounded=True)
+            except Exception:
+                return await reject(503, 'BUSINESS_AUTH_OR_CONFIGURATION', 'Business authorization or configuration is unavailable', bounded=True)
         normal_post = self.normal_maximum is not None and scope['path'] == '/normal-observed'
-        request_maximum = self.normal_maximum if normal_post else self.maximum
+        request_maximum = (BUSINESS_REQUEST_MAXIMUM if business and scope['method'] == 'POST'
+                           else NATIVE_CANDIDATE_REQUEST_MAXIMUM if native_candidate
+                           else 26 * 1024 * 1024 if ocr_route and scope['method'] == 'POST'
+                           else self.normal_maximum if normal_post else self.maximum)
         # Registry schema dispatch keeps non-normal canonical roots at their original cap.
         normal_reply = normal_post or (self.normal_maximum is not None
             and re.fullmatch(r'/canonical/[a-f0-9]{64}', scope['path']) is not None)
-        response_maximum = self.normal_maximum if normal_reply else self.maximum
+        response_maximum = (MAX_SNAPSHOT_BYTES if native_candidate else 32 * 1024 * 1024 if ocr_route
+                            else self.normal_maximum if normal_reply else self.maximum)
         body = bytearray()
         while True:
-            event = await receive()
+            if deadline is None:
+                event = await receive()
+            else:
+                pending = asyncio.create_task(receive())
+                pending.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+                try:
+                    done, _ = await asyncio.wait((pending,), timeout=max(0, deadline - time.monotonic()))
+                    if pending not in done:
+                        pending.cancel()
+                        return await reject(504, 'BUSINESS_DEADLINE_EXPIRED', 'Business request deadline elapsed', bounded=True)
+                    event = pending.result()
+                except BaseException:
+                    pending.cancel()
+                    raise
             if event['type'] != 'http.request': return
             incoming = event.get('body', b'')
             if len(body) + len(incoming) > request_maximum:
-                return await reject(413, 'NATIVE_PDF_MESSAGE_TOO_LARGE', 'Public request exceeds the configured whole-message cap')
+                return await reject(413, 'BUSINESS_MESSAGE_TOO_LARGE' if business else 'NATIVE_PDF_MESSAGE_TOO_LARGE',
+                                    'Public request exceeds the configured whole-message cap', bounded=business)
             body.extend(incoming)
             if not event.get('more_body', False): break
         if scope['path'] in self.strict_json_paths and body:
@@ -134,6 +195,8 @@ class _WireLimits:
                 delivered = True
                 return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
             return await receive()
+        if business and scope['method'] == 'POST':
+            return await self.app(scope, replay, send)
         # This exact route owns finite NDJSON frames and requires a final proof record.
         # Buffering the complete response would turn a full-source stream into one huge envelope.
         if (scope['path'] == '/sources/read' and
@@ -154,7 +217,8 @@ class _WireLimits:
 
 def create_native_pdf_app(policy, *, backend=None, artifact_store=None, target_module='vetting',
                           source_registry=None, runtime_factory=None, app=None,
-                          maximum_message_bytes=None, strict_json_paths=None, normal_maximum_message_bytes=None):
+                          maximum_message_bytes=None, strict_json_paths=None, normal_maximum_message_bytes=None,
+                          preserve_ocr=False, business_backend=None):
     from fastapi import HTTPException
     backend = importlib.import_module('server') if backend is None else backend
     artifact_store = artifact_store or ArtifactStore(Path(backend.STATE) / 'artifacts')
@@ -169,7 +233,7 @@ def create_native_pdf_app(policy, *, backend=None, artifact_store=None, target_m
         backend, policy, source_registry=registry, target_module=target_module)
     maximum = MAX_MESSAGE_BYTES if maximum_message_bytes is None else maximum_message_bytes
     app.add_middleware(_WireLimits, maximum=maximum, strict_json_paths=strict_json_paths,
-        normal_maximum=normal_maximum_message_bytes)
+        normal_maximum=normal_maximum_message_bytes, preserve_ocr=preserve_ocr, business_backend=business_backend)
     old_health = next(route for route in app.routes if getattr(route, 'path', None) == '/health')
     old_endpoint = old_health.endpoint; app.router.routes.remove(old_health)
     def health():

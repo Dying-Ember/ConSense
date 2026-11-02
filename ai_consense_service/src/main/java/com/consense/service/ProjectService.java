@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
 public class ProjectService {
 
     private final ProjectRepository projectRepository;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private org.springframework.context.ApplicationEventPublisher projectEvents;
     private final SourceDocumentRepository sourceDocumentRepository;
     private final DraftVariableRepository draftVariableRepository;
     private final DraftDocumentRepository draftDocumentRepository;
@@ -80,6 +82,7 @@ public class ProjectService {
         }
         project.setUpdatedAt(Instant.now());
         projectRepository.save(project);
+        if(isNew && projectEvents!=null) projectEvents.publishEvent(new com.consense.service.drafting.DraftPackagedTemplates.ProjectCreated(project.getId()));
         return toVO(project);
     }
 
@@ -107,7 +110,7 @@ public class ProjectService {
             try {
                 titles = JsonUtils.readList(project.getTitleLinesJson(), LocalizedText.class);
             } catch (Exception e) {
-                log.debug("解析 titleLines 失败: {}", e.getMessage());
+                log.debug("解析 titleLines 失败: {}", com.consense.common.DiagnosticSummary.of(e));
             }
         }
         return new ProjectVO(project.getId(),

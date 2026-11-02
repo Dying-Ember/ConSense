@@ -27,6 +27,41 @@ class OerSourceReadTransportTest {
         assertEquals(2,calls.get());
     }
 
+    @Test void exactCanonicalCatalogUsesThreeMinuteDeadlineOnlyForItsOwnModule() {
+        CanonicalEvidenceProperties properties=new CanonicalEvidenceProperties();properties.setBaseUrl("http://snapshot.invalid");
+        properties.setTimeoutMs(30000);AtomicInteger extended=new AtomicInteger(),ordinary=new AtomicInteger();
+        CanonicalEvidenceBackend backend=new CanonicalEvidenceBackend(properties) {
+            @Override protected Reply execute(Request request,int maximum) {
+                if(request.tag(Integer.class)==null)ordinary.incrementAndGet();
+                else {assertEquals(Integer.valueOf(180000),request.tag(Integer.class));extended.incrementAndGet();}
+                assertEquals(4096,maximum);return new Reply(new byte[]{123,125},"application/json",null,null,null);
+            }
+        };
+        for(String module:new String[]{"vetting","advisory"})
+            assertEquals("{}",backend.sourceRead("{\"module\":\""+module+"\",\"operation\":\"catalog\",\"view\":\"canonical_units\"}",module,4096));
+        for(String input:new String[]{
+                "{\"module\":\"advisory\",\"operation\":\"catalog\",\"view\":\"canonical_units\"}",
+                "{\"module\":\"vetting\",\"operation\":\"ids\",\"view\":\"canonical_units\"}",
+                "{\"module\":\"vetting\",\"operation\":\"scan\",\"view\":\"canonical_units\"}",
+                "{\"module\":\"vetting\",\"operation\":\"catalog\",\"view\":\"semantic_units\"}",
+                "{\"module\":\"vetting\",\"operation\":\"catalog\",\"view\":\"canonical_units\"} trailing"})
+            assertEquals("{}",backend.sourceRead(input,"vetting",4096));
+        assertEquals("{}",backend.sourceRead("{\"module\":\"drafting\",\"operation\":\"catalog\",\"view\":\"canonical_units\"}","drafting",4096));
+        assertEquals(2,extended.get());assertEquals(6,ordinary.get());
+    }
+
+    @Test void catalogNeverShortensTheConfiguredDeadline() {
+        CanonicalEvidenceProperties properties=new CanonicalEvidenceProperties();properties.setBaseUrl("http://snapshot.invalid");
+        properties.setTimeoutMs(240000);
+        CanonicalEvidenceBackend backend=new CanonicalEvidenceBackend(properties) {
+            @Override protected Reply execute(Request request,int maximum) {
+                assertEquals(Integer.valueOf(240000),request.tag(Integer.class));
+                return new Reply(new byte[]{123,125},"application/json",null,null,null);
+            }
+        };
+        assertEquals("{}",backend.sourceRead("{\"module\":\"advisory\",\"operation\":\"catalog\",\"view\":\"canonical_units\"}","advisory",4096));
+    }
+
     @Test void ordinaryReadsAndMalformedOrMismatchedPreparationKeepTheirExistingDeadline() {
         CanonicalEvidenceProperties properties=new CanonicalEvidenceProperties();properties.setBaseUrl("http://snapshot.invalid");
         properties.setTimeoutMs(180000);properties.setNormalPublicationTimeoutMs(0);AtomicInteger calls=new AtomicInteger();

@@ -87,6 +87,13 @@ def validate_provider(provider):
     _require(isinstance(identity.get('config'), dict), 'resolved parser configuration required')
     config_sha = hashlib.sha256(_bytes(identity['config'])).hexdigest()
     _require(identity.get('configSha256') in (None, config_sha), 'resolved configuration SHA differs')
+    _require(sum(provider.get(key) is not None for key in ('ownedBoot', 'ownedJob', 'ownedFixed')) <= 1,
+             'only one provider ownership mode is allowed')
+    if provider.get('ownedFixed') is not None:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'offline_delivery'))
+        from fixed_gpu_provider import configuration
+        configuration(provider)
+        return provider
     if provider.get('ownedJob') is not None:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'offline_delivery'))
         from native_job_provider import configuration
@@ -229,6 +236,14 @@ class _WindowsTree:
         self.kernel.CloseHandle(self.process); self.kernel.CloseHandle(self.job)
 
 
+def _child_cgroup_identity(root, child_name, own, pid):
+    _require(own.startswith('0::/') and '\n' not in own and '\r' not in own,
+             'current cgroup v2 identity required')
+    _require(str(pid) in (root / 'cgroup.procs').read_text().split(),
+             'owner is not in delegated cgroup root')
+    return own.rstrip('/') + '/' + child_name
+
+
 class _LinuxTree:
     def __init__(self, boot, stdout, stderr, remaining):
         import select
@@ -237,6 +252,12 @@ class _LinuxTree:
         _require(str(Path(sys.executable).resolve()) in {str(Path(asset['path']).resolve()) for asset in boot['runtimeAssets']},
                  'native Linux admission bootstrap Python executable must be SHA pinned')
         self.group = root / ('consense-ocr-' + uuid.uuid4().hex)
+        if 'cgroupIdentity' in boot:
+            own = Path('/proc/self/cgroup').read_text().strip()
+            _require(boot['cgroupIdentity'] == own, 'current cgroup changed before native launch')
+            expected = _child_cgroup_identity(root, self.group.name, own, os.getpid())
+        else:
+            expected = '0::/' + os.path.relpath(self.group, '/sys/fs/cgroup')
         self.group.mkdir()
         if not (self.group / 'cgroup.kill').is_file():
             self.group.rmdir()
@@ -246,7 +267,7 @@ class _LinuxTree:
 with open(sys.argv[1], "w") as stream:
     stream.write(str(os.getpid()))
     stream.flush()
-expected = "0::/" + os.path.relpath(os.path.dirname(sys.argv[1]), "/sys/fs/cgroup")
+expected = sys.argv[3]
 with open("/proc/self/cgroup") as stream:
     if expected not in stream.read().splitlines():
         raise RuntimeError("Native Linux cgroup admission readback differs")
@@ -255,10 +276,10 @@ with open(sys.argv[1]) as stream:
         raise RuntimeError("Native Linux cgroup does not contain admitted process")
 os.write(int(sys.argv[2]), b"1")
 os.close(int(sys.argv[2]))
-os.execvpe(sys.argv[3], sys.argv[3:], os.environ)
+os.execvpe(sys.argv[4], sys.argv[4:], os.environ)
 '''
         try:
-            self.process = subprocess.Popen([sys.executable, '-c', wrapper, str(self.group / 'cgroup.procs'), str(write_fd), *boot['command']],
+            self.process = subprocess.Popen([sys.executable, '-c', wrapper, str(self.group / 'cgroup.procs'), str(write_fd), expected, *boot['command']],
                 cwd=boot['cwd'], env=boot['env'], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
                 pass_fds=(write_fd,), start_new_session=True)
             self.pid = self.process.pid
@@ -325,6 +346,11 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir, *, cancelled
     if cancelled is not None and cancelled():
         raise ProviderLifecycleError('Caller cancelled before owned provider admission')
     validate_provider(provider)
+    if provider.get('ownedFixed') is not None:
+        from fixed_gpu_provider import owned_fixed_provider
+        with owned_fixed_provider(provider, deadline-time.monotonic(), receipt_dir, cancelled=cancelled) as lifecycle:
+            yield lifecycle
+        return
     if provider.get('ownedJob') is not None:
         from native_job_provider import owned_gpu_provider
         with owned_gpu_provider(provider, deadline-time.monotonic(), receipt_dir, cancelled=cancelled) as lifecycle:

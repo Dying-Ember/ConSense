@@ -89,6 +89,216 @@ class UnifiedHttpTests(unittest.TestCase):
         return self.client.post('/retrieve', json={'projectId': 'unified-test', 'query': 'Visible',
             'candidates': 10, 'limit': 10})
 
+    def test_ocr_routes_are_opt_in_and_reuse_task_lifecycle(self):
+        import io
+        from PIL import Image
+
+        self.assertEqual(404, self.client.post('/ocr').status_code)
+        self.assertFalse(self.client.get('/health').json()['ocrRouteExposed'])
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+        with self.assertRaisesRegex(ValueError, 'Vetting'):
+            create_unified_app(self.policy, backend=self.backend, target_module='advisory', with_ocr=True)
+        stream = io.BytesIO()
+        Image.new('RGB', (2, 2), 'white').save(stream, format='PNG')
+        config = self.root / 'complete-ocr.json'
+        raw = b'{"timeoutSeconds":30}'
+        config.write_bytes(raw)
+        task_id = 'a' * 32
+        headers = {'X-Consense-Ocr-Purpose': 'parse', 'X-Consense-Ocr-Task-Id': task_id}
+        with TestClient(app) as client, patch.dict('os.environ', {
+                'CONSENSE_COMPLETE_OCR_CONFIG': str(config),
+                'CONSENSE_COMPLETE_OCR_CONFIG_SHA256': '0' * 64}):
+            self.assertTrue(client.get('/health').json()['ocrRouteExposed'])
+            bad = client.post('/ocr', files={'file': ('page.png', stream.getvalue(), 'image/png')}, headers=headers)
+            self.assertEqual(503, bad.status_code)
+            with patch.dict('os.environ', {'CONSENSE_COMPLETE_OCR_CONFIG_SHA256': hashlib.sha256(raw).hexdigest()}), \
+                    patch('complete_ocr.recognize_complete_page', return_value={'text': 'authored', 'provenance': {}}) as provider:
+                response = client.post('/ocr', files={'file': ('page.png', stream.getvalue(), 'image/png')}, headers=headers)
+            self.assertEqual(200, response.status_code, response.text)
+            self.assertEqual('authored', response.json()['text'])
+            self.assertEqual(1, provider.call_count)
+            self.assertEqual('completed', client.get('/ocr/tasks/' + task_id).json()['status'])
+            self.assertEqual('authored', client.get('/ocr/tasks/' + task_id + '/result').json()['text'])
+            self.assertEqual('completed', client.delete('/ocr/tasks/' + task_id).json()['status'])
+
+    def test_ocr_keeps_image_and_result_limits_without_weakening_oer_limits(self):
+        import io
+        from PIL import Image
+
+        stream = io.BytesIO()
+        Image.new('RGB', (2, 2), 'white').save(stream, format='PNG')
+        png = stream.getvalue()
+        image = png + b'\0' * (25 * 1024 * 1024 - len(png))
+        config = self.root / 'complete-ocr-limit.json'
+        raw = b'{"timeoutSeconds":30}'
+        config.write_bytes(raw)
+        text = 'x' * (16 * 1024 * 1024 + 1)
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True, maximum_message_bytes=1024)
+        headers = {'X-Consense-Ocr-Purpose': 'parse', 'X-Consense-Ocr-Task-Id': 'b' * 32}
+        with TestClient(app) as client, patch.dict('os.environ', {
+                'CONSENSE_COMPLETE_OCR_CONFIG': str(config),
+                'CONSENSE_COMPLETE_OCR_CONFIG_SHA256': hashlib.sha256(raw).hexdigest()}), \
+                patch('complete_ocr.recognize_complete_page', return_value={'text': text, 'provenance': {}}) as provider:
+            response = client.post('/ocr', files={'file': ('page.png', image, 'image/png')}, headers=headers)
+            self.assertEqual(200, response.status_code, response.text[:200])
+            self.assertEqual(len(text), len(response.json()['text']))
+            result = client.get('/ocr/tasks/' + 'b' * 32 + '/result')
+            self.assertEqual(200, result.status_code)
+            self.assertEqual(len(text), len(result.json()['text']))
+            oversized = client.post('/ocr', files={'file': ('page.png', image + b'x', 'image/png')}, headers=headers)
+            self.assertEqual(413, oversized.status_code)
+            self.assertEqual('Image exceeds 25 MiB', oversized.json()['detail'])
+            excess_form = client.post('/ocr', files={'file': ('page.png', image, 'image/png')},
+                                      data={'sourceContext': 'x' * (1024 * 1024)}, headers=headers)
+            self.assertEqual(413, excess_form.status_code)
+            self.assertEqual('NATIVE_PDF_MESSAGE_TOO_LARGE', excess_form.json()['detail']['kind'])
+            self.assertEqual(1, provider.call_count)
+            self.assertEqual(413, client.post('/project/native-pdf', content=b' ' * 1025).status_code)
+
+    def test_ocr_registration_refuses_missing_task_routes(self):
+        routes = [route for route in self.backend.app.routes if route.path != '/ocr/tasks/{task_id}/result']
+        with patch.object(self.backend.app.router, 'routes', routes):
+            with self.assertRaisesRegex(ValueError, 'OCR task routes'):
+                create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+
+    def test_native_table_candidate_route_is_opt_in_and_uses_original_handler(self):
+        path = '/native-pdf/table-candidates'
+        self.assertEqual(404, self.client.post(path).status_code)
+        advisory = create_unified_app(self.policy, backend=self.backend, target_module='advisory')
+        with TestClient(advisory) as client:
+            self.assertEqual(404, client.post(path).status_code)
+        with self.assertRaises(ValueError):
+            create_unified_app(self.policy, backend=self.backend, target_module='advisory', with_ocr=True)
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+        source = [r for r in self.backend.app.routes if r.path == path and 'POST' in getattr(r, 'methods', ())]
+        selected = [r for r in app.routes if r.path == path and 'POST' in getattr(r, 'methods', ())]
+        self.assertEqual(1, len(source))
+        self.assertEqual(1, len(selected))
+        self.assertIs(source[0].endpoint, selected[0].endpoint)
+
+    def test_native_table_candidate_registration_rejects_missing_and_conflicting_routes(self):
+        import oer_unified_server
+
+        path = '/native-pdf/table-candidates'
+        routes = [route for route in self.backend.app.routes if route.path != path]
+        with patch.object(self.backend.app.router, 'routes', routes):
+            with self.assertRaises(ValueError):
+                create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+        original_route = next(route for route in self.backend.app.routes if route.path == path)
+        with patch.object(self.backend.app.router, 'routes', [*self.backend.app.routes, original_route]):
+            with self.assertRaises(ValueError):
+                create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+        original = oer_unified_server.create_native_pdf_app
+        def with_conflict(*args, **kwargs):
+            app = original(*args, **kwargs)
+            app.add_api_route(path, lambda: {}, methods=['POST'])
+            return app
+        with patch.object(oer_unified_server, 'create_native_pdf_app', side_effect=with_conflict):
+            with self.assertRaises(ValueError):
+                create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+
+    def test_native_table_candidate_multipart_preserves_pdf_and_both_context_forms(self):
+        path = '/native-pdf/table-candidates'
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True, maximum_message_bytes=1024)
+        raw, native = b'%PDF-authored', '{"note":"汉"}'.encode('utf-8')
+        with TestClient(app) as client, patch('native_pdf_candidates.capture_native_pdf_candidates',
+                return_value={'status': 'authored-control', 'payload': 'x' * 2048}) as capture:
+            for context_part in ({'data': {'nativeContext': native.decode('utf-8')}},
+                    {'files': {'nativeContext': ('context.json', native, 'application/json')}}):
+                files = {'file': ('authored.pdf', raw, 'application/pdf'), **context_part.get('files', {})}
+                response = client.post(path, files=files, data=context_part.get('data'))
+                self.assertEqual(200, response.status_code, response.text)
+                self.assertEqual('authored-control', response.json()['status'])
+                self.assertEqual((raw, native), capture.call_args.args)
+            self.assertEqual(2, capture.call_count)
+
+    def test_native_table_candidate_accepts_multipart_above_16_mib(self):
+        path = '/native-pdf/table-candidates'
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True)
+        raw = b'%PDF-' + b'x' * (MAX_SNAPSHOT_BYTES + 1)
+        with TestClient(app) as client, patch('native_pdf_candidates.capture_native_pdf_candidates',
+                return_value={'status': 'authored-control'}) as capture:
+            response = client.post(path, files={'file': ('authored.pdf', raw, 'application/pdf')},
+                                   data={'nativeContext': '{}'})
+            self.assertEqual(200, response.status_code, response.text)
+            self.assertEqual(hashlib.sha256(raw).digest(), hashlib.sha256(capture.call_args.args[0]).digest())
+            self.assertEqual(b'{}', capture.call_args.args[1])
+
+    def test_native_table_candidate_field_and_whole_message_limits(self):
+        import oer_native_pdf_server
+
+        path = '/native-pdf/table-candidates'
+        self.assertEqual(97 * 1024 * 1024, oer_native_pdf_server.NATIVE_CANDIDATE_REQUEST_MAXIMUM)
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True, maximum_message_bytes=1024)
+        with patch.object(oer_native_pdf_server, 'NATIVE_CANDIDATE_REQUEST_MAXIMUM', 4096), \
+                patch('native_pdf_candidates.MAX_PDF_BYTES', 8), \
+                patch('native_pdf_candidates.MAX_CONTEXT_BYTES', 8), \
+                patch('native_pdf_candidates.capture_native_pdf_candidates', return_value={'status': 'ok'}) as capture, \
+                TestClient(app) as client:
+            for pdf, native in ((b'123456789', b'{}'), (b'%PDF-', b'123456789')):
+                response = client.post(path, files={'file': ('authored.pdf', pdf, 'application/pdf'),
+                    'nativeContext': ('context.json', native, 'application/json')})
+                self.assertEqual(413, response.status_code, response.text)
+            response = client.post(path, files={'file': ('authored.pdf', b'%PDF-', 'application/pdf')},
+                                   data={'nativeContext': '汉' * 3})
+            self.assertEqual(413, response.status_code, response.text)
+            self.assertEqual(422, client.post(path, content=b'x' * 4096).status_code)
+            self.assertEqual(413, client.post(path, content=b'x' * 4097).status_code)
+            self.assertEqual(413, client.request('GET', path, content=b'x' * 1025).status_code)
+            self.assertEqual(413, client.post('/project/native-pdf', content=b'x' * 1025).status_code)
+            capture.assert_not_called()
+
+    def test_native_table_candidate_response_still_has_finite_snapshot_cap(self):
+        import oer_native_pdf_server
+
+        self.assertEqual(16 * 1024 * 1024, oer_native_pdf_server.MAX_SNAPSHOT_BYTES)
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True, maximum_message_bytes=1024)
+        with patch.object(oer_native_pdf_server, 'MAX_SNAPSHOT_BYTES', 1024), \
+                patch('native_pdf_candidates.capture_native_pdf_candidates', return_value={'payload': 'x' * 2048}), \
+                TestClient(app) as client:
+            response = client.post('/native-pdf/table-candidates',
+                files={'file': ('authored.pdf', b'%PDF-', 'application/pdf')}, data={'nativeContext': '{}'})
+            self.assertEqual(422, response.status_code, response.text)
+            self.assertEqual('NATIVE_PDF_MESSAGE_TOO_LARGE', response.json()['detail']['kind'])
+
+    def test_legacy_trailing_slash_redirects_keep_route_limits_and_handlers(self):
+        import io
+        from PIL import Image
+        import oer_native_pdf_server
+
+        app = create_unified_app(self.policy, backend=self.backend, with_ocr=True, maximum_message_bytes=1024)
+        config = self.root / 'complete-ocr-redirect.json'
+        raw_config = b'{"timeoutSeconds":30}'
+        config.write_bytes(raw_config)
+        stream = io.BytesIO()
+        Image.new('RGB', (2, 2), 'white').save(stream, format='PNG')
+        image = stream.getvalue() + b'\0' * 2048
+        headers = {'X-Consense-Ocr-Purpose': 'parse', 'X-Consense-Ocr-Task-Id': 'd' * 32}
+        with patch.object(oer_native_pdf_server, 'NATIVE_CANDIDATE_REQUEST_MAXIMUM', 8192), \
+                patch.dict('os.environ', {'CONSENSE_COMPLETE_OCR_CONFIG': str(config),
+                    'CONSENSE_COMPLETE_OCR_CONFIG_SHA256': hashlib.sha256(raw_config).hexdigest()}), \
+                patch('native_pdf_candidates.capture_native_pdf_candidates', return_value={'status': 'authored'}) as capture, \
+                patch('complete_ocr.recognize_complete_page', return_value={'text': 'authored', 'provenance': {}}) as ocr, \
+                TestClient(app) as client:
+            response = client.post('/native-pdf/table-candidates/',
+                files={'file': ('authored.pdf', b'%PDF-' + b'x' * 2048, 'application/pdf')},
+                data={'nativeContext': '{}'}, follow_redirects=True)
+            self.assertEqual([307], [item.status_code for item in response.history])
+            self.assertEqual(200, response.status_code, response.text)
+            self.assertEqual((b'%PDF-' + b'x' * 2048, b'{}'), capture.call_args.args)
+            self.assertEqual(1, capture.call_count)
+            response = client.post('/ocr/', files={'file': ('page.png', image, 'image/png')},
+                                   headers=headers, follow_redirects=True)
+            self.assertEqual([307], [item.status_code for item in response.history])
+            self.assertEqual(200, response.status_code, response.text)
+            self.assertEqual('authored', response.json()['text'])
+            self.assertEqual(1, ocr.call_count)
+            for path in ('/ocr//', '/ocr-extra', '/native-pdf/table-candidates//',
+                         '/native-pdf/table-candidates-extra'):
+                with self.subTest(path=path):
+                    self.assertEqual(413, client.post(path, content=b'x' * 1025,
+                                                      follow_redirects=False).status_code)
+
     def test_all_health_capabilities_and_source_algorithms_without_inference(self):
         with patch.object(self.rt, 'tokenizer', side_effect=AssertionError('model forbidden')):
             response = self.client.get('/health')

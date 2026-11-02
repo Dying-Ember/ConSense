@@ -25,11 +25,11 @@ public class AiConfig {
     public LlmClient llmClient(ConsenseProperties props, HttpSupport http) {
         ConsenseProperties.Llm llm = props.getLlm();
         if ("openai".equalsIgnoreCase(llm.getProvider())) {
-            log.info("LLM provider = openai-compatible, baseUrl={}", llm.getBaseUrl());
+            log.info("LLM provider = openai-compatible");
             return new OpenAiLlmClient(llm, http);
         }
-        log.info("LLM provider = ollama, baseUrl={}, chatModel={}, embedModel={}",
-                llm.getBaseUrl(), llm.getChatModel(), llm.getEmbedModel());
+        log.info("LLM provider = ollama, chatModel={}, embedModel={}",
+                llm.getChatModel(), llm.getEmbedModel());
         return new OllamaLlmClient(llm, http);
     }
 
@@ -51,7 +51,7 @@ public class AiConfig {
     @Bean
     public OcrClient ocrClient(ConsenseProperties props, HttpSupport http) {
         ConsenseProperties.Ocr ocr = props.getOcr();
-        log.info("OCR provider = paddle, mode={}, baseUrl={}", ocr.getMode(), ocr.getBaseUrl());
+        log.info("OCR provider = paddle, mode={}", ocr.getMode());
         return new PaddleOcrClient(ocr, http);
     }
 
@@ -59,10 +59,10 @@ public class AiConfig {
     public VectorStore vectorStore(ConsenseProperties props, HttpSupport http) {
         ConsenseProperties.VectorCfg cfg = props.getVector();
         if ("memory".equalsIgnoreCase(cfg.getProvider())) {
-            log.warn("向量库使用内存实现（重启后索引丢失），baseUrl={} 未启用", cfg.getBaseUrl());
+            log.warn("向量库使用内存实现（重启后索引丢失）");
             return new InMemoryVectorStore(cfg);
         }
-        log.info("向量库 provider = qdrant, baseUrl={}, collection={}", cfg.getBaseUrl(), cfg.getCollection());
+        log.info("向量库 provider = qdrant, collection={}", cfg.getCollection());
         return new QdrantVectorStore(cfg, http);
     }
 }

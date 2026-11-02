@@ -1,10 +1,14 @@
 package com.consense.service.vetting;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -61,6 +65,23 @@ class VettingServiceProbeTest {
         assertEquals("actual suppressed",tree.path("suppressed").get(0).path("message").asText());
         assertEquals("snapshot-only failure",tree.path("suppressed").get(1).path("cause").path("message").asText());
         assertEquals(1,JsonUtils.parse(Files.readString(operations().get(0).resolve("service_probe_manifest.json"))).path("observerFailureCount").asInt());
+    }
+    @Test void observerFailureLogOmitsPrivateThrowableWhileEvidenceKeepsIt() throws Exception {
+        Logger logger=(Logger)LoggerFactory.getLogger(VettingServiceProbe.class);
+        ListAppender<ILoggingEvent> logs=new ListAppender<>();logs.start();logger.addAppender(logs);
+        try {
+            VettingServiceProbe probe=VettingServiceProbe.start(props(),run,project,"fixture");
+            probe.observe("bad_snapshot",()->{throw new IllegalStateException("SYNTHETIC_PRIVATE_OBSERVER_DETAIL");});
+            RuntimeException original=new RuntimeException("business");
+            probe.originalFailure("original_failure",original);probe.finish("aborted",original);
+            ILoggingEvent event=logs.list.stream().filter(e->e.getFormattedMessage().contains("Lifecycle observer")).findFirst().orElseThrow(AssertionError::new);
+            assertNull(event.getThrowableProxy());
+            assertFalse(event.getFormattedMessage().contains("SYNTHETIC_PRIVATE_OBSERVER_DETAIL"));
+            assertTrue(event.getFormattedMessage().contains("IllegalStateException"));
+            assertTrue(event.getFormattedMessage().contains(run));
+            JsonNode tree=event(operations().get(0),"original_failure").path("observations").path("originalFailure");
+            assertEquals("SYNTHETIC_PRIVATE_OBSERVER_DETAIL",tree.path("suppressed").get(0).path("cause").path("message").asText());
+        } finally {logger.detachAppender(logs);logs.stop();}
     }
     @Test void timingSeparatesProbeOverheadAndNeverClaimsSemanticAcceptance() throws Exception {
         VettingServiceProbe probe=VettingServiceProbe.start(props(),run,project,"fixture");long start=System.nanoTime(),before=probe.overheadNanos();

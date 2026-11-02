@@ -2,6 +2,7 @@ package com.consense.service.drafting;
 
 import com.consense.ai.AiGateway;
 import com.consense.common.BizException;
+import com.consense.common.DiagnosticSummary;
 import com.consense.common.JsonUtils;
 import com.consense.common.LocalizedText;
 import com.consense.common.PublicErrorMessages;
@@ -229,7 +230,7 @@ public class DraftingService {
     }
 
     private String uploadFailure(Exception failure) {
-        log.warn("drafting upload failed",failure);
+        log.warn("drafting upload failed: {}",DiagnosticSummary.of(failure));
         return PublicErrorMessages.from(failure,"文件处理失败，请稍后重试；若仍失败，请联系维护人员。");
     }
 
@@ -331,6 +332,23 @@ public class DraftingService {
             source.setParseCoverageJson(JsonUtils.write(DraftBusinessRules.map("templateSelection",DraftBusinessRules.map("status",pending?"identity_pending_unanalysed_source":"failed_unanalysed_source","explicitFileKey",fileKey,"familyConfirmed",false,"sourceSha256",upload.hash))));
             sourceDocumentRepository.save(source);return null;
         });
+    }
+    public boolean hasPackagedPdfReference(String projectId) {
+        projectService.require(projectId);
+        for(SourceDocument source:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE)) {
+            if(!DraftTemplateRouting.isAuxiliary(source)||!DraftPdfSccReference.SOURCE_SHA.equals(source.getSourceSha256())||source.getStoragePath()==null)continue;
+            try { if(DraftPdfSccReference.SOURCE_SHA.equals(DraftTemplateRouting.sha(storageService.read(source.getStoragePath()))))return true; }
+            catch(RuntimeException unavailable) { /* Missing originals make the reference unavailable. */ }
+        }
+        return false;
+    }
+    void savePackagedPdfAuxiliary(String projectId,MultipartFile file) throws java.io.IOException {
+        projectService.require(projectId);
+        DraftTemplateRouting.Upload upload=new DraftTemplateRouting.Upload(file,file.getBytes());
+        if(!"pdf".equals(upload.format))throw new BizException(4012,"TEMPLATE_SOURCE_INVALID");
+        preflightTemplateIdentity(upload,"SCC");
+        lockTemplateProject(projectId);
+        saveAuxiliaryTemplate(projectId,upload,existingPreferredWordHash(projectId,"SCC"));
     }
     private SourceDocument saveAuxiliaryTemplate(String projectId,DraftTemplateRouting.Upload upload,String wordHash) {
         SourceDocument document=null;
@@ -931,7 +949,7 @@ public class DraftingService {
             TransactionTemplate failureTransaction=new TransactionTemplate(transactionManager);
             failureTransaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             try{failureTransaction.execute(status->{entityManager.clear();appendExtractionReport(projectId,trace);return null;});}
-            catch(RuntimeException reportFailure){failure.addSuppressed(reportFailure);log.error("Unable to persist failed extraction report {}",trace.getRunId(),reportFailure);}
+            catch(RuntimeException reportFailure){failure.addSuppressed(reportFailure);log.error("Unable to persist failed extraction report {}: {}",trace.getRunId(),DiagnosticSummary.of(reportFailure));}
             throw failure;
         }
     }
@@ -1220,16 +1238,43 @@ public class DraftingService {
         vo.setSnapshotId(document.getSnapshotId());vo.setRuleVersion(document.getRuleVersion());
         vo.setContentEdited(Boolean.TRUE.equals(document.getContentEdited()));
         vo.setStale(document.getSnapshotId()==null||!document.getSnapshotId().equals(current)||document.getRevisionId()==null);
+        if(document.getRevisionId()==null&&Boolean.TRUE.equals(document.getGenerated()))vo.setArtifactStatus("REVISION_MISSING");
         if(document.getRevisionId()!=null) {
-            DraftArtifact artifact=artifactRepository.findById(document.getRevisionId()).orElseThrow(()->new BizException(4012,"GENERATED_ARTIFACT_MISSING: Regenerate this draft."));
+            DraftArtifact artifact=artifactRepository.findById(document.getRevisionId()).orElse(null);
+            if(artifact==null){vo.setStale(true);vo.setArtifactStatus("MISSING");}
+            else {
+            byte[] artifactBytes=artifact.getDocxBytes();
+            boolean trusted=Objects.equals(document.getProjectId(),artifact.getProjectId())&&Objects.equals(document.getFileKey(),artifact.getFileKey())
+                    &&document.getSnapshotId()!=null&&Objects.equals(document.getSnapshotId(),artifact.getSnapshotId())
+                    &&artifactBytes!=null&&artifact.getDocxSha256()!=null&&artifact.getDocxSha256().equals(DraftPdfConverter.sha256(artifactBytes));
+            if(!trusted)vo.setStale(true);
+            else if(!readableArtifactContent(artifact,artifactBytes)){vo.setStale(true);vo.setArtifactStatus("CONTENT_INVALID");}
+            else {
             vo.setRevisionId(artifact.getId());vo.setDocxSha256(artifact.getDocxSha256());vo.setSourceSha256(artifact.getSourceSha256());
             vo.setBlocks(currentBlocks(artifact));vo.setFieldImpacts((List)JsonUtils.readList(artifact.getFieldImpactsJson(),Map.class));vo.setFieldStatus("UNVERIFIED");
             vo.setBodyCleanupScopes(DraftBodyCleanup.candidates(artifact.getDocxBytes(),new DocxTemplateEditor().inspect(artifact.getDocxBytes()),DraftDocumentBindings.read(artifact.getBindingsJson())));
             vo.setBodyCleanupReceipts(DraftBodyCleanup.receipts(artifact.getLedgerJson()));
             vo.setNativeLayout(DraftNativeLayout.savedInfo(artifact.getLedgerJson(),document.getFileKey(),properties.getDrafting().getRendererKind(),artifact.getSourceSha256(),artifact.getDocxSha256()));
             DraftPdfArtifactRepository.Metadata pdf=pdfMetadata.apply(artifact.getDocxSha256());if(pdf!=null){vo.setPdfSha256(pdf.getPdfSha256());vo.setRenderProfileHash(pdf.getRenderProfileHash());}
+            }
+            }
         }
         try{vo.setUnresolved((List)JsonUtils.readList(document.getUnresolvedJson(),Map.class));}catch(RuntimeException invalidLegacy){vo.setUnresolved(Collections.emptyList());}return vo;
+    }
+    private boolean readableArtifactContent(DraftArtifact artifact,byte[] bytes) {
+        String[] json={artifact.getBlocksJson(),artifact.getFieldImpactsJson(),artifact.getBindingsJson(),artifact.getLedgerJson()};
+        for(int i=0;i<json.length;i++)if(!JsonUtils.isBlankText(json[i])) {
+            try {
+                Class<?> element=i==3?Object.class:Map.class;
+                List<?> rows=JsonUtils.mapper().readValue(json[i],JsonUtils.mapper().getTypeFactory().constructCollectionType(List.class,element));
+                if(rows==null||(i<3&&rows.contains(null)))return false;
+            } catch(com.fasterxml.jackson.core.JsonProcessingException invalid) {return false;}
+        }
+        try {new DocxTemplateEditor().inspect(bytes);return true;}
+        catch(DocxTemplateEditor.EditException invalid) {
+            if(Arrays.asList("INVALID_DOCX_PACKAGE","UNSAFE_ZIP_ENTRY","DUPLICATE_ZIP_ENTRY","DOCX_INFLATION_LIMIT","UNSUPPORTED_DOCX_CODEC").contains(invalid.getCode()))return false;
+            throw invalid;
+        }
     }
     @SuppressWarnings("unchecked")
     private List<Map<String,Object>> currentBlocks(DraftArtifact artifact) {
@@ -1345,7 +1390,7 @@ public class DraftingService {
 
     @Transactional(readOnly=true)
     public DocumentBindingsVO templateBindings(String projectId,String fileKey,String expectedSourceHash) {
-        TemplateSourceFile source=templateSource(projectId,fileKey);byte[] original=source.getBytes();String sourceHash=DraftPdfConverter.sha256(original);
+        TemplateSourceFile source=templateSource(projectId,fileKey,true);byte[] original=source.getBytes();String sourceHash=DraftPdfConverter.sha256(original);
         if(expectedSourceHash!=null&&!expectedSourceHash.equals(sourceHash))throw new BizException(4090,"SOURCE_REVISION_CONFLICT: Reload the current template.");
         if(!"application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(source.getContentType()))throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: Native template bindings require DOCX.");
         DocxTemplateEditor.TemplateIndex sourceIndex=new DocxTemplateEditor().inspect(original);
@@ -1495,6 +1540,9 @@ public class DraftingService {
     /** Original uploaded evidence; reading it never reparses or updates persisted drafting state. */
     @Transactional(readOnly=true)
     public TemplateSourceFile templateSource(String projectId,String fileKey) {
+        return templateSource(projectId,fileKey,false);
+    }
+    private TemplateSourceFile templateSource(String projectId,String fileKey,boolean requireInspection) {
         projectService.require(projectId);
         SourceDocument template=reviewedRules(projectId)?templateGraphService.selectedTemplate(projectId,fileKey):sourceDocumentRepository
                 .findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE)
@@ -1508,6 +1556,10 @@ public class DraftingService {
         else {
             try {new DocxTemplateEditor().inspect(bytes);mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document";}
             catch(DocxTemplateEditor.EditException unsupported) { /* Preserve raw evidence with a conservative MIME. */ }
+            catch(IllegalStateException unavailable) {
+                if(!"DOCX_INSPECTION_UNAVAILABLE".equals(unavailable.getMessage())||requireInspection)throw unavailable;
+                log.warn("template source format inspection unavailable: {}",DiagnosticSummary.of(unavailable));
+            }
         }
         return new TemplateSourceFile(bytes,template.getFileName(),mime);
     }
@@ -1552,7 +1604,7 @@ public class DraftingService {
 
     @Transactional(readOnly=true)
     public TemplateReadingVO templateReading(String projectId,String fileKey) {
-        TemplateSourceFile source=templateSource(projectId,fileKey);
+        TemplateSourceFile source=templateSource(projectId,fileKey,true);
         if("application/pdf".equals(source.getContentType())) {
             try(org.apache.pdfbox.pdmodel.PDDocument pdf=org.apache.pdfbox.pdmodel.PDDocument.load(source.getBytes())) {
                 if(pdf.isEncrypted()||pdf.getNumberOfPages()==0)throw new java.io.IOException("No accessible PDF pages.");
@@ -1855,7 +1907,7 @@ public class DraftingService {
             try {
                 options = JsonUtils.readList(variable.getOptionsJson(), LocalizedText.class);
             } catch (Exception e) {
-                log.debug("解析 options 失败: {}", e.getMessage());
+                log.debug("解析 options 失败: {}", DiagnosticSummary.of(e));
             }
         }
         List<String> cols = new ArrayList<>();
@@ -1863,7 +1915,7 @@ public class DraftingService {
             try {
                 cols = JsonUtils.readList(variable.getColsJson(), String.class);
             } catch (Exception e) {
-                log.debug("解析 cols 失败: {}", e.getMessage());
+                log.debug("解析 cols 失败: {}", DiagnosticSummary.of(e));
             }
         }
         List<String> affects = JsonUtils.isBlankText(variable.getAffects())
@@ -1999,13 +2051,15 @@ public class DraftingService {
     private byte[] englishWord(String fileKey,DraftArtifact artifact,Runnable guard) {
         guard.run();byte[] original=artifact.getDocxBytes().clone();byte[] result;
         if(englishFileOutput==null)throw new BizException(4012,"ENGLISH_FILE_OUTPUT_REQUIRED: Configure English translation before exporting this draft.");
-        result=englishFileOutput.docx(original,exportReference(fileKey,artifact),guard);
+        result=englishFileOutput.docx(original,exportReference(fileKey,artifact),guard,
+                DraftIncompleteNotice.trustedEnglish(DraftDocumentBindings.read(artifact.getBindingsJson())));
         guard.run();return result;
     }
     private DraftArtifact lineageArtifact(String id){return artifactRepository.findById(id).orElse(null);}
     private DraftArtifact requireArtifact(DraftDocument document) {
         DraftArtifact artifact=artifactRepository.findById(document.getRevisionId()).orElseThrow(()->new BizException(4012,"GENERATED_ARTIFACT_MISSING"));
         if(!document.getProjectId().equals(artifact.getProjectId())||!document.getFileKey().equals(artifact.getFileKey())||!artifact.getDocxSha256().equals(DraftPdfConverter.sha256(artifact.getDocxBytes())))throw new BizException(4012,"GENERATED_ARTIFACT_HASH_MISMATCH");
+        if(!Objects.equals(document.getSnapshotId(),artifact.getSnapshotId()))throw new BizException(4012,"GENERATED_ARTIFACT_SNAPSHOT_MISMATCH");
         return artifact;
     }
     private void requireRevision(DraftDocument document,String expectedRevision) {

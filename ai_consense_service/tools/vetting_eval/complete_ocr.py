@@ -6,6 +6,7 @@ from uploaded files. No confidence-based selection or cell fusion is performed.
 """
 import base64
 import copy
+from contextlib import contextmanager
 import hashlib
 import io
 import ipaddress
@@ -52,20 +53,74 @@ def _json(raw):
 
 
 class HttpCaptureFailure(OSError):
-    def __init__(self, reason, raw, status=None, complete=False):
+    def __init__(self, reason, raw, status=None, complete=False, gateway=False, wire=None, wire_truncated=False, extra_wire=None, extra_wire_truncated=False):
         super().__init__(reason)
         self.raw, self.status, self.complete = raw, status, complete
+        self.gateway = gateway
+        self.wire, self.wire_truncated = wire, wire_truncated
+        self.extra_wire, self.extra_wire_truncated = extra_wire, extra_wire_truncated
 
 
-def _request(url, body=None, timeout=None, method=None):
+def _request(url, body=None, timeout=None, method=None, *, socket_path=None, token=None, cancelled=None, dispatch_id=None, content_type=None):
+    if dispatch_id is not None and (socket_path is None or token is None or not re.fullmatch('[a-f0-9]{32}', dispatch_id)):
+        raise ValueError('valid private gateway dispatch ID required')
     target = urlsplit(url)
     deadline = time.monotonic() + timeout
     connection_type = http.client.HTTPSConnection if target.scheme == 'https' else http.client.HTTPConnection
-    connection = connection_type(target.hostname, target.port, timeout=timeout)
+    header_wire, header_phase, wire_truncated = bytearray(), [True], [False]
+    wire_received, body_end, extra_wire, extra_truncated = [0], [None], bytearray(), [False]
+    readers, deferred_close_errors = [], []
+    def capture_extra(value):
+        available = max(0, 8 * 1024 * 1024 - len(extra_wire))
+        extra_wire.extend(value[:available])
+        if len(value) > available: extra_truncated[0] = True
+    if socket_path is not None:
+        from fixed_gpu_provider import UnixConnection
+        connection = UnixConnection(socket_path, timeout)
+        import selectors
+        from fixed_gpu_client import _ResponseReader
+        class CaptureReader(_ResponseReader):
+            def readinto(self, buffer):
+                while True:
+                    if expired.is_set() or cancelled is not None and cancelled():
+                        raise TimeoutError('Parser HTTP request cancelled or deadline elapsed')
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError('Parser total HTTP deadline elapsed')
+                    if self.selector.select(min(remaining, .05)):
+                        if expired.is_set() or cancelled is not None and cancelled():
+                            raise TimeoutError('Parser HTTP request cancelled or deadline elapsed')
+                        try:
+                            count = self.sock.recv_into(buffer)
+                            if count:
+                                start = wire_received[0]
+                                wire_received[0] += count
+                                if header_phase[0]:
+                                    available = max(0, 8 * 1024 * 1024 - len(header_wire))
+                                    header_wire.extend(buffer[:min(count, available)])
+                                    if count > available: wire_truncated[0] = True
+                                elif wire_received[0] > body_end[0]:
+                                    capture_extra(buffer[max(0, body_end[0] - start):count])
+                            return count
+                        except BlockingIOError:
+                            continue
+        class CaptureSocket:
+            def __init__(self, sock): self.sock = sock
+            def makefile(self, mode):
+                reader = CaptureReader(self.sock, deadline, cancelled)
+                readers.append(reader)
+                return io.BufferedReader(reader)
+        class CaptureResponse(http.client.HTTPResponse):
+            def _close_conn(self):
+                try: super()._close_conn()
+                except Exception as error: deferred_close_errors.append(error)
+        connection.response_class = lambda sock, *args, **kwargs: CaptureResponse(CaptureSocket(sock), *args, **kwargs)
+    else:
+        connection = connection_type(target.hostname, target.port, timeout=timeout)
     sockets, chunks = [], []
     expired = threading.Event()
-    status = None
-    response = None
+    status = None; gateway = False; finished = threading.Event(); watcher = None
+    response = None; primary = None; body_complete = False; send_error = None
     def stop():
         expired.set()
         for stream in sockets:
@@ -75,29 +130,57 @@ def _request(url, body=None, timeout=None, method=None):
                 pass
     timer = threading.Timer(timeout, stop)
     timer.daemon = True
-    timer.start()
+    timer_started = False; watcher_started = False
     try:
+        timer.start(); timer_started = True
+        if cancelled is not None:
+            def watch():
+                while not finished.wait(.05):
+                    if cancelled(): stop(); return
+            watcher = threading.Thread(target=watch, daemon=True); watcher.start(); watcher_started = True
         connection.connect()
         stream = connection.sock
         sockets.append(stream)
         if expired.is_set():
             raise TimeoutError('Parser total HTTP deadline elapsed')
         data = body if isinstance(body, bytes) else _bytes(body) if body is not None else None
-        connection.request(method or ('POST' if data is not None else 'GET'),
-            target.path or '/', body=data,
-            headers={'Content-Type': 'application/octet-stream' if isinstance(body, bytes) else 'application/json'})
+        headers = {'Content-Type': content_type or ('application/octet-stream' if isinstance(body, bytes) else 'application/json')}
+        if token is not None: headers['Authorization'] = 'Bearer ' + token
+        if dispatch_id is not None: headers['X-Consense-Provider-Dispatch-Id'] = dispatch_id
+        try:
+            connection.request(method or ('POST' if data is not None else 'GET'), target.path or '/', body=data, headers=headers)
+        except BrokenPipeError as error:
+            if socket_path is None: raise
+            send_error = error
         response = connection.getresponse()
         status = response.status
+        gateway = response.getheader('X-Consense-Gateway-Error') == '1'
+        if socket_path is not None:
+            lengths = response.headers.get_all('Content-Length', [])
+            if len(lengths) != 1 or not lengths[0].isdigit() or response.getheader('Transfer-Encoding') is not None:
+                raise ValueError('Fixed GPU response requires one Content-Length and no transfer encoding')
+            header_end = header_wire.find(b'\r\n\r\n') + 4
+            first_line = bytes(header_wire).split(b'\r\n', 1)[0].split()
+            if (wire_truncated[0] or header_end < 4 or len(first_line) < 2
+                    or first_line[1] != str(status).encode() or response.length != int(lengths[0])):
+                raise ValueError('Fixed GPU response framing cannot be bound to received wire')
+            body_end[0] = header_end + int(lengths[0])
+            if wire_received[0] > body_end[0]:
+                capture_extra(header_wire[body_end[0]:])
+            header_phase[0] = False
+            header_wire.clear()
         size = 0
+        if socket_path is not None and response.length == 0 and not extra_wire and not extra_truncated[0]:
+            body_complete = True
         while True:
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or expired.is_set():
+            if socket_path is None and (remaining <= 0 or expired.is_set()):
                 raise TimeoutError('Parser total HTTP deadline elapsed')
             if response.isclosed():
                 if response.length:
                     raise OSError('Parser HTTP body ended before Content-Length')
                 break
-            stream.settimeout(remaining)
+            if socket_path is None: stream.settimeout(remaining)
             chunk = response.read1(64*1024)
             if not chunk:
                 if response.length:
@@ -107,21 +190,59 @@ def _request(url, body=None, timeout=None, method=None):
             size += len(chunk)
             if size > MAX_RESPONSE_BYTES:
                 raise ValueError('Parser response exceeds capture limit; no truncated result')
+            if socket_path is not None and response.length == 0 and not extra_wire and not extra_truncated[0]:
+                body_complete = True
+            if socket_path is not None and (expired.is_set() or time.monotonic() >= deadline or cancelled is not None and cancelled()):
+                raise TimeoutError('Parser HTTP request cancelled or deadline elapsed')
         raw = b''.join(chunks)
-        if expired.is_set():
-            raise TimeoutError('Parser total HTTP deadline elapsed')
-        if not 200 <= status < 300:
-            raise HttpCaptureFailure('Parser HTTP ' + str(status), raw, status, True)
+        if extra_wire:
+            raise ValueError('Fixed GPU response exceeded its declared body framing')
+        if expired.is_set() or time.monotonic() >= deadline or cancelled is not None and cancelled():
+            raise TimeoutError('Parser total HTTP deadline elapsed or cancelled')
+        body_complete = True
+        if gateway or not 200 <= status < 300:
+            failure = HttpCaptureFailure(('GPU gateway HTTP ' if gateway else 'Parser HTTP ') + str(status), raw, status, True, gateway)
+            if send_error is not None: raise failure from send_error
+            raise failure
+        if send_error is not None:
+            raise HttpCaptureFailure('Parser request body send failed', raw, status, True, gateway) from send_error
         return raw
-    except HttpCaptureFailure:
+    except HttpCaptureFailure as error:
+        if send_error is not None: error.request_send_error = send_error
+        primary = error
         raise
     except Exception as error:
-        raise HttpCaptureFailure(type(error).__name__ + ': ' + str(error), b''.join(chunks), status, False) from error
+        primary = HttpCaptureFailure(type(error).__name__ + ': ' + str(error), b''.join(chunks), status, body_complete, gateway,
+            bytes(header_wire) if socket_path is not None and header_phase[0] else None, wire_truncated[0],
+            bytes(extra_wire) if extra_wire else None, extra_truncated[0])
+        if send_error is not None: primary.request_send_error = send_error
+        raise primary from (send_error if send_error is not None else error)
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        timer.cancel()
-        if response is not None:
-            response.close()
-        connection.close()
+        cleanup_error = deferred_close_errors[0] if deferred_close_errors else None
+        finished.set()
+        operations = [timer.cancel]
+        if timer_started: operations.append(timer.join)
+        if watcher_started: operations.append(watcher.join)
+        if response is not None: operations.append(response.close)
+        operations.extend(reader.close for reader in readers)
+        operations.append(connection.close)
+        for operation in operations:
+            try: operation()
+            except Exception as error:
+                if cleanup_error is None: cleanup_error = error
+        if cleanup_error is None and deferred_close_errors:
+            cleanup_error = deferred_close_errors[0]
+        if cleanup_error is not None:
+            if primary is not None:
+                if send_error is not None:
+                    primary.add_note('Parser HTTP cleanup failed: ' + type(cleanup_error).__name__)
+                    raise primary from send_error
+                raise primary from cleanup_error
+            raise HttpCaptureFailure('Parser HTTP cleanup failed: ' + str(cleanup_error), b''.join(chunks),
+                                     status, body_complete, gateway) from cleanup_error
 
 
 def _config(config):
@@ -247,7 +368,7 @@ def _paddle_asset_store(provider):
     if root is None:
         return None
     address = urlsplit(provider.get('baseUrl', ''))
-    if (not isinstance(provider.get('ownedBoot'), dict) or address.scheme != 'http'
+    if (not any(isinstance(provider.get(key), dict) for key in ('ownedBoot', 'ownedFixed')) or address.scheme != 'http'
             or not address.hostname or not ipaddress.ip_address(address.hostname).is_loopback):
         raise ValueError('Native CAS references require a pinned owned local provider')
     from artifact_store import ArtifactStore
@@ -525,6 +646,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
     input_ref = store.put_bytes(raw, identity_scope='exact_parser_input_image_bytes')
     job_id = None
     job_completed = False
+    fixed_cleanup = None
+    active_lifecycle = None
     parser = 'paddleocr-vl'
     paddle_capture = None
 
@@ -534,19 +657,49 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError('Complete-parser deadline elapsed')
-        request_ref = store.put_bytes(body if isinstance(body, bytes) else _bytes(body)) if body is not None else None
+        wire_body = body if isinstance(body, bytes) else _bytes(body) if body is not None else None
+        request_ref = store.put_bytes(wire_body) if wire_body is not None else None
         attempt = {'parser': parser, 'url': url, 'method': method or ('POST' if body is not None else 'GET'),
                    'request': request_ref, 'status': 'dispatched_response_unknown'}
         attempts.append(attempt)
         provider_tasks[-1]['httpDispatches'] += 1
         try:
-            response = request(url, body=body, timeout=remaining, **({'method': method} if method else {}))
+            if config[parser].get('ownedFixed') is not None:
+                from fixed_gpu_provider import proxy_request
+                dispatch_id = uuid.uuid4().hex
+                attempt.update(sourceBodyProvided=body is not None, requestByteCount=len(wire_body or b''),
+                    requestSha256=hashlib.sha256(wire_body or b'').hexdigest(),
+                    requestContentType='application/octet-stream' if isinstance(body, bytes) else 'application/json',
+                    operationId=active_lifecycle['operationId'],
+                    operationBindingSha256=active_lifecycle['operationBindingSha256'], dispatchId=dispatch_id,
+                    workerCaptureStatus='unknown')
+                response = proxy_request(config[parser], active_lifecycle, url, body=wire_body, method=method,
+                                         content_type=attempt['requestContentType'], timeout=remaining,
+                                         cancelled=cancelled, dispatch_id=dispatch_id)
+            else:
+                response = request(url, body=body, timeout=remaining, **({'method': method} if method else {}))
         except Exception as error:
             attempt.update(status='failed', errorType=type(error).__name__,
                 httpStatus=getattr(error, 'status', None), responseComplete=getattr(error, 'complete', False))
-            if hasattr(error, 'raw'):
-                attempt['response'] = store.put_bytes(error.raw, identity_scope='actual_received_http_body_complete' if error.complete else 'actual_received_http_body_incomplete')
-                if parser == 'paddleocr-vl' and error.complete and getattr(error, 'status', None) == 503:
+            if getattr(error, 'request_send_error', None) is not None:
+                attempt.update(requestSendErrorType=type(error.request_send_error).__name__, requestSendOutcome='unknown')
+            if getattr(error, 'gateway', False):
+                attempt['gatewayError'] = True
+            if getattr(error, 'extra_wire', None) is not None:
+                attempt['proxyExtraWire'] = store.put_bytes(error.extra_wire, identity_scope='actual_proxy_http_extra_wire')
+                attempt['proxyExtraWireCaptureTruncated'] = error.extra_wire_truncated
+            if getattr(error, 'wire', None) is not None:
+                attempt['proxyWirePrefix'] = store.put_bytes(error.wire, identity_scope='actual_proxy_http_wire_prefix_incomplete')
+                attempt['proxyWireCaptureTruncated'] = error.wire_truncated
+            if hasattr(error, 'raw') and getattr(error, 'wire', None) is None:
+                if getattr(error, 'gateway', False):
+                    scope = 'actual_gateway_http_body_complete' if error.complete else 'actual_gateway_http_body_incomplete'
+                elif config[parser].get('ownedFixed') is not None and not error.complete:
+                    scope = 'actual_proxy_http_body_incomplete'
+                else:
+                    scope = 'actual_received_http_body_complete' if error.complete else 'actual_received_http_body_incomplete'
+                attempt['response'] = store.put_bytes(error.raw, identity_scope=scope)
+                if parser == 'paddleocr-vl' and error.complete and not getattr(error, 'gateway', False) and getattr(error, 'status', None) == 503:
                     try:
                         detail = _json(error.raw).get('detail', {})
                         if isinstance(detail, dict) and detail.get('kind') == 'native_capture_failed':
@@ -563,6 +716,45 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                           'request': request_ref,
                           'response': response_ref})
         return response
+
+    @contextmanager
+    def provider_session(provider_config, receipt_dir):
+        nonlocal fixed_cleanup
+        with owned_native_provider(provider_config, deadline-time.monotonic(), receipt_dir=receipt_dir,
+                **({'cancelled': cancelled} if cancelled is not None else {})) as lifecycle:
+            try:
+                yield lifecycle
+            except Exception:
+                if parser == 'mineru' and provider_config.get('ownedFixed') is not None and job_id and not job_completed:
+                    try:
+                        from fixed_gpu_provider import proxy_request
+                        dispatch_id = uuid.uuid4().hex
+                        cleanup_url = provider_config['baseUrl'].rstrip('/') + '/parse/jobs/' + job_id
+                        fixed_cleanup = {'status':'cancellation_unknown', 'method':'DELETE', 'path':urlsplit(cleanup_url).path,
+                            'operationId':lifecycle['operationId'], 'operationBindingSha256':lifecycle['operationBindingSha256'],
+                            'dispatchId':dispatch_id, 'workerCaptureStatus':'unknown', 'sourceBodyProvided':False,
+                            'requestByteCount':0, 'requestSha256':hashlib.sha256(b'').hexdigest(), 'requestContentType':'application/json'}
+                        wire = proxy_request(provider_config, lifecycle, cleanup_url,
+                                             method='DELETE', timeout=min(2., timeout), dispatch_id=dispatch_id)
+                        reference = store.put_bytes(wire, identity_scope='exact_owned_job_cancellation_response')
+                        result = _json(wire)
+                        fixed_cleanup.update(status='cancelled' if result.get('status') == 'canceled' and result.get('job_id') == job_id
+                                             else 'cancellation_not_confirmed', response=reference)
+                    except Exception as error:
+                        fixed_cleanup = fixed_cleanup or {'status':'cancellation_unknown'}
+                        fixed_cleanup.update(errorType=type(error).__name__, httpStatus=getattr(error, 'status', None))
+                        if getattr(error, 'request_send_error', None) is not None:
+                            fixed_cleanup.update(requestSendErrorType=type(error.request_send_error).__name__, requestSendOutcome='unknown')
+                        if getattr(error, 'extra_wire', None) is not None:
+                            fixed_cleanup.update(proxyExtraWire=store.put_bytes(error.extra_wire, identity_scope='actual_proxy_http_extra_wire'),
+                                                 proxyExtraWireCaptureTruncated=error.extra_wire_truncated)
+                        if getattr(error, 'wire', None) is not None:
+                            fixed_cleanup.update(proxyWirePrefix=store.put_bytes(error.wire, identity_scope='actual_proxy_http_wire_prefix_incomplete'),
+                                                 proxyWireCaptureTruncated=error.wire_truncated)
+                        if hasattr(error, 'raw') and getattr(error, 'wire', None) is None:
+                            fixed_cleanup.update(response=store.put_bytes(error.raw, identity_scope='actual_owned_job_cancellation_http_body'),
+                                                 responseComplete=error.complete)
+                raise
 
     try:
         for parser in ('paddleocr-vl', 'mineru'):
@@ -593,9 +785,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
             else:
                 task_record['mode'] = 'fresh_provider'
                 provider_config=dict(config[parser],taskBinding=native_binding)
-                with owned_native_provider(provider_config, deadline-time.monotonic(),
-                        receipt_dir=store.root / 'jobs' / uuid.uuid4().hex / parser,
-                        **({'cancelled': cancelled} if cancelled is not None else {})) as lifecycle:
+                with provider_session(provider_config, store.root / 'jobs' / uuid.uuid4().hex / parser) as lifecycle:
+                    active_lifecycle = lifecycle
                     lifecycles.append(lifecycle)
                     base = config[parser]['baseUrl'].rstrip('/')
                     if parser == 'paddleocr-vl':
@@ -752,7 +943,9 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
         submitted = any(attempt['parser'] == 'mineru' and attempt['method'] == 'POST'
                         and attempt['url'].endswith('/parse/jobs') for attempt in attempts)
         cleanup = {'status': 'not_applicable' if job_completed or not submitted else 'remote_submission_or_cancellation_unknown'}
-        if job_id and not job_completed:
+        if job_id and not job_completed and config['mineru'].get('ownedFixed') is not None:
+            cleanup = fixed_cleanup or {'status':'cancellation_unknown'}
+        elif job_id and not job_completed:
             try:
                 cancellation = request(config['mineru']['baseUrl'].rstrip('/') + '/parse/jobs/' + job_id,
                                        body=None, method='DELETE', timeout=min(2., timeout))

@@ -1,6 +1,7 @@
 package com.consense.service.seed;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.DiagnosticSummary;
 import com.consense.common.LocalizedText;
 import com.consense.domain.Project;
 import com.consense.domain.SkillDoc;
@@ -206,7 +207,7 @@ public class DemoDataInitializer implements ApplicationRunner {
             return JsonUtils.mapper().readValue(in,
                     JsonUtils.mapper().getTypeFactory().constructCollectionType(List.class, type));
         } catch (Exception e) {
-            log.warn("读取种子数据 {} 失败: {}", path, e.getMessage());
+            log.warn("读取种子数据 {} 失败: {}", path, DiagnosticSummary.of(e));
             return Collections.emptyList();
         }
     }

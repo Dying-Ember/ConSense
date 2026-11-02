@@ -25,6 +25,10 @@ public final class ProviderStreamReader {
     }
 
     public static String read(InputStream input, int cap, boolean sse, Consumer<String> event) throws IOException {
+        return read(input, cap, sse, event, false);
+    }
+
+    public static String read(InputStream input, int cap, boolean sse, Consumer<String> event, boolean gatewayEvents) throws IOException {
         if (cap <= 0 || event == null) throw new IllegalArgumentException("Stream bound and callback are required");
         ByteArrayOutputStream raw = new ByteArrayOutputStream();
         InputStream bounded = new FilterInputStream(input) {
@@ -46,6 +50,7 @@ public final class ProviderStreamReader {
         BufferedReader reader = new BufferedReader(new InputStreamReader(bounded, StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)));
         StringBuilder data = new StringBuilder();
+        String eventName = "";
         boolean first = true;
         String line;
         while ((line = reader.readLine()) != null) {
@@ -54,13 +59,22 @@ public final class ProviderStreamReader {
             first = false;
             if (!sse) { if (!line.trim().isEmpty()) event.accept(line); continue; }
             if (line.isEmpty()) {
+                if (gatewayEvents && "consense-gateway-timeout".equals(eventName)) {
+                    if ("TIMEOUT\n".contentEquals(data)) throw new java.net.SocketTimeoutException("Business gateway deadline elapsed");
+                    throw new IOException("Invalid business gateway timeout event");
+                }
                 if (data.length() > 0) { event.accept(data.substring(0, data.length() - 1)); data.setLength(0); }
+                eventName = "";
+            } else if (line.startsWith("event:")) {
+                String value = line.substring(6);
+                eventName = value.startsWith(" ") ? value.substring(1) : value;
             } else if (line.startsWith("data:") || "data".equals(line)) {
                 String value = line.length() <= 5 ? "" : line.substring(5);
                 if (value.startsWith(" ")) value = value.substring(1);
                 data.append(value).append('\n');
             }
         }
+        if (gatewayEvents && "consense-gateway-timeout".equals(eventName)) throw new IOException("Incomplete business gateway timeout event");
         if (data.length() > 0) event.accept(data.substring(0, data.length() - 1));
         return new String(raw.toByteArray(), StandardCharsets.UTF_8);
     }

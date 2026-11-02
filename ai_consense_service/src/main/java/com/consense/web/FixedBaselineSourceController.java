@@ -37,7 +37,7 @@ public class FixedBaselineSourceController {
         result.put("retrievalLiveVerified",false);
         if(fixed.enabled()) {
             JsonNode manifest=fixed.frozenManifest();
-            result.put("availableSlSources",FixedBaselineRetrievalClient.slSources(manifest));
+            result.put("availableSlSources",fixed.allSlSources());
             for(String key:Arrays.asList("version","developmentBaseline","finalParsingAccepted",
                     "businessAccepted","H800Accepted","scope","coverage","indexSignature",
                     "collection","persistedVectorCount","knownGaps"))
@@ -84,7 +84,7 @@ public class FixedBaselineSourceController {
     public ResponseEntity<ByteArrayResource> original(@RequestParam String sourceSha256) throws IOException {
         if(sourceSha256==null||!sourceSha256.matches("[a-f0-9]{64}"))
             throw new BizException(4001,"A frozen original source SHA256 is required.");
-        List<JsonNode> sources=FixedBaselineRetrievalClient.originalSources(fixed.frozenManifest());
+        List<JsonNode> sources=fixed.allOriginalSources();
         JsonNode selected=null;
         for(JsonNode descriptor:sources)if(sourceSha256.equals(descriptor.path("sha256").asText())) {
             if(selected!=null)throw new BizException(4091,"Ambiguous frozen original source identity.");
@@ -115,11 +115,13 @@ public class FixedBaselineSourceController {
     }
 
     /** Return precisely the bytes that were hashed, avoiding a check-then-stream race. */
-    static byte[] readBound(JsonNode descriptor,long maxBytes) throws IOException {
+    private byte[] readBound(JsonNode descriptor,long maxBytes) throws IOException {
         String hash=descriptor.path("sha256").asText();long count=descriptor.path("bytes").asLong(-1);
         if(!hash.matches("[a-f0-9]{64}")||count<0||count>maxBytes||!descriptor.path("path").isTextual())
             throw new BizException(4091,"Invalid frozen artifact descriptor.");
-        Path path=Paths.get(descriptor.path("path").asText());
+        Path path;
+        try { path=fixed.resolveDescriptorPath(descriptor.path("path").asText()); }
+        catch(IllegalStateException|java.nio.file.InvalidPathException invalid) { throw new BizException(4091,"Frozen source bytes changed or are unavailable.",null,invalid); }
         if(!Files.isRegularFile(path)||Files.size(path)!=count)
             throw new BizException(4091,"Frozen source bytes changed or are unavailable.");
         byte[] bytes=Files.readAllBytes(path);

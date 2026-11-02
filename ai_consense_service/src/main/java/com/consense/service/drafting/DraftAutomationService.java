@@ -115,6 +115,8 @@ public class DraftAutomationService {
             Set<String> protectedIds=protectedSources(row.getManifestJson());if(protectedIds!=null&&!protectedIds.containsAll(graphs.automationSourceDependencies(projectId,expectedDraft==null?expectedCurrent:expectedDraft)))throw conflict("当前人工图谱新增了原任务保护范围外的原件依赖，请新建识别任务；原有结果、来源选择和累计调用预算保留。");
             if(System.currentTimeMillis()-row.getCreatedAt().toEpochMilli()>=LIFETIME)throw conflict("原识别任务的6小时时限已到，不能继续；已有结果和调用记录保留。");
             if(!Objects.equals(row.getSourceStampJson(),stamp(projectId,protectedSources(row.getManifestJson()))))throw conflict("模板或来源已变化，不能继续旧任务。");
+            rejectMultipleSccContinuation(row.getManifestJson(),row.getSourceStampJson());
+            checkContinuationScc(row.getManifestJson(),row.getSourceStampJson(),graphs.selectedSccForRevision(projectId,expectedDraft==null?expectedCurrent:expectedDraft));
             if(budgetCalls(receipts(id))>=MAX_CALLS&&!(saved&&!continuationTasks(row.getManifestJson()).isEmpty()))throw conflict("原识别任务的累计调用预算已用完；已有结果保留。");
             if(saved){
                 Map<String,Object> manifest=JsonUtils.readMap(row.getManifestJson());if(!GROUP_EXECUTION.equals(manifest.get("execution")))throw conflict("此结果不是可继续的分组任务。");
@@ -444,9 +446,18 @@ public class DraftAutomationService {
     static Set<String> protectedSources(String manifest){Set<String> protectedIds=sourceSelectionIds(manifest,"protectedSourceIds");if(protectedIds!=null&&!protectedIds.containsAll(selectedSources(manifest)))throw conflict("识别任务的来源保护范围缺失。");return protectedIds;}
     private static Set<String> sourceSelectionIds(String manifest,String field){if(manifest==null)return null;Map<String,Object> selection=map(JsonUtils.readMap(manifest).get("sourceSelection"));if(selection.isEmpty())return null;if(number(selection.get("version"))!=1)throw conflict("识别任务的来源选择版本不受支持。");Set<String> ids=new TreeSet<>();for(Object raw:list(selection.get(field))){String id=text(raw);if(!(raw instanceof String)||!id.matches("[1-9][0-9]*")||!ids.add(id))throw conflict("识别任务的来源选择记录无效。");try{Long.parseLong(id);}catch(NumberFormatException invalid){throw conflict("识别任务的来源选择记录无效。");}}if(ids.isEmpty())throw conflict("识别任务的来源选择记录缺失。");return Collections.unmodifiableSet(ids);}
     static Set<String> selectSources(List<Object[]> metadata,List<String> requested){
-        Set<String> eligible=new TreeSet<>();for(Object[] row:metadata)if(row.length>=6&&"STANDARD_TEMPLATE".equals(row[1])&&Arrays.asList("NTT","SCT","SCC").contains(row[2])&&Arrays.asList("PARSED","PARTIAL").contains(row[4])&&text(row[3])!=null&&text(row[3]).matches("(?i)[0-9a-f]{64}")&&row[5] instanceof String&&!((String)row[5]).trim().isEmpty())eligible.add(text(row[0]));
-        if(requested==null){if(eligible.isEmpty())throw new BizException(4007,"请先上传并识别模板文件，再开始识别变量。");return eligible;}
-        Set<String> work=new TreeSet<>();if(requested.isEmpty()||requested.size()>MAX_TASKS)throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_INVALID");for(String id:requested){if(id==null||!id.matches("[1-9][0-9]*")||!work.add(id)||!eligible.contains(id))throw new BizException(4007,"所选来源不属于当前项目的已识别模板："+id);}return work;
+        Set<String> eligible=new TreeSet<>(),scc=new HashSet<>();for(Object[] row:metadata)if(row.length>=6&&"STANDARD_TEMPLATE".equals(row[1])&&Arrays.asList("NTT","SCT","SCC").contains(row[2])&&Arrays.asList("PARSED","PARTIAL").contains(row[4])&&text(row[3])!=null&&text(row[3]).matches("(?i)[0-9a-f]{64}")&&row[5] instanceof String&&!((String)row[5]).trim().isEmpty()){String id=text(row[0]);eligible.add(id);if("SCC".equals(row[2]))scc.add(id);}
+        Set<String> work=new TreeSet<>();if(requested==null){if(eligible.isEmpty())throw new BizException(4007,"请先上传并识别模板文件，再开始识别变量。");work.addAll(eligible);}else{if(requested.isEmpty()||requested.size()>MAX_TASKS)throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_INVALID");for(String id:requested){if(id==null||!id.matches("[1-9][0-9]*")||!work.add(id)||!eligible.contains(id))throw new BizException(4007,"所选来源不属于当前项目的已识别模板："+id);}}
+        if(work.stream().filter(scc::contains).count()>1)throw new BizException(4007,"一次识别最多选择一个 SCC 版本，请明确选择。");return work;
+    }
+    static void rejectMultipleSccContinuation(String manifest,String sourceStamp){
+        Set<String> selected=selectedSources(manifest);int count=0;
+        for(JsonNode row:JsonUtils.parse(sourceStamp))if(row.isArray()&&row.size()>2&&"STANDARD_TEMPLATE".equals(row.get(1).asText())&&"SCC".equals(row.get(2).asText())&&(selected==null||selected.contains(row.get(0).asText())))count++;
+        if(count>1)throw conflict("旧任务包含多个 SCC 版本，不能续跑；已有结果和调用记录保留。请新建识别任务并只选择一版 SCC。");
+    }
+    static void checkContinuationScc(String manifest,String sourceStamp,String graphScc){
+        if(graphScc==null)return;Set<String> selected=selectedSources(manifest);
+        for(JsonNode row:JsonUtils.parse(sourceStamp))if(row.isArray()&&row.size()>2&&"STANDARD_TEMPLATE".equals(row.get(1).asText())&&"SCC".equals(row.get(2).asText())&&(selected==null||selected.contains(row.get(0).asText()))&&!graphScc.equals(row.get(0).asText()))throw conflict("旧任务的 SCC 与当前图谱版本不一致，不能续跑；已有结果和调用记录保留。请切回原版本，或新建仅选择当前 SCC 的识别任务。");
     }
     private void updateCounts(String id,List<Map<String,Object>> receipts){change(id,row->{int completed=0,failed=0,unresolved=0,nodes=0,requirements=0;for(Map<String,Object> receipt:receipts){if(isGroup(receipt))continue;completed++;String status=text(receipt.get("status"));if(Arrays.asList("failed","blocked").contains(status))failed++;if(!Arrays.asList("completed","reviewed_no_requirement").contains(status))unresolved++;nodes+=list(receipt.get("nodes")).size();requirements+=list(receipt.get("requirements")).size();}row.setCompletedItems(completed);row.setFailedItems(failed);row.setUnresolvedItems(unresolved);row.setRequirementsCount(requirements);row.setNodesCount(nodes);});}
     private void guard(DraftAutomationRun run,boolean allowCancel){guard(new RunBinding(run),allowCancel);}

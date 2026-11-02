@@ -2,6 +2,7 @@ package com.consense.vector;
 
 import com.consense.ai.HttpSupport;
 import com.consense.common.BizException;
+import com.consense.common.DiagnosticSummary;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,7 +40,7 @@ public class QdrantVectorStore implements VectorStore {
             String url = base() + "/collections/" + cfg.getCollection();
             boolean exists;
             try {
-                http.get(url, 5000);
+                http.getWithHeaders(url, 5000, headers());
                 exists = true;
             } catch (Exception e) {
                 exists = false;
@@ -49,7 +50,7 @@ public class QdrantVectorStore implements VectorStore {
                 ObjectNode vectors = body.putObject("vectors");
                 vectors.put("size", cfg.getVectorSize());
                 vectors.put("distance", cfg.getDistance());
-                http.putJson(url, JsonUtils.write(body), cfg.getTimeoutMs());
+                http.putJsonWithHeaders(url, JsonUtils.write(body), cfg.getTimeoutMs(), headers());
                 log.info("已创建 Qdrant 集合 {} (size={}, distance={})",
                         cfg.getCollection(), cfg.getVectorSize(), cfg.getDistance());
             }
@@ -77,8 +78,8 @@ public class QdrantVectorStore implements VectorStore {
             point.getPayload().forEach((key, value) -> payload.set(key,
                     JsonUtils.mapper().valueToTree(value)));
         }
-        http.putJson(base() + "/collections/" + cfg.getCollection() + "/points?wait=true",
-                JsonUtils.write(body), cfg.getTimeoutMs());
+        http.putJsonWithHeaders(base() + "/collections/" + cfg.getCollection() + "/points?wait=true",
+                JsonUtils.write(body), cfg.getTimeoutMs(), headers());
     }
 
     @Override
@@ -109,8 +110,8 @@ public class QdrantVectorStore implements VectorStore {
             documentIds.stream().sorted().forEach(any::add);
         }
 
-        String raw = http.postJson(base() + "/collections/" + cfg.getCollection() + "/points/query",
-                JsonUtils.write(body), cfg.getTimeoutMs());
+        String raw = http.postJsonWithHeaders(base() + "/collections/" + cfg.getCollection() + "/points/query",
+                JsonUtils.write(body), cfg.getTimeoutMs(), headers());
         JsonNode result = JsonUtils.parse(raw).path("result").path("points");
         List<SearchHit> hits = new ArrayList<>();
         for (JsonNode node : result) {
@@ -128,11 +129,11 @@ public class QdrantVectorStore implements VectorStore {
             ensureCollection();
             ObjectNode body = projectFilter(projectId);
             body.put("exact", true);
-            String raw = http.postJson(base() + "/collections/" + cfg.getCollection() + "/points/count",
-                    JsonUtils.write(body), cfg.getTimeoutMs());
+            String raw = http.postJsonWithHeaders(base() + "/collections/" + cfg.getCollection() + "/points/count",
+                    JsonUtils.write(body), cfg.getTimeoutMs(), headers());
             return JsonUtils.parse(raw).path("result").path("count").asInt(0);
         } catch (Exception e) {
-            log.debug("Qdrant count 失败: {}", e.getMessage());
+            log.debug("Qdrant count 失败: {}", DiagnosticSummary.of(e));
             return 0;
         }
     }
@@ -153,10 +154,10 @@ public class QdrantVectorStore implements VectorStore {
     @Override
     public boolean available() {
         try {
-            http.get(base() + "/collections", 4000);
+            http.getWithHeaders(base() + "/collections", 4000, headers());
             return true;
         } catch (Exception e) {
-            log.debug("Qdrant 不可达: {}", e.getMessage());
+            log.debug("Qdrant 不可达: {}", DiagnosticSummary.of(e));
             return false;
         }
     }
@@ -164,11 +165,11 @@ public class QdrantVectorStore implements VectorStore {
     private void deleteWithFilter(ObjectNode body, String desc) {
         try {
             ensureCollection();
-            http.postJson(base() + "/collections/" + cfg.getCollection() + "/points/delete?wait=true",
-                    JsonUtils.write(body), cfg.getTimeoutMs());
+            http.postJsonWithHeaders(base() + "/collections/" + cfg.getCollection() + "/points/delete?wait=true",
+                    JsonUtils.write(body), cfg.getTimeoutMs(), headers());
             log.info("已删除 Qdrant 向量: {}", desc);
         } catch (Exception e) {
-            log.warn("删除 Qdrant 向量失败({}): {}", desc, e.getMessage());
+            log.warn("删除 Qdrant 向量失败({}): {}", desc, DiagnosticSummary.of(e));
         }
     }
 
@@ -184,6 +185,11 @@ public class QdrantVectorStore implements VectorStore {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
+    private Map<String,String> headers() {
+        String key = cfg.getApiKey();
+        return key == null || key.isBlank() ? Map.of() : Map.of("api-key", key);
+    }
+
     /** 把任意字符串 id 规范成确定的 UUID（Qdrant 对非 UUID 字符串会报错） */
     private String toUuid(String id) {
         try {
@@ -197,7 +203,7 @@ public class QdrantVectorStore implements VectorStore {
     public Map<String, Object> health() {
         Map<String, Object> info = new LinkedHashMap<>();
         try {
-            String raw = http.get(base() + "/collections", 4000);
+            String raw = http.getWithHeaders(base() + "/collections", 4000, headers());
             info.put("reachable", true);
             info.put("collections", JsonUtils.parse(raw).path("result").path("collections").size());
         } catch (Exception e) {

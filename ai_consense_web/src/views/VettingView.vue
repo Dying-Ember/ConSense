@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { vettingApi } from '@/api'
+import { vettingApi, type FixedSelectionState } from '@/api'
 import type { ProjectTextSearchResult, VettingParsedTextPage, VettingParsedTablesPage, VettingSourceReviewFile } from '@/api'
 import { ApiError, type PreparedDownload } from '@/api/client'
 import type { Citation, DocumentScope, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, VettingChecklist, VettingChecklistItem } from '@/api/types'
@@ -21,6 +21,8 @@ const DraftingPdfPreview = defineAsyncComponent(() => import('@/components/Draft
 const { t } = useI18n()
 const store = useAppStore()
 const projectId = computed(() => store.activeProjectId)
+const fixedSelectionState = ref<FixedSelectionState | null>(null)
+const fixedSelectionBlocked = computed(() => !!projectId.value && (fixedSelectionState.value?.projectId !== projectId.value || !['ready', 'disabled'].includes(fixedSelectionState.value?.status ?? '')))
 const router = useRouter()
 const { pick, currentKey } = useLocalized()
 
@@ -42,7 +44,7 @@ function requestStateLabel(status: string, kind: 'transportStates' | 'requestSta
 }
 
 function packetBudgetStatus(status?: string): string {
-  return status && ['budget_unknown', 'over_budget', 'observed_tokens', 'provider_estimated_fit'].includes(status) ? status : 'budget_unknown'
+  return status && ['budget_unknown', 'over_budget', 'observed_tokens', 'provider_estimated_fit', 'direct_unmeasured'].includes(status) ? status : 'budget_unknown'
 }
 function checkStateLabel(status?: string): string { return t(`vetting.checkStates.${status && ['checked_pass', 'issue', 'insufficient_evidence', 'not_completed', 'not_applicable'].includes(status) ? status : 'not_completed'}`) }
 
@@ -1163,7 +1165,7 @@ async function saveReview() {
 }
 
 async function runVetting() {
-  if (running.value || sourceRoleSaving.value !== null || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || !projectId.value) return
+  if (running.value || sourceRoleSaving.value !== null || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || !projectId.value || fixedSelectionBlocked.value) return
   const llmSelection = store.captureLlmSelection()
   const id = projectId.value
   const epoch = viewEpoch
@@ -1350,7 +1352,7 @@ function tagClass(group: string) {
         <button class="btn" type="button" :disabled="running || sourceRoleSaving !== null || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="chooseUploadFiles">
           <AppIcon name="upload" :size="15" />{{ t('vetting.actions.upload') }}
         </button>
-        <button class="btn primary" type="button" :disabled="running || projectTextSearching || sourceRoleSaving !== null || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed)" @click="runVetting">
+        <button class="btn primary" type="button" :disabled="running || projectTextSearching || sourceRoleSaving !== null || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed) || fixedSelectionBlocked" @click="runVetting">
           <AppIcon name="play" :size="15" />
           {{ reviewActive ? t('vetting.actions.running') : t('vetting.actions.run') }}
         </button>
@@ -1369,7 +1371,8 @@ function tagClass(group: string) {
     </div>
 
     <p class="small" data-generated-output-language>{{ t('common.generatedOutputLanguage') }}</p>
-    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="vetting" />
+    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="vetting" @selection-state="fixedSelectionState = $event" />
+    <p v-if="fixedSelectionBlocked" role="status" class="small">{{ sourceReaderCopy('Check and save one SL edition before starting a review.', '请先核对并保存一个 SL 版本，再开始审查。', '請先核對並儲存一個 SL 版本，再開始審查。') }}</p>
 
     <section class="surface section-gap" aria-live="polite" data-project-text-search>
       <div class="surface-body">

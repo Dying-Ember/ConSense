@@ -74,6 +74,45 @@ class VettingEvidenceRepairTest {
         assertEquals(4,wire.endpoints.stream().filter(e->e.endsWith("/input_tokens")).count());
         assertEquals(2,wire.endpoints.stream().filter(e->e.endsWith("/responses")).count());
     }
+    @ParameterizedTest @ValueSource(booleans={true,false})
+    void pendingAmendWithMissingEvidenceUsesReviewAndStillRequiresRealEvidence(boolean supported) {
+        VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();
+        JsonNode original=JsonUtils.parse(f.raw("amend",true,f.source.getContent()));
+        ((ObjectNode)original.get(0)).remove("evidence");
+        String rejected=JsonUtils.write(original);
+        String quote=supported?f.source.getContent():"AUTHORED invented quotation absent from supplied sources";
+        String repair=patch(0,"R1",quote);
+        VettingSemanticReview.Result result=f.review(f.wire(rejected,repair));
+        SemanticPacketVO packet=packet(result);
+        assertEquals(2,result.getActualGatewayCallCount());
+        assertEquals(rejected,packet.getAttempts().get(0).getRawResponse());
+        assertEquals(repair,packet.getAttempts().get(1).getRawResponse());
+        assertTrue(packet.getAttempts().get(1).getInput().path("schema").path("items").path("properties").has("recordIndex"));
+        if(supported){
+            assertEquals(1,result.getCandidates().size());
+            assertEquals("review",result.getCandidates().get(0).getBusinessDetails().getSuggestedAction());
+            assertEquals(1,result.getCandidates().get(0).getBusinessDetails().getPendingFacts().size());
+            assertTrue(result.getCandidates().get(0).getSuggestion().startsWith("[System: pending facts require review;"));
+            assertTrue(result.getCandidates().get(0).getSuggestion().endsWith(original.get(0).path("suggestion").asText()),"Original model suggestion remains visible");
+        } else {
+            assertTrue(result.getCandidates().isEmpty());
+            assertEquals("structured_output_invalid",packet.getAttempts().get(1).getStatus());
+        }
+    }
+    @ParameterizedTest @ValueSource(strings={"zh-Hans","zh-Hant"})
+    void chineseReviewKeepsTheSystemNoticeEnglishAndPreservesTheModelSuggestion(String lang) {
+        VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();
+        JsonNode original=JsonUtils.parse(f.raw("amend",true,f.source.getContent()));ObjectNode row=(ObjectNode)original.get(0);
+        row.remove("evidence");row.put("suggestion","请确认后再修改。");String raw=JsonUtils.write(original);
+        VettingRetrievalClient retrieval=org.mockito.Mockito.mock(VettingRetrievalClient.class);
+        org.mockito.Mockito.when(retrieval.retrieve(org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.eq("tender"),org.mockito.ArgumentMatchers.anyList())).thenReturn(f.corpus);
+        VettingSemanticReview service=new VettingSemanticReview(new com.consense.ai.AiGateway(org.mockito.Mockito.mock(com.consense.ai.LlmClient.class)),f.props,retrieval);
+        service.setResponsesTransport(new VettingResponsesTransport(f.props,f.wire(raw,patch(0,"R1",f.source.getContent()))));
+        VettingSemanticReview.Result result=service.reviewWithProgress(null,"AUTHORED language TEST ONLY",f.corpus,lang,(n,total,message)->{},null,()->{});
+        assertEquals(1,result.getCandidates().size());String suggestion=result.getCandidates().get(0).getSuggestion();
+        assertTrue(suggestion.startsWith("[System: pending facts require review; original model suggestion follows] "));
+        assertTrue(suggestion.endsWith("请确认后再修改。"));assertEquals(raw,packet(result).getAttempts().get(0).getRawResponse());
+    }
     @ParameterizedTest @ValueSource(strings={"missing","extra","duplicate","non_target","malformed","duplicate_key","trailing","unknown_alias","invented_quote","extra_field","full_record","null_evidence"})
     void invalidPatchesCannotPublishOrConsumeAThirdGeneration(String kind) {
         VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();
@@ -122,7 +161,7 @@ class VettingEvidenceRepairTest {
             case "null_evidence":first.putNull("evidence");break;
             case "empty_evidence":first.putArray("evidence");break;
             case "unknown_field":first.put("authority","invented");break;
-            case "business_mismatch":first.putArray("pendingFacts").add("AUTHORED unconfirmed fact");break;
+            case "business_mismatch":first.put("suggestedAction","insert");first.putArray("pendingFacts").add("AUTHORED unconfirmed fact");break;
             case "malformed_original":break;
             default:fail(kind);
         }

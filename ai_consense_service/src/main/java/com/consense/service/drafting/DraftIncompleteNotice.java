@@ -9,6 +9,7 @@ import org.apache.xmlbeans.XmlCursor;
 /** Delivery notice is added to a fresh generated copy, never to the source template. */
 final class DraftIncompleteNotice {
     static final String TITLE="INCOMPLETE DRAFT";
+    private static final String EXPLANATION="Only reviewed and adopted changes are applied. Unresolved passages retain their source wording. See the outstanding-items list at the end. This document is not complete.";
     private DraftIncompleteNotice() { }
 
     static List<String> outstanding(Map<String,Object> graph,Map<String,Object> plan) {
@@ -70,6 +71,30 @@ final class DraftIncompleteNotice {
         }
     }
 
+    /** Trust only exact English text built from the application catalogue and fixed notice reasons. */
+    static Set<String> trustedEnglish(List<Map<String,Object>> bindings) {
+        Set<String> result=new HashSet<>(Arrays.asList(TITLE,EXPLANATION,"Outstanding items"));
+        Set<String> labels=new HashSet<>(Arrays.asList("Project name and contract number","Question requiring review","Project draft","NTT document","SCT document","SCC document"));
+        collectEnglishLabels(DraftBusinessRules.catalog(),labels);
+        Set<String> reasons=new HashSet<>();for(String kind:Arrays.asList("SourceFormat","NodeReviewRequired","InputMissing","InputInvalid","OverlappingEdits","ConditionUnknown","SourceBindingRequired","GraphCycle","source_review","ManualCheck","other"))reasons.add(reason(kind));
+        for(Map<String,Object> binding:bindings){
+            if(!"delivery_notice".equals(binding.get("applicationStatus")))continue;
+            String paragraph=text(binding.get("text"));
+            if(paragraph.matches("[0-9]+\\. [0-9]+ outstanding records remain in (NTT|SCT|SCC)\\. See that document's list; the package remains incomplete\\.")){result.add(paragraph);continue;}
+            int separator=paragraph.indexOf(": ");if(separator<0)continue;
+            String title=paragraph.substring(0,separator).replaceFirst("^[0-9]+\\. ","");
+            if(title.equals(paragraph.substring(0,separator)))continue;
+            if(!Arrays.stream(title.split("; ",-1)).allMatch(labels::contains))continue;
+            if(!Arrays.stream(paragraph.substring(separator+2).split("\\n",-1)).allMatch(reasons::contains))continue;
+            result.add(paragraph);
+        }
+        return result;
+    }
+    private static void collectEnglishLabels(Object value,Set<String> labels) {
+        if(value instanceof Map){Map<String,Object> item=map(value),label=map(item.get("label"));Object english=label.get("en");if(english instanceof String&&!((String)english).isBlank())labels.add((String)english);for(Object child:item.values())collectEnglishLabels(child,labels);}
+        else if(value instanceof List)for(Object child:list(value))collectEnglishLabels(child,labels);
+    }
+
     static byte[] apply(byte[] generated,List<String> outstanding) {
         return applyWithReceipt(generated,outstanding).bytes;
     }
@@ -91,7 +116,7 @@ final class DraftIncompleteNotice {
             if(cover==null)throw new IllegalStateException("Cannot insert incomplete-draft notice");
             cover.setSpacingAfter(240);XWPFRun title=noticeRun(cover);title.setText(TITLE);title.setBold(true);title.setColor("B91C1C");title.setFontSize(20);title.addBreak();
             XWPFRun explanation=noticeRun(cover);explanation.setFontSize(12);
-            explanation.setText("Only reviewed and adopted changes are applied. Unresolved passages retain their source wording. See the outstanding-items list at the end. This document is not complete.");explanation.addBreak(BreakType.PAGE);
+            explanation.setText(EXPLANATION);explanation.addBreak(BreakType.PAGE);
             annotation(cover,bookmarkId=bookmarkId.add(java.math.BigInteger.ONE),"before",annotations);
             XWPFParagraph heading=document.createParagraph();heading.setPageBreak(true);XWPFRun headingRun=noticeRun(heading);headingRun.setText("Outstanding items");headingRun.setBold(true);headingRun.setFontSize(16);
             annotation(heading,bookmarkId=bookmarkId.add(java.math.BigInteger.ONE),"after",annotations);

@@ -1,6 +1,7 @@
 package com.consense.ai;
 
 import com.consense.common.BizException;
+import com.consense.common.DiagnosticSummary;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,8 +27,20 @@ import java.util.function.Consumer;
 @Component
 public class HttpSupport {
 
+    /** Keeps the existing message for business decisions, while exposing a safe status for logs. */
+    public static final class HttpResponseFailure extends BizException implements DiagnosticSummary.HttpStatus {
+        private final int status;
+        private final String errorKind;
+        private HttpResponseFailure(String message, int status, String errorKind) {
+            super(message); this.status = status; this.errorKind = errorKind;
+        }
+        @Override public int httpStatus() { return status; }
+        /** Only recognized service error kinds are exposed; null means unknown. */
+        public String errorKind() { return errorKind; }
+    }
+
     /** Fixed transport facts only: no provider message, URL, credential, body or external cause. */
-    public static final class ModelRequestFailure extends BizException {
+    public static final class ModelRequestFailure extends BizException implements DiagnosticSummary.HttpStatus, DiagnosticSummary.Category {
         public enum Category { HTTP, TIMEOUT, CONNECTION_FAILED, CANCELLED }
         public enum Phase { TRANSPORT, PREFLIGHT, GENERATION }
         private final Category category;
@@ -41,6 +54,8 @@ public class HttpSupport {
             return new ModelRequestFailure(category,httpStatus,selected,selected==Phase.PREFLIGHT?"Qwen usage preflight":"Qwen chat");
         }
         public String failureKind(){return category==Category.HTTP?"HTTP"+httpStatus:category.name();}
+        @Override public int httpStatus(){return httpStatus;}
+        @Override public Category diagnosticCategory(){return category;}
         public boolean isCancellation(){return category==Category.CANCELLED;}
         public String phase(){return phase.name().toLowerCase(Locale.ROOT);}
         public String description(){return description(failureKind());}
@@ -68,6 +83,25 @@ public class HttpSupport {
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
+    private static String safeErrorKind(int status, byte[] body) {
+        if (status != 503 || body == null || body.length > 4096) return null;
+        try {
+            String utf8 = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(body)).toString();
+            JsonNode root = OVERLOAD_ERROR_READER.readValue(utf8);
+            if (root == null || !root.isObject() || !root.path("detail").isObject()) return null;
+            JsonNode kind = root.path("detail").path("kind");
+            if (!kind.isTextual()) return null;
+            String value = kind.textValue();
+            return "QDRANT_BACKEND_UNAVAILABLE".equals(value) || "QDRANT_BACKEND_RELEASE_UNKNOWN".equals(value)
+                    ? value : null;
+        } catch (IOException | RuntimeException invalid) {
+            return null;
+        }
+    }
+
     private final OkHttpClient shared = new OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
@@ -77,6 +111,12 @@ public class HttpSupport {
     public String get(String url, long timeoutMs) {
         Request request = new Request.Builder().url(url).get().build();
         return execute(request, timeoutMs, 0);
+    }
+
+    public String getWithHeaders(String url, long timeoutMs, Map<String,String> headers) {
+        Request.Builder request = new Request.Builder().url(url).get();
+        headers.forEach(request::header);
+        return execute(request.build(), timeoutMs, 0);
     }
 
     public String getBounded(String url, long timeoutMs, int maxResponseBytes) {
@@ -109,6 +149,18 @@ public class HttpSupport {
         return postJson(url, json, timeoutMs, null, 0);
     }
 
+    public String postJsonCancelable(String url,String json,long timeoutMs,Consumer<Runnable> onCancel) {
+        if(onCancel==null)return postJson(url,json,timeoutMs);
+        Request request=new Request.Builder().url(url).post(RequestBody.create(json,JSON)).build();
+        return execute(request,timeoutMs,0,0,onCancel);
+    }
+
+    public String postJsonWithHeaders(String url, String json, long timeoutMs, Map<String,String> headers) {
+        Request.Builder request = new Request.Builder().url(url).post(RequestBody.create(json, JSON));
+        headers.forEach(request::header);
+        return execute(request.build(), timeoutMs, 0);
+    }
+
     /** Streaming generations are one-shot: a disconnect may conceal generated output. */
     public String postJsonStream(String url, String json, long timeoutMs, String authHeader,
                                  int cap, boolean sse, Consumer<String> event, Consumer<Runnable> onCancel) {
@@ -127,7 +179,8 @@ public class HttpSupport {
         try (Response response = call.execute()) {
             if (!response.isSuccessful()) throw modelHttpFailure(response.code(),"Streaming model");
             if (response.body() == null) throw new BizException("Streaming model returned no response body");
-            return ProviderStreamReader.read(response.body().byteStream(), cap, sse, event);
+            return ProviderStreamReader.read(response.body().byteStream(), cap, sse, event,
+                    "1".equals(response.header("X-ConSense-Gateway-Events")));
         } catch (IOException error) {
             throw modelTransportFailure(error,cancellationRequested.get(),"Streaming model");
         } finally { call.cancel(); }
@@ -144,6 +197,7 @@ public class HttpSupport {
         Call call=client.newCall(builder.build());java.util.concurrent.atomic.AtomicBoolean cancellationRequested=new java.util.concurrent.atomic.AtomicBoolean();
         Runnable cancel=()->{cancellationRequested.set(true);call.cancel();};if(onCancel!=null)onCancel.accept(cancel);
         if(Thread.currentThread().isInterrupted())cancel.run();
+        String transportStage="request_or_response_headers";
         try(Response response=call.execute()) {
             if(response.code()!=200){
                 if(authHeader!=null){
@@ -154,15 +208,32 @@ public class HttpSupport {
                 throw modelHttpFailure(response.code(),"Qwen chat");
             }
             if(response.body()==null)throw new BizException("Qwen chat response missing");
+            transportStage="response_body";
             java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
             try(java.io.InputStream input=response.body().byteStream()) {
                 byte[] buffer=new byte[8192];int count;
                 while((count=input.read(buffer))!=-1){if(count>cap-bytes.size())throw new BizException("Qwen chat response byte limit exceeded");bytes.write(buffer,0,count);}
             }
+            transportStage="response_utf8";
             return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                     .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString();
-        }catch(IOException failure){throw modelTransportFailure(failure,cancellationRequested.get(),"Qwen chat");}
+        }catch(IOException failure){
+            if(!cancellationRequested.get()&&!Thread.currentThread().isInterrupted())
+                log.warn("Bounded model transport failure: stage={}, cause={}",transportStage,safeTransportCause(failure));
+            throw modelTransportFailure(failure,cancellationRequested.get(),"Qwen chat");
+        }
         finally {call.cancel();}
+    }
+
+    private static String safeTransportCause(IOException failure) {
+        if(failure instanceof java.net.SocketTimeoutException)return "timeout";
+        if(failure instanceof java.net.UnknownHostException)return "dns";
+        if(failure instanceof java.net.ConnectException)return "connect";
+        if(failure instanceof javax.net.ssl.SSLException)return "tls";
+        if(failure instanceof java.io.EOFException)return "eof";
+        if(failure instanceof java.net.SocketException)return "socket";
+        if(failure instanceof java.nio.charset.CharacterCodingException)return "invalid_utf8";
+        return "io";
     }
 
     private static String boundedModelErrorCategory(Response response) {
@@ -286,6 +357,12 @@ public class HttpSupport {
         return execute(request, timeoutMs, 0);
     }
 
+    public String putJsonWithHeaders(String url, String json, long timeoutMs, Map<String,String> headers) {
+        Request.Builder request = new Request.Builder().url(url).put(RequestBody.create(json, JSON));
+        headers.forEach(request::header);
+        return execute(request.build(), timeoutMs, 0);
+    }
+
     public String deleteJson(String url, String json, long timeoutMs) {
         Request request = new Request.Builder()
                 .url(url)
@@ -299,6 +376,10 @@ public class HttpSupport {
     }
 
     private String execute(Request request, long timeoutMs, int maxRetry, int maxResponseBytes) {
+        return execute(request,timeoutMs,maxRetry,maxResponseBytes,null);
+    }
+
+    private String execute(Request request,long timeoutMs,int maxRetry,int maxResponseBytes,Consumer<Runnable> onCancel) {
         int attempts = Math.max(1, maxRetry + 1);
         IOException last = null;
         for (int i = 1; i <= attempts; i++) {
@@ -311,30 +392,57 @@ public class HttpSupport {
             }
             OkHttpClient client = clientBuilder.build();
             Call call = client.newCall(request);
+            java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();
+            if(onCancel!=null)onCancel.accept(()->{cancelled.set(true);call.cancel();});
             try (Response response = call.execute()) {
-                String body = maxResponseBytes > 0 ? boundedResponse(response, maxResponseBytes, call)
-                        : response.body() == null ? "" : response.body().string();
-                if (!response.isSuccessful()) {
-                    throw new BizException("调用 " + request.url().encodedPath()
-                            + " 失败: HTTP " + response.code() + " " + truncate(body));
+                if (response.isSuccessful()) {
+                    String value=maxResponseBytes > 0 ? boundedResponse(response, maxResponseBytes, call)
+                            : response.body() == null ? "" : response.body().string();
+                    if(cancelled.get())throw new java.util.concurrent.CancellationException("HTTP request cancelled");
+                    return value;
                 }
-                return body;
+                ResponseBody responseBody = response.body();
+                String body, kind;
+                if (maxResponseBytes > 0) {
+                    byte[] bytes = boundedBytes(response, maxResponseBytes, call);
+                    kind = safeErrorKind(response.code(), bytes);
+                    try (ResponseBody decoded = ResponseBody.create(bytes, responseBody == null ? null : responseBody.contentType())) {
+                        body = decoded.string();
+                    }
+                } else {
+                    kind = null;
+                    if (response.code() == 503 && responseBody != null) {
+                        okio.BufferedSource peek = responseBody.source().peek();
+                        boolean oversized = peek.request(4097);
+                        if (!oversized) kind = safeErrorKind(response.code(), peek.readByteArray());
+                    }
+                    body = responseBody == null ? "" : responseBody.string();
+                }
+                throw new HttpResponseFailure("调用 " + request.url().encodedPath()
+                        + " 失败: HTTP " + response.code() + " " + truncate(body), response.code(), kind);
             } catch (IOException e) {
+                if(cancelled.get())throw new java.util.concurrent.CancellationException("HTTP request cancelled");
                 last = e;
-                log.warn("HTTP 调用失败({}/{}): {} - {}", i, attempts, request.url(), e.getMessage());
+                log.warn("HTTP 调用失败({}/{}): {}", i, attempts, e.getClass().getSimpleName());
             }
         }
         throw new BizException("无法连接 " + request.url().host() + ":" + request.url().port()
                 + "，请确认本地服务已启动（" + (last == null ? "unknown" : last.getMessage()) + "）");
     }
 
-    private static String boundedResponse(Response response, int cap, Call call) throws IOException {
+    private static byte[] boundedBytes(Response response, int cap, Call call) throws IOException {
         ResponseBody body = response.body();
-        if (body == null) return "";
+        if (body == null) return new byte[0];
         if (body.contentLength() > cap) { call.cancel(); throw new BizException("HTTP response exceeds " + cap + " bytes"); }
         byte[] bytes = body.byteStream().readNBytes(cap + 1);
         if (bytes.length > cap) { call.cancel(); throw new BizException("HTTP response exceeds " + cap + " bytes"); }
-        try (ResponseBody bounded = ResponseBody.create(bytes, body.contentType())) { return bounded.string(); }
+        return bytes;
+    }
+
+    private static String boundedResponse(Response response, int cap, Call call) throws IOException {
+        ResponseBody body = response.body();
+        byte[] bytes = boundedBytes(response, cap, call);
+        try (ResponseBody bounded = ResponseBody.create(bytes, body == null ? null : body.contentType())) { return bounded.string(); }
     }
 
     private String truncate(String text) {

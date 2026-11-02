@@ -1,8 +1,8 @@
 import type { DraftDocumentBinding, DraftDocumentBindings, DraftBindingPoint } from '@/api/types'
+import { sha256Bytes } from '@/api/sha256Bytes'
 
 export async function pdfSha256(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  return (await sha256Bytes(await blob.arrayBuffer())).hex
 }
 
 export function matchesBindingPdf(bundle: DraftDocumentBindings, fileKey: string, view: 'source' | 'result', pdfHash: string): boolean {

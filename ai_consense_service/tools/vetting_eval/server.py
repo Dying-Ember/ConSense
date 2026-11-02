@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
+import hmac
 import io
 import inspect
 import json
+import math
 import os
 from pathlib import Path
 import re
+import stat
 import threading
 import time
 import uuid
 import sys
+import weakref
 from typing import Annotated
 
 HERE = Path(__file__).resolve().parent
@@ -34,6 +39,7 @@ if MODEL_DTYPE not in {'float32', 'float16'}:
 SERIAL_OFFLOAD = os.environ.get('CONSENSE_MODEL_SERIAL_OFFLOAD', '1') == '1'
 _windows_runtime = None
 _window_observer = None
+_request_evidence = None
 
 def window_runtime():
     global _windows_runtime
@@ -105,13 +111,27 @@ LOCK = threading.RLock()
 _embedding = _reranker = _ocr = _database = None
 _ocr_recipe_sha256 = None
 _database_configuration = None
+_database_binding = None
+_database_release_unknown = False
 _projects = {}
+_missing_index_history = set()
 _migrated_index = None
 _selected_device = None
+_remote_models = None
+_business_config = None
 app = FastAPI(title='ConSense local vetting models', version='1.0.0')
 
 
+def forget_project(key):
+    with LOCK:
+        if key in _projects:
+            _missing_index_history.add(key)
+        _projects.pop(key, None)
+
+
 def gpu_coordinator():
+    if _remote_models is not None:
+        return None
     path = str(HERE.parent / 'offline_delivery')
     if path not in sys.path:
         sys.path.insert(0, path)
@@ -148,6 +168,7 @@ class IndexRequest(BaseModel):
     projectId: int | str
     chunks: list[Chunk] = Field(max_length=50000)
     rebuild: bool = Field(default=False, strict=True)
+    initializationDecision: bool = Field(default=False, strict=True)
 
 
 class RetrieveRequest(BaseModel):
@@ -303,22 +324,134 @@ def rerank_candidates(query, candidates):
 
 
 def database():
-    global _database, _database_configuration
-    from migrated_qdrant_index import configured
+    global _database, _database_configuration, _database_binding, _database_release_unknown
+    from migrated_qdrant_index import configured, ENV
+    from migration_project_registry import REGISTRY
     from token_windows import fail
-    current = (str(STATE), os.environ.get('CONSENSE_QDRANT_URL'), os.environ.get('CONSENSE_QDRANT_API_KEY'))
-    if _database is None:
-        from qdrant_backend import connect
-        _database = connect(STATE, os.environ)
-        _database_configuration = current
-    else:
-        fail(_database_configuration == current or (_database_configuration is None and not configured(os.environ)),
-             'QDRANT_BACKEND_CONFIG_CHANGED', 'Cached Qdrant backend configuration differs; start a new runtime')
-    return _database
+    names = ('CONSENSE_QDRANT_URL', 'CONSENSE_QDRANT_API_KEY', ENV, ENV + '_SHA256', REGISTRY, REGISTRY + '_SHA256')
+    def configuration():
+        return {name: os.environ[name] for name in names if name in os.environ}
+    with LOCK:
+        fail(not _database_release_unknown, 'QDRANT_BACKEND_RELEASE_UNKNOWN', 'Previous Qdrant client release is unknown')
+        snapshot, state = configuration(), STATE
+        current = (str(state), snapshot.get('CONSENSE_QDRANT_URL'), snapshot.get('CONSENSE_QDRANT_API_KEY'))
+        if _database is None:
+            from qdrant_backend import connect
+            try:
+                client = connect(state, snapshot)
+            except Exception:
+                raise WindowError('QDRANT_BACKEND_UNAVAILABLE', 'Qdrant backend is unavailable') from None
+            try:
+                fail(str(STATE) == str(state) and configuration() == snapshot,
+                     'QDRANT_BACKEND_CONFIG_CHANGED', 'Qdrant backend configuration changed during connection')
+                _database, _database_configuration, _database_binding = client, current, (client, current)
+            except BaseException as error:
+                _database, _database_configuration, _database_binding = None, None, None
+                try:
+                    client.close()
+                except BaseException as close_error:
+                    _database_release_unknown = True
+                    if not isinstance(close_error, Exception):
+                        raise
+                    raise WindowError('QDRANT_BACKEND_RELEASE_UNKNOWN', 'Qdrant client release is unknown') from None
+                if not isinstance(error, Exception):
+                    raise
+                raise WindowError('QDRANT_BACKEND_CONFIG_CHANGED', 'Qdrant backend configuration changed during connection') from None
+        else:
+            fail(_database_configuration == current or (_database_configuration is None and not configured(snapshot)
+                 and REGISTRY not in snapshot and REGISTRY + '_SHA256' not in snapshot),
+                 'QDRANT_BACKEND_CONFIG_CHANGED', 'Cached Qdrant backend configuration differs; start a new runtime')
+        return _database
 
 
 def metadata_path(key):
     return STATE / 'projects' / (digest(key) + '.json')
+
+
+def request_evidence():
+    global _request_evidence
+    from oer_request_evidence import RequestEvidence
+    root = STATE / 'run-evidence'
+    with LOCK:
+        if _request_evidence is None:
+            _request_evidence = RequestEvidence(root)
+        elif _request_evidence.root != root:
+            raise WindowError('INDEX_PUBLICATION_DURABILITY_UNKNOWN', 'Request journal state root changed')
+        return _request_evidence
+
+
+def verify_project_publication(key, stored):
+    journal = request_evidence()
+    path = metadata_path(key)
+    # A pending publication blocks even an absent or old metadata file.
+    journal.verify_index(path, None, key)
+    if stored is None:
+        return
+    if 'publicationJournal' in stored:
+        journal.verify_index(path, stored, key)
+    elif _remote_models is not None:
+        raise WindowError('INDEX_PUBLICATION_DURABILITY_UNKNOWN',
+                          'Remote index without a verified publication journal is not accepted')
+
+
+def recover_project_publication_for_read(key):
+    """Recover a published ordinary index only inside its request-owned source frame."""
+    if _remote_models is None:
+        return
+    journal = request_evidence()
+    # Serialize the checked transition with the journal's existing recovery lock.
+    with journal._lock:
+        return _recover_project_publication_for_read_locked(key, journal)
+
+
+def _recover_project_publication_for_read_locked(key, journal):
+    if str(key) in journal._verified:
+        # Each request using a recovered publication owns its own frame. A
+        # later frame failure must revoke the earlier in-process verification.
+        runtime = window_runtime()
+        registry = getattr(runtime, 'source_registry', None)
+        frame_var = getattr(registry, '_validation_frame', None)
+        frame = frame_var.get() if frame_var is not None else None
+        if isinstance(frame, dict):
+            from contextlib import ExitStack
+            if (not isinstance(frame.get('leaseStack'), ExitStack)
+                    or frame.get('guard') != runtime.algorithms):
+                raise WindowError('INDEX_PUBLICATION_DURABILITY_UNKNOWN',
+                                  'Recovery requires the current source-owned read frame')
+            frame.setdefault('recoveredIndexKeys', set()).add(str(key))
+        return
+    path = metadata_path(key)
+    if not path.exists() and not path.is_symlink():
+        return
+    from contextlib import ExitStack
+    runtime = window_runtime()
+    registry = getattr(runtime, 'source_registry', None)
+    frame_var = getattr(registry, '_validation_frame', None)
+    frame = frame_var.get() if frame_var is not None else None
+    if (not isinstance(frame, dict) or not isinstance(frame.get('leaseStack'), ExitStack)
+            or frame.get('guard') != runtime.algorithms):
+        journal.verify_index(path, None, key)
+        raise WindowError('INDEX_PUBLICATION_DURABILITY_UNKNOWN',
+                          'Recovery requires the current source-owned read frame')
+    from migration_project_registry import runtime_route
+    if runtime_route(sys.modules[__name__], key, runtime)['mode'] != 'ordinary':
+        return
+    if path.is_symlink():
+        raise WindowError('INDEX_PUBLICATION_DURABILITY_UNKNOWN', 'Index metadata path is unsafe')
+    try:
+        metadata = json.loads(path.read_bytes())
+    except (OSError, ValueError) as error:
+        raise WindowError('INDEX_PUBLICATION_DURABILITY_UNKNOWN',
+                          'Index metadata cannot be inspected for recovery') from error
+    if not isinstance(metadata, dict) or 'publicationJournal' not in metadata:
+        return
+    frame.setdefault('recoveredIndexKeys', set()).add(str(key))
+    journal.recover_index(path, metadata, key)
+
+
+def require_project_metadata_for_load(key):
+    if _remote_models is not None:
+        request_evidence().require_verified_index_for_load(key)
 
 
 def signature(chunks):
@@ -327,6 +460,7 @@ def signature(chunks):
 
 def load_project_metadata(key):
     """Reuse resident parents; changed records decode once and owner exit hashes once."""
+    recover_project_publication_for_read(key)
     path = metadata_path(key)
     metrics = {'bytesRead': 0, 'jsonDecodes': 0}
     registry = getattr(window_runtime(), 'source_registry', None)
@@ -349,9 +483,12 @@ def load_project_metadata(key):
         record = frame['indexMetadata'][key]
         if stamp() != record['stamp']:
             raise HTTPException(409, 'Index metadata changed during this operation')
+        verify_project_publication(key, record['stored'])
         return record['stored']
+    verify_project_publication(key, None)
     if not path.exists():
         raise HTTPException(404, 'Project is not indexed')
+    require_project_metadata_for_load(key)
     before_stamp = stamp()
     stored = _projects.get(key)
     expected = stored.get('_metadataFileIdentity') if stored is not None else None
@@ -364,6 +501,7 @@ def load_project_metadata(key):
         metrics['jsonDecodes'] += 1
     if stamp() != before_stamp:
         raise HTTPException(409, 'Index metadata changed while loading')
+    verify_project_publication(key, stored)
     stored['_metadataFileIdentity'] = expected
     stored['_metadataFileStamp'] = before_stamp
     _projects[key] = stored
@@ -375,14 +513,37 @@ def load_project_metadata(key):
 
 def read_project(key):
     global _migrated_index
-    from migrated_qdrant_index import MigratedIndex, configured
-    if configured(os.environ) or _migrated_index is not None:
+    from migration_project_registry import runtime_route, REGISTRY
+    from migrated_qdrant_index import configured
+    from token_windows import fail
+    try:
+        if REGISTRY in os.environ or REGISTRY + '_SHA256' in os.environ or configured(os.environ) or _migrated_index is not None:
+            verify_project_publication(key, None)
+        runtime = window_runtime()
+        route = runtime_route(sys.modules[__name__], key, runtime)
+    except WindowError as error:
+        raise HTTPException(409, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
+    if route['mode'] != 'ordinary':
         try:
-            if _migrated_index is None:
-                _migrated_index = MigratedIndex(os.environ)
-            return _migrated_index.read(key, window_runtime(), database)
+            registry = getattr(runtime, 'source_registry', None)
+            frame_var = getattr(registry, '_validation_frame', None)
+            frame = frame_var.get() if frame_var is not None else None
+            record = frame.get('indexMetadata', {}).get(key) if isinstance(frame, dict) else None
+            reader = record.get('migrationReader') if isinstance(record, dict) else None
+            fail(isinstance(record, dict) and reader is not None
+                 and (route['mode'] == 'migrated' or reader is _migrated_index)
+                 and record.get('stored') is reader.metadata
+                 and record.get('migrationSourceScopeVerified') is True
+                 and callable(record.get('leaseCheck')),
+                 'MIGRATED_INDEX_SOURCE_FRAME_REQUIRED',
+                 'Migrated reads require a verified source frame and isolation lease')
+            record['leaseCheck']()
+            stored = reader.read(key, runtime, database)
+            record['migrationObservation'] = getattr(reader, 'last_observation', None)
+            return stored
         except WindowError as error:
-            raise HTTPException(409, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
+            raise HTTPException(503 if error.kind in ('QDRANT_BACKEND_UNAVAILABLE', 'QDRANT_BACKEND_RELEASE_UNKNOWN') else 409,
+                                {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
     stored = load_project_metadata(key)
     if stored.get('projectId') != key or not window_runtime().signature_matches(stored.get('signature',{}),stored['chunks']):
         raise HTTPException(409, 'Index signature changed; re-index current documents')
@@ -416,12 +577,12 @@ def health():
     coordinator = gpu_coordinator()
     if coordinator is not None:
         return coordinator.health(server=sys.modules[__name__])
-    selected_device = device()
+    selected_device = 'cuda' if _remote_models is not None else device()
     cuda_allocated = None
-    if selected_device == 'cuda':
+    if selected_device == 'cuda' and _remote_models is None:
         import torch
         cuda_allocated = round(torch.cuda.memory_allocated()/2**20, 1)
-    return {'status': 'ok', 'mode': 'server' if os.environ.get('CONSENSE_QDRANT_URL') else 'local', 'device': selected_device, 'offline': OFFLINE,
+    return {'status': 'ok', 'mode': 'remote-model-coordinator' if _remote_models is not None else ('server' if os.environ.get('CONSENSE_QDRANT_URL') else 'local'), 'device': selected_device, 'offline': OFFLINE,
         'models': MODELS, 'maxTokens': MODEL_SETTINGS['embedding']['maxTokens'],
         'batchSize': MODEL_SETTINGS['embedding']['batchSize'],
         'runtime': {kind: model_runtime(kind) for kind in ('embedding', 'reranker')},
@@ -429,6 +590,8 @@ def health():
         'indexSignatureVersion': window_runtime().signature_version(),
         'loaded': {'embedding': _embedding is not None, 'reranker': _reranker is not None, 'ocr': _ocr is not None},
         'cudaAllocatedMiB': cuda_allocated,
+        **({'remoteModelReady': False, 'deviceScope': 'configured remote CUDA recipe; not a local GPU observation',
+            'runtimeIdentityScope': 'configured remote recipe; each operation verifies the actual worker'} if _remote_models is not None else {}),
         'ocrEngine': 'Complete Paddle/MinerU API candidates' if os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG') else 'RapidOCR CPU baseline',
         'limitations': ['OCR does not interpret table cells or deletion state',
             'Source-bound windows count query/special tokens; oversized queries fail without silent clipping',
@@ -436,8 +599,64 @@ def health():
             'Run one server worker with one Qdrant storage owner']}
 
 
+def _trusted_business_configuration():
+    return _business_config
+
+
+def _fixed_business_configuration(request):
+    config = _trusted_business_configuration()
+    if not isinstance(config, dict):
+        raise HTTPException(503, 'Trusted business operation configuration is unavailable')
+    config = dict(config)
+    model, token, profile, execution, timeout = (config.get(name) for name in
+        ('model', 'token', 'profileSha256', 'executionSha256', 'timeout'))
+    verifier = config.get('verifyRelease')
+    client = config.get('client', getattr(_remote_models, 'client', None))
+    if (not isinstance(model, str) or not model.strip() or not isinstance(token, str) or not token
+            or not isinstance(profile, str) or re.fullmatch('[a-f0-9]{64}', profile) is None
+            or not isinstance(execution, str) or re.fullmatch('[a-f0-9]{64}', execution) is None
+            or type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 86400
+            or not callable(verifier) or client is None
+            or getattr(client, 'profile_sha256s', {}).get('business-llm') != profile):
+        raise HTTPException(503, 'Trusted business operation configuration is unavailable')
+    if request is not None:
+        supplied = request.headers.get('authorization', '')
+        if not hmac.compare_digest(supplied.encode('utf-8'), ('Bearer ' + token).encode('utf-8')):
+            raise HTTPException(401, 'Business authorization is required')
+        allowed = config.get('allowedPaths')
+        if allowed is not None and (not isinstance(allowed, frozenset)
+                or not allowed or not allowed <= {'/v1/models', '/v1/chat/completions',
+                                                    '/v1/responses', '/v1/responses/input_tokens'}):
+            raise HTTPException(503, 'Trusted business route allowlist is unavailable')
+        if allowed is not None and request.url.path not in allowed:
+            raise HTTPException(404, 'Business profile route is unavailable')
+        saved = request.scope.get('consense.business.preflight')
+        if saved is not None and not _business_snapshot_matches(saved, config, client):
+            raise HTTPException(503, 'Trusted business operation configuration changed')
+    return config, client
+
+
+def _business_configuration_snapshot(config, client):
+    return {**{name: config[name] for name in ('model', 'profileSha256', 'executionSha256', 'timeout')},
+            'allowedPaths': config.get('allowedPaths'),
+            'verifier': config['verifyRelease'], 'client': weakref.ref(client)}
+
+
+def _business_snapshot_matches(saved, config, client):
+    return (isinstance(saved, dict)
+            and all(saved.get(name) == config[name] for name in ('model', 'profileSha256', 'executionSha256', 'timeout'))
+            and saved.get('allowedPaths') == config.get('allowedPaths')
+            and saved.get('verifier') is config['verifyRelease']
+            and isinstance(saved.get('client'), weakref.ReferenceType) and saved['client']() is client)
+
+
 @app.get('/v1/models')
-def native_business_models():
+def native_business_models(request: Request):
+    if _remote_models is not None or 'consense.business.preflight' in request.scope:
+        config, _ = _fixed_business_configuration(request)
+        return {'object': 'list', 'data': [{'id': config['model'], 'object': 'model',
+                                            'owned_by': 'configured-offline-profile'}],
+                'modelReady': False, 'targetAccepted': False}
     coordinator = gpu_coordinator()
     if coordinator is None:
         raise HTTPException(404, 'Native business Job coordinator is not configured')
@@ -607,19 +826,27 @@ def native_pdf_table_candidates(file: Annotated[UploadFile, File()],
 
 @app.post('/index')
 def index(request: IndexRequest):
+    from migration_project_registry import require_writable, REGISTRY
     from migrated_qdrant_index import configured
-    if configured(os.environ) or _migrated_index is not None:
+    if REGISTRY not in os.environ and REGISTRY + '_SHA256' not in os.environ and (configured(os.environ) or _migrated_index is not None):
         raise HTTPException(409, 'Pinned migrated Server index is read-only')
+    try:
+        require_writable(sys.modules[__name__], project_key(request.projectId), window_runtime())
+    except WindowError as error:
+        raise HTTPException(409, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
     coordinator = gpu_coordinator()
     if coordinator is not None:
-        status, value = coordinator.execute('document-embedding', request.model_dump(mode='json'), server=sys.modules[__name__])
+        if request.initializationDecision:
+            raise HTTPException(409, 'Initialization requires the local index runtime')
+        status, value = coordinator.execute('document-embedding', request.model_dump(mode='json', exclude={'initializationDecision'}), server=sys.modules[__name__])
         if status != 200:
             raise HTTPException(status, value)
         return value
     try:
         return window_runtime().index(request)
     except WindowError as error:
-        raise HTTPException(422, {'kind': error.kind, 'message': str(error), 'metadata': error.metadata}) from error
+        raise HTTPException(503 if error.kind in ('SOURCE_REQUEST_CANCELLED','INDEX_PUBLICATION_DURABILITY_UNCERTAIN','INDEX_PUBLICATION_DURABILITY_UNKNOWN','QDRANT_BACKEND_UNAVAILABLE','QDRANT_BACKEND_RELEASE_UNKNOWN') else 422,
+                            {'kind': error.kind, 'message': str(error), 'metadata': error.metadata}) from error
 
 
 @app.post('/retrieve')
@@ -630,9 +857,19 @@ def retrieve(request: RetrieveRequest):
         if status != 200:
             raise HTTPException(status, value)
         return value
-    result = window_runtime().retrieve(request)
-    if _migrated_index is not None:
-        observed = _migrated_index.last_observation
+    try:
+        result = window_runtime().retrieve(request)
+    except WindowError as error:
+        if error.kind not in ('INDEX_PUBLICATION_DURABILITY_UNKNOWN', 'QDRANT_BACKEND_UNAVAILABLE', 'QDRANT_BACKEND_RELEASE_UNKNOWN'):
+            raise
+        raise HTTPException(503, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
+    runtime = window_runtime()
+    registry = getattr(runtime, 'source_registry', None)
+    frame_var = getattr(registry, '_validation_frame', None)
+    frame = frame_var.get() if frame_var is not None else None
+    record = frame.get('indexMetadata', {}).get(project_key(request.projectId)) if isinstance(frame, dict) else None
+    observed = record.get('migrationObservation') if isinstance(record, dict) else None
+    if observed is not None:
         result['indexAccess'] = {'mode':'pinned-migrated-server-read-only', 'readOnly':True,
                                 'migrationReceiptSha256':observed['receipt']['sha256'],
                                 'runtimeCompatibilityVerified':False,
@@ -640,10 +877,303 @@ def retrieve(request: RetrieveRequest):
     return result
 
 
+class _FixedBusinessResponse(Response):
+    """One ASGI receive owner controls the lifetime of the bounded client call."""
+    def __init__(self, client, config, path, raw, streaming, deadline):
+        super().__init__()
+        self.client, self.config, self.path, self.raw = client, config, path, raw
+        self.streaming, self.deadline = streaming, deadline
+        self.exit_receipt = {'status': 'release_unknown', 'operationId': None}
+
+    async def __call__(self, scope, receive, send):
+        cancelled = threading.Event()
+        async_cancelled = asyncio.Event()
+        session = None
+        operation = None
+        started = False
+        send_uncertain = False
+        def stopped():
+            return cancelled.is_set() or time.monotonic() >= self.deadline
+        def remaining():
+            value = self.deadline - time.monotonic()
+            if value <= 0 or cancelled.is_set():
+                raise TimeoutError('Business request cancelled or expired')
+            return value
+        async def watch():
+            while True:
+                event = await receive()
+                if event['type'] == 'http.disconnect':
+                    cancelled.set()
+                    async_cancelled.set()
+                    return
+        async def wait_operation(task, final_response=False):
+            interrupted = asyncio.create_task(async_cancelled.wait())
+            try:
+                done, _ = await asyncio.wait((task, interrupted), timeout=remaining(),
+                                             return_when=asyncio.FIRST_COMPLETED)
+                # Uvicorn may report disconnect after accepting the final response body.
+                finished_response = final_response and task in done and not task.cancelled() and task.exception() is None
+                if task not in done or (stopped() and not finished_response):
+                    cancelled.set()
+                    raise TimeoutError('Business operation cancelled or expired')
+                return task.result()
+            finally:
+                interrupted.cancel()
+        watcher = asyncio.create_task(watch())
+        claims = {'path': self.path, 'bodySha256': hashlib.sha256(self.raw).hexdigest(),
+                  'profileSha256': self.config['profileSha256'], 'executionSha256': self.config['executionSha256'],
+                  'model': self.config['model']}
+        async def verified(receipt, expected_operation=None):
+            operation_id = receipt.get('operationId') if isinstance(receipt, dict) else None
+            if (stopped() or not isinstance(operation_id, str) or re.fullmatch('[a-f0-9]{32}', operation_id) is None
+                    or (expected_operation is not None and expected_operation != operation_id)):
+                return False
+            proof = asyncio.create_task(asyncio.to_thread(self.config['verifyRelease'], receipt,
+                                                         {**claims, 'operationId': operation_id}))
+            proof.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            interrupted = asyncio.create_task(async_cancelled.wait())
+            try:
+                done, _ = await asyncio.wait((proof, interrupted), timeout=remaining(),
+                                             return_when=asyncio.FIRST_COMPLETED)
+                return proof in done and not stopped() and proof.result() is True and not stopped()
+            finally:
+                interrupted.cancel()
+        def safe_close(current):
+            try:
+                current.close()
+            except BaseException:
+                pass
+        def open_stream():
+            current = self.client.start_business(self.path, self.raw, remaining(), stopped)
+            try:
+                if stopped():
+                    raise TimeoutError('Business request cancelled after admission')
+                status, headers = current.open()
+                if stopped():
+                    raise TimeoutError('Business request cancelled while opening')
+                return current, status, headers
+            except BaseException:
+                safe_close(current)
+                raise
+        def next_chunk(iterator):
+            try:
+                return next(iterator)
+            except StopIteration:
+                return None
+        async def do_send(event):
+            nonlocal started, send_uncertain
+            if stopped():
+                if async_cancelled.is_set():
+                    raise asyncio.CancelledError()
+                raise TimeoutError('Business response deadline elapsed')
+            if event['type'] == 'http.response.start':
+                started = True
+            sending = asyncio.create_task(send(event))
+            sending.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            try:
+                await wait_operation(sending, event['type'] == 'http.response.body' and not event.get('more_body', False))
+            except TimeoutError:
+                send_uncertain = True
+                sending.cancel()
+                if async_cancelled.is_set():
+                    raise asyncio.CancelledError() from None
+                raise TimeoutError('Business response send deadline elapsed') from None
+            except asyncio.CancelledError:
+                sending.cancel()
+                raise
+            except OSError:
+                cancelled.set()
+                async_cancelled.set()
+                raise asyncio.CancelledError() from None
+        try:
+            if not self.streaming:
+                operation = asyncio.create_task(asyncio.to_thread(self.client.call_business,
+                    self.path, self.raw, remaining(), stopped))
+                operation.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+                status, headers, body, receipt = await wait_operation(operation)
+                if not await verified(receipt):
+                    raise ValueError('Independent business release is unavailable')
+                from request_stage import MAX_BODY
+                content_type = headers.get('content-type', 'application/octet-stream') if isinstance(headers, dict) else None
+                if (type(status) is not int or not 200 <= status <= 599 or not isinstance(body, bytes)
+                        or len(body) > MAX_BODY or not isinstance(content_type, str)
+                        or any(c in content_type for c in '\r\n\x00')):
+                    raise ValueError('Invalid bounded business response')
+                await do_send({'type': 'http.response.start', 'status': status,
+                    'headers': [(b'content-type', content_type.encode('latin-1'))]})
+                await do_send({'type': 'http.response.body', 'body': body, 'more_body': False})
+                return
+            operation = asyncio.create_task(asyncio.to_thread(open_stream))
+            operation.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            session, status, headers = await wait_operation(operation)
+            operation = None
+            content_type = headers.get('content-type', 'application/octet-stream')
+            if (type(status) is not int or not 200 <= status <= 599 or not isinstance(content_type, str)
+                    or any(c in content_type for c in '\r\n\x00')):
+                raise ValueError('Invalid business stream headers')
+            if 200 <= status < 300 and content_type.lower().split(';', 1)[0].strip() != 'text/event-stream':
+                raise ValueError('Business streaming response requires SSE')
+            iterator = session.read()
+            withheld_error = []
+            upstream_pending = b''
+            terminal_verified = False
+            size = 0
+            if 200 <= status < 300:
+                await do_send({'type': 'http.response.start', 'status': status,
+                    'headers': [(b'content-type', content_type.encode('latin-1')),
+                                (b'x-consense-gateway-events', b'1')]})
+            while True:
+                operation = asyncio.create_task(asyncio.to_thread(next_chunk, iterator))
+                operation.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+                chunk = await wait_operation(operation)
+                operation = None
+                if chunk is None:
+                    break
+                from request_stage import MAX_BODY
+                if not isinstance(chunk, bytes) or size + len(chunk) > MAX_BODY:
+                    raise ValueError('Business response exceeds its finite bound')
+                size += len(chunk)
+                if session.finished:
+                    if not await verified(session.exit_receipt, session.operation):
+                        raise ValueError('Independent business release is unavailable')
+                    terminal_verified = True
+                if 200 <= status < 300:
+                    upstream_pending += chunk
+                    while True:
+                        boundary = re.search(rb'\r\n\r\n|\n\n|\r\r', upstream_pending)
+                        if not boundary:
+                            break
+                        frame, upstream_pending = upstream_pending[:boundary.end()], upstream_pending[boundary.end():]
+                        if re.search(rb'(?:^|[\r\n])(?:\xef\xbb\xbf)?event:[ \t]*consense-gateway-timeout[ \t]*(?:[\r\n]|$)', frame):
+                            raise ValueError('Reserved gateway event received from upstream')
+                        await do_send({'type': 'http.response.body', 'body': frame, 'more_body': True})
+                else:
+                    withheld_error.append(chunk)
+            if not session.finished or (200 <= status < 300 and not terminal_verified):
+                raise ValueError('Business stream ended without a verified terminal')
+            if 200 <= status < 300 and upstream_pending:
+                raise ValueError('Business stream ended with an incomplete SSE frame')
+            if not 200 <= status < 300:
+                if not await verified(session.exit_receipt, session.operation):
+                    raise ValueError('Independent business release is unavailable')
+                await do_send({'type': 'http.response.start', 'status': status,
+                    'headers': [(b'content-type', content_type.encode('latin-1'))]})
+                await do_send({'type': 'http.response.body', 'body': b''.join(withheld_error), 'more_body': False})
+            else:
+                await do_send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+        except asyncio.CancelledError:
+            cancelled.set()
+            async_cancelled.set()
+            raise
+        except Exception as failure:
+            from fixed_gpu_client import OperationError
+            disconnected = async_cancelled.is_set()
+            expired = (not disconnected and (isinstance(failure, TimeoutError)
+                       or (isinstance(failure, OperationError) and isinstance(failure.__cause__, TimeoutError))))
+            self.exit_receipt = {'status': 'release_unknown', 'operationId': getattr(failure, 'operation', None)}
+            cancelled.set()
+            async_cancelled.set()
+            if not started and not disconnected:
+                await Response(content=b'{"error":"Business operation unavailable or release unverified"}',
+                               status_code=504 if expired else 503, media_type='application/json')(scope, receive, send)
+            elif started and expired and self.streaming and not send_uncertain:
+                try:
+                    await asyncio.wait_for(send({'type': 'http.response.body',
+                        'body': b'event: consense-gateway-timeout\ndata: TIMEOUT\n\n',
+                        'more_body': False}), .25)
+                except (OSError, asyncio.TimeoutError):
+                    pass
+            elif started:
+                raise RuntimeError('Business response send deadline elapsed' if expired and send_uncertain
+                                   else 'Business operation stream failed') from None
+        finally:
+            cancelled.set()
+            async_cancelled.set()
+            deferred_close = False
+            if operation is not None:
+                try:
+                    result = await asyncio.wait_for(asyncio.shield(operation), .25)
+                    if session is None and self.streaming and isinstance(result, tuple):
+                        session = result[0]
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    deferred_close = True
+                    if self.streaming:
+                        def close_late(done):
+                            try:
+                                value = done.result()
+                                target = session if session is not None else value[0] if isinstance(value, tuple) else None
+                            except BaseException:
+                                target = session
+                            if target is not None:
+                                threading.Thread(target=safe_close, args=(target,), daemon=True).start()
+                        operation.add_done_callback(close_late)
+                except BaseException:
+                    pass
+            try:
+                if session is not None and not deferred_close:
+                    close = asyncio.create_task(asyncio.to_thread(safe_close, session))
+                    try:
+                        await asyncio.wait_for(asyncio.shield(close), .25)
+                    except asyncio.TimeoutError:
+                        pass
+            finally:
+                watcher.cancel()
+                try:
+                    await watcher
+                except asyncio.CancelledError:
+                    pass
+
+
 @app.post('/v1/chat/completions')
 @app.post('/v1/responses')
 @app.post('/v1/responses/input_tokens')
 async def native_business_operation(request: Request):
+    if _remote_models is not None or 'consense.business.preflight' in request.scope:
+        config, client = _fixed_business_configuration(request)
+        from request_stage import MAX_BODY
+        deadline = request.scope.get('consense.business.deadline', time.monotonic() + config['timeout'])
+        if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= time.monotonic():
+            raise HTTPException(504, 'Business request deadline elapsed')
+        async def read_body():
+            chunks = []; size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_BODY:
+                    raise HTTPException(413, 'Complete native business wire exceeds the finite byte limit')
+                chunks.append(chunk)
+            return b''.join(chunks)
+        try:
+            raw = await asyncio.wait_for(read_body(), max(0, deadline - time.monotonic()))
+        except asyncio.TimeoutError as failure:
+            raise HTTPException(504, 'Business request deadline elapsed') from failure
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ValueError('Duplicate business request field')
+                result[key] = value
+            return result
+        try:
+            value = json.loads(raw, object_pairs_hook=pairs,
+                parse_constant=lambda value: (_ for _ in ()).throw(ValueError('Nonfinite number')))
+            if (not isinstance(value, dict) or value.get('model') != config['model']
+                    or ('stream' in value and type(value['stream']) is not bool)):
+                raise ValueError('Business model or stream differs')
+            pending = [value]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, str):
+                    item.encode('utf-8')
+                elif isinstance(item, float) and not math.isfinite(item):
+                    raise ValueError('Nonfinite business request number')
+                elif isinstance(item, dict):
+                    pending.extend(item.keys())
+                    pending.extend(item.values())
+                elif isinstance(item, list):
+                    pending.extend(item)
+        except (ValueError, UnicodeError) as failure:
+            raise HTTPException(422, 'Invalid business request') from failure
+        return _FixedBusinessResponse(client, config, request.url.path, raw, value.get('stream') is True, deadline)
     coordinator = gpu_coordinator()
     if coordinator is None:
         raise HTTPException(404, 'Native business Job coordinator is not configured')
@@ -662,6 +1192,83 @@ async def native_business_operation(request: Request):
     except (ValueError,OSError) as failure:
         raise HTTPException(503,'Native GPU operation was not accepted or completed; its private failure ledger is retained') from failure
     return Response(content=body,status_code=status,headers=headers)
+
+
+def configure_remote_gpu():
+    """Bind the existing model methods to a configured fixed GPU executor."""
+    global _remote_models, _business_config, model_runtime, embedding_model, rerank_model, encode_embeddings
+    names = ('CONSENSE_FIXED_GPU_URL', 'CONSENSE_FIXED_GPU_TOKEN_FILE', 'CONSENSE_FIXED_GPU_TIMEOUT_SECONDS',
+             'CONSENSE_FIXED_GPU_PROFILE_MANIFEST', 'CONSENSE_FIXED_GPU_PROFILE_MANIFEST_SHA256')
+    present = [bool(os.environ.get(name)) for name in names]
+    if not any(present):
+        if any(os.environ.get(name) for name in ('CONSENSE_BUSINESS_MODEL', 'CONSENSE_BUSINESS_TOKEN_FILE',
+                'CONSENSE_BUSINESS_PROFILE_FILE', 'CONSENSE_BUSINESS_TIMEOUT_SECONDS',
+                'CONSENSE_FIXED_GPU_CONFIG_SHA256')):
+            raise ValueError('Business route requires the fixed GPU executor')
+        return
+    if not all(present) or _remote_models is not None or _windows_runtime is not None:
+        raise ValueError('Complete remote GPU configuration is required before runtime initialization')
+    if os.environ.get('CONSENSE_MODEL_DEVICE') != 'cuda':
+        raise ValueError('Remote GPU execution requires an explicit CUDA recipe')
+    if os.name != 'posix' or not os.environ[names[0]].startswith('unix:///'):
+        raise ValueError('Remote GPU execution requires a private Unix socket')
+    path = str(HERE.parent / 'offline_delivery')
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    import coordinator
+    if any(os.environ.get(name) for name in coordinator.NAMES):
+        raise ValueError('Remote GPU and Job coordinator configurations are mutually exclusive')
+    from fixed_gpu_client import Client
+    from remote_gpu_models import RemoteModels
+    from fixed_gpu_profiles import load_profiles
+    from business_configuration import configure as configure_business
+    profiles = load_profiles(os.environ[names[3]], os.environ[names[4]])
+    secret = Path(os.environ[names[1]])
+    if not secret.is_absolute() or secret.is_symlink():
+        raise ValueError('A bounded private GPU token file is required')
+    fd = os.open(secret, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_size > 512
+                or (os.name == 'posix' and (info.st_uid != os.getuid() or info.st_mode & 0o077))):
+            raise ValueError('A bounded private GPU token file is required')
+        with os.fdopen(fd, 'r', encoding='ascii') as stream:
+            fd = None
+            token = stream.read(513).strip()
+    finally:
+        if fd is not None:
+            os.close(fd)
+    timeout = float(os.environ[names[2]])
+    remote = RemoteModels(sys.modules[__name__], Client(os.environ[names[0]], token, profiles),
+                          dtype=MODEL_DTYPE, serial_offload=SERIAL_OFFLOAD, timeout=timeout)
+    remote.require_request_scope()
+    business = configure_business(os.environ, os.environ[names[0]], token, profiles)
+    _remote_models = remote
+    _business_config = business
+    model_runtime, embedding_model, rerank_model, encode_embeddings = (
+        remote.model_runtime, remote.embedding_model, remote.rerank_model, remote.encode_embeddings)
+
+
+def install_remote_request_routes(target):
+    """Apply the same owned deadline to standalone index and retrieval routes."""
+    if _remote_models is None:
+        return
+    def wrap(handler, request_type):
+        async def bounded(payload, http_request):
+            raise HTTPException(503, {'kind':'SOURCE_FRAME_PROOF_REQUIRED',
+                'message':'Standalone remote indexing and retrieval require a protected source frame'})
+        bounded.__annotations__ = {'payload':request_type, 'http_request':Request}
+        return bounded
+    for path, handler, request_type in (('/index',index,IndexRequest),('/retrieve',retrieve,RetrieveRequest)):
+        routes = [route for route in target.routes if getattr(route,'path',None) == path and 'POST' in getattr(route,'methods',set())]
+        if len(routes) != 1:
+            raise ValueError('Standalone remote route identity differs')
+        target.router.routes.remove(routes[0])
+        target.post(path)(wrap(handler,request_type))
+
+
+configure_remote_gpu()
+install_remote_request_routes(app)
 
 
 if __name__ == '__main__':

@@ -619,6 +619,32 @@ class VettingSourcePurposeJpaHttpTest {
         assertTrue(listed.path("identityConfirmationAvailable").asBoolean(),listed.toString());
         assertEquals(4104,putPending(d,pendingRequest(d)).path("code").asInt());verify(parser,times(1)).parseOrdinary(eq(d.getFileName()),any(byte[].class),isNull(),any(OerDocumentIdentity.class));verifyNoInteractions(externalLlm,oer);
     }
+    @Test void pendingLinkageFailureIsPersistedBeforeTheSameErrorIsRethrown()throws Exception {
+        SourceDocument d=pendingSource("pending-native-linkage.txt");
+        byte[] original=Files.readAllBytes(Paths.get(d.getStoragePath()));
+        String text=d.getTextContent(),structure=d.getStructuredContentJson(),coverage=d.getParseCoverageJson();
+        UnsatisfiedLinkError error=new UnsatisfiedLinkError("/private/path/libjpeg.so.8: secret");
+        doThrow(error).when(parser).parseOrdinary(eq(d.getFileName()),any(byte[].class),isNull(),any(OerDocumentIdentity.class));
+        com.consense.web.dto.VettingDtos.SourceRoleConfirmationRequest request=JsonUtils.mapper().convertValue(pendingRequest(d),com.consense.web.dto.VettingDtos.SourceRoleConfirmationRequest.class);
+        assertSame(error,assertThrows(UnsatisfiedLinkError.class,()->service.confirmSourceRole(project,d.getId(),request)));
+        SourceDocument after=fresh(d);
+        assertEquals("FAILED",after.getParseStatus());assertEquals("tender",after.getReviewRole());
+        assertFalse(after.getParseMessage().contains("secret"));assertFalse(after.getParseMessage().contains("/private/path"));
+        assertEquals(text,after.getTextContent());assertEquals(structure,after.getStructuredContentJson());assertEquals(coverage,after.getParseCoverageJson());
+        assertEquals(d.getSourceSha256(),after.getSourceSha256());assertArrayEquals(original,Files.readAllBytes(Paths.get(after.getStoragePath())));
+        assertTrue(listed().get(0).path("identityConfirmationAvailable").asBoolean());verifyNoInteractions(externalLlm,oer);
+    }
+    @Test void uploadLinkageFailureRetainsOriginalAndRethrowsTheSameError()throws Exception {
+        String name="upload-native-linkage.txt";byte[] original="Authored contract text".getBytes(StandardCharsets.UTF_8);
+        UnsatisfiedLinkError error=new UnsatisfiedLinkError("/private/path/libjpeg.so.8: secret");
+        doThrow(error).when(parser).observeOrdinary(eq(name),any(byte[].class));
+        MockMultipartFile file=new MockMultipartFile("files",name,"text/plain",original);
+        assertSame(error,assertThrows(UnsatisfiedLinkError.class,()->service.uploadPackage(project,Collections.singletonList(file),"tender","package")));
+        SourceDocument saved=sources.findByProjectIdOrderByIdAsc(project).stream().filter(row->name.equals(row.getFileName())).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("FAILED",saved.getParseStatus());assertFalse(saved.getParseMessage().contains("secret"));
+        assertEquals(OerSourceMetadata.originalSha256(original),saved.getSourceSha256());assertArrayEquals(original,Files.readAllBytes(Paths.get(saved.getStoragePath())));
+        verifyNoInteractions(externalLlm,oer);
+    }
     @Test void historicalFailedTextSourcesCanExplicitlyRetryTheSameOriginalWithoutReuploadOrAStoredHumanMarker()throws Exception {
         for(boolean known:new boolean[]{false,true}) {
             SourceDocument d=pendingSource(known?"failed-known-gct.txt":"failed-historical-list.txt");d.setParseStatus("FAILED");

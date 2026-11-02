@@ -284,6 +284,7 @@ class VettingReportWriterTest {
         java.util.List<String> warnings = Arrays.asList(
                 "资料类型：项目事实资料",
                 "语义仅覆盖 7/13270 片段，其他片段未进入成功的模型调用。",
+                "语义仅覆盖 0/1 片段；其他片段未计入覆盖，可能未提交或结果不足以确认。",
                 "主题 12 未完成语义检查：opaque$reason(3).txt",
                 "主题 9 的一条模型发现未通过逐字证据校验，已剔除。",
                 "主题 13 的一条模型记录未通过证据或适用性校验，未采纳。",
@@ -319,6 +320,7 @@ class VettingReportWriterTest {
                 if ("en".equals(lang)) {
                     assertTrue(text.contains("Source role: Project facts"));
                     assertTrue(text.contains("Semantic review covered only 7/13270 excerpts"));
+                    assertTrue(text.contains("Semantic review covered only 0/1 excerpts; other excerpts were not counted as covered because they may not have been submitted or their results were insufficient to confirm coverage."));
                     assertTrue(text.contains("Topic 12 did not complete semantic review: opaque$reason(3).txt"));
                     assertTrue(text.contains("A model finding for topic 9 failed exact source-quotation validation and was excluded."));
                     assertTrue(text.contains("A model record for topic 13 failed evidence or applicability validation and was not accepted."));
@@ -340,6 +342,7 @@ class VettingReportWriterTest {
                 } else if ("zh-Hant".equals(lang)) {
                     assertTrue(text.contains("資料類型：項目事實資料"));
                     assertTrue(text.contains("語義僅覆蓋 7/13270 片段"));
+                    assertTrue(text.contains("語義僅覆蓋 0/1 片段；其他片段未計入覆蓋，可能未提交或結果不足以確認。"));
                     assertTrue(text.contains("主題 12 未完成語義檢查：opaque$reason(3).txt"));
                     assertTrue(text.contains("主題 9 的一條模型發現未通過逐字證據校驗，已剔除。"));
                     assertTrue(text.contains("主題 13 的一條模型記錄未通過證據或適用性校驗，未採納。"));

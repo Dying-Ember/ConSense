@@ -4,6 +4,8 @@ Lazy tokenizer/identity preparation is separate from actual model loading.
 Index/retrieve execute only when the caller explicitly invokes server endpoints.
 """
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import importlib.metadata
 import json
@@ -26,12 +28,29 @@ from checkpoint_identity import checkpoint_inventory
 from checkpoint_publication import CheckpointPublication
 from index_integrity import inspect_points, verify_reuse, verify_availability, vector_sha256, PROTOCOL as INDEX_INTEGRITY_PROTOCOL
 from portable_index_signature import portable, matches as portable_signature_matches, legacy_candidate, migration_signature_version
+from source_request_context import active as request_active, check as request_check, prewrite as request_prewrite, publication_reference, require_index_session, stage as request_stage
 
 CONTRACT = "source-bound-window-points-full-parent-results-v1"
 SIGNATURE_VERSION = 5
 EXACT_CLAUSE_POLICY = 'full_dotted_identifier_bound_clause_first_v1'
 _loaded_source_hashes = {name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                        for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','qdrant_backend.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py','migrated_qdrant_index.py','migrate_qdrant_server.py','fixed_development_baseline_runtime.py','verify_retrieval_offline.py','portable_index_signature.py')}
+                        for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','qdrant_backend.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py','migrated_qdrant_index.py','migrate_qdrant_server.py','fixed_development_baseline_runtime.py','verify_retrieval_offline.py','portable_index_signature.py','source_request_context.py','source_session_scope.py','model_session_observer.py','trusted_stage_pins.py','model_session_receipt.py','fixed_gpu_profiles.py','oer_request_evidence.py','same_project_vector_reuse.py')}
+
+_retrieved_metadata = ContextVar('consense_retrieved_metadata', default=None)
+
+
+@contextmanager
+def retrieved_metadata_scope():
+    holder = _retrieved_metadata.get()
+    if holder is not None:
+        yield holder
+        return
+    holder = []
+    token = _retrieved_metadata.set(holder)
+    try:
+        yield holder
+    finally:
+        _retrieved_metadata.reset(token)
 
 
 def file_identity(path):
@@ -39,6 +58,69 @@ def file_identity(path):
     with p.open('rb')as f:
         for raw in iter(lambda:f.read(1024*1024),b''):h.update(raw);size+=len(raw)
     return {'relativePath':p.name,'bytes':size,'sha256':h.hexdigest()}
+
+
+def require_unused_index_metadata(server, key):
+    path = server.metadata_path(key)
+    fail(key not in server._projects and key not in server._missing_index_history,
+         'INDEX_INITIALIZATION_UNAVAILABLE', 'Existing index state cannot be initialized')
+    try:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            fail(False, 'INDEX_INITIALIZATION_UNAVAILABLE', 'Existing index state cannot be initialized')
+        fail(not path.parent.is_symlink(), 'INDEX_INITIALIZATION_UNAVAILABLE',
+             'Existing index state cannot be initialized')
+        try:
+            with os.scandir(path.parent) as entries:
+                pending = any(entry.name.startswith(path.name + '.pending-') for entry in entries)
+        except FileNotFoundError:
+            pending = False
+        fail(not pending, 'INDEX_INITIALIZATION_UNAVAILABLE', 'Existing index state cannot be initialized')
+    except OSError:
+        raise WindowError('INDEX_INITIALIZATION_UNAVAILABLE', 'Existing index state cannot be verified') from None
+    return path
+
+
+def require_empty_project_storage(server, key):
+    identity = (str(server.STATE), os.environ.get('CONSENSE_QDRANT_URL'), os.environ.get('CONSENSE_QDRANT_API_KEY'))
+    try:
+        database = server.database()
+        require_initial_database_binding(server, database, identity)
+        collections = database.get_collections().collections
+        aliases = database.get_aliases().aliases
+    except WindowError:
+        raise
+    except Exception:
+        raise WindowError('QDRANT_BACKEND_UNAVAILABLE', 'Qdrant backend is unavailable') from None
+    require_initial_database_binding(server, database, identity)
+    prefix = 'project_' + server.digest(key)[:16] + '_'
+    fail(isinstance(collections, list) and isinstance(aliases, list)
+         and all(isinstance(getattr(row, 'name', None), str) for row in collections)
+         and all(isinstance(getattr(row, 'alias_name', None), str) for row in aliases)
+         and not any(row.name.startswith(prefix) for row in collections)
+         and not any(row.alias_name.startswith(prefix) for row in aliases),
+         'INDEX_INITIALIZATION_UNAVAILABLE', 'Existing index state cannot be initialized')
+    return database
+
+
+def require_initial_database_binding(server, database, identity):
+    binding = getattr(server, '_database_binding', None)
+    fail(getattr(server, '_database', None) is database
+         and isinstance(binding, tuple) and len(binding) == 2
+         and binding[0] is database and binding[1] == identity
+         and getattr(server, '_database_configuration', None) == identity
+         and (str(server.STATE), os.environ.get('CONSENSE_QDRANT_URL'), os.environ.get('CONSENSE_QDRANT_API_KEY')) == identity,
+         'INDEX_INITIALIZATION_UNAVAILABLE', 'Qdrant backend identity cannot be verified')
+
+
+def sync_index_directory(directory):
+    if os.name == 'posix':
+        fd=os.open(directory,os.O_RDONLY | getattr(os,'O_DIRECTORY',0))
+        try:os.fsync(fd)
+        finally:os.close(fd)
 
 
 def dense_scope_filter(bound,scope_ids):
@@ -79,7 +161,7 @@ class WindowRuntime:
     def __init__(self,server):
         self.s=server;self.tokenizers={};self.identities={};self.event_ordinals={}
         self.prepared_structures=PreparationCache()
-        self.model_publications={};self.model_publication_settings={}
+        self.model_publications={};self.model_publication_settings={};self._model_publication_loaders={}
         for kind in ('embedding','reranker'):
             prefix='CONSENSE_'+kind.upper()+'_CHECKPOINT_MANIFEST'
             path,expected=os.environ.get(prefix),os.environ.get(prefix+'_SHA256')
@@ -121,6 +203,7 @@ class WindowRuntime:
                      'Loaded model instance belongs to a different publication; start a new runtime')
                 model._consense_checkpoint_publication=publication['publicationSha256']
                 return model
+            self._model_publication_loaders[kind]=(load,original,load.__code__,load.__defaults__)
             setattr(self.s,function_name,load)
 
     def publication_identity(self,kind):
@@ -263,7 +346,8 @@ class WindowRuntime:
         return self.prepared_structures.compute(key,lambda:structural_plan(chunks,tokenizer,identity,short,structure))
 
     def validate_metadata(self,metadata):
-        migration=getattr(self.s,'_migrated_index',None)
+        from migration_project_registry import frame_reader
+        migration=frame_reader(self,metadata.get('projectId')) or getattr(self.s,'_migrated_index',None)
         migrated=migration is not None and getattr(migration,'metadata',None) is metadata
         compatible=migration_signature_version(metadata.get('signature',{}).get('signatureVersion'),self.signature_version()) if migrated else self.signature_matches(metadata.get('signature',{}),metadata['chunks'])
         fail(metadata.get('contract')==self.contract() and compatible,'OLD_INDEX_CONTRACT','Index contract/mode differs from the explicitly configured recipe')
@@ -302,7 +386,11 @@ class WindowRuntime:
             if row['granularity']=='short':
                 fail(origins==[row['parentId']],'UNKNOWN_WINDOW_PARENT','Short window must bind its exact original parent')
         signed=metadata['signature'];key=metadata['projectId']
-        collection=self.index_collection(key,signed,metadata.get('generation'))
+        from migration_project_registry import frame_reader
+        holder=_retrieved_metadata.get();migration=frame_reader(self,key) or getattr(self.s,'_migrated_index',None)
+        migrated=(holder is not None and len(holder)==1 and holder[0] is metadata
+                  and migration is not None and getattr(migration,'metadata',None) is metadata)
+        collection=metadata['collection'] if migrated else self.index_collection(key,signed,metadata.get('generation'))
         verify_availability(self.s.database()if chunks else None,metadata,key=key,collection=collection,signature=signed)
         return parents,{w['id']:w for w in rows}
 
@@ -312,7 +400,42 @@ class WindowRuntime:
              'INDEX_GENERATION_INVALID','Index generation must be an exact owned UUID')
         return 'project_'+self.s.digest(key)[:16]+'_'+self.s.digest(signed)[:16]+('_g'+generation if generation else '')
 
+    def preflight_initialization(self, key, rebuild):
+        from contextlib import ExitStack
+        from migration_project_registry import require_writable
+        self.s.verify_project_publication(key, None)
+        route = require_writable(self.s, key, self)
+        registry = getattr(self, 'source_registry', None)
+        frame_var = getattr(registry, '_validation_frame', None)
+        frame = frame_var.get() if frame_var is not None else None
+        fail(not os.environ.get('CONSENSE_QDRANT_URL') and not rebuild
+             and isinstance(frame, dict) and isinstance(frame.get('leaseStack'), ExitStack),
+             'INDEX_INITIALIZATION_UNAVAILABLE', 'Initialization requires an unused local source-owned route')
+        require_unused_index_metadata(self.s, key)
+        database = require_empty_project_storage(self.s, key)
+        fail(require_writable(self.s, key, self) == route and not os.environ.get('CONSENSE_QDRANT_URL'),
+             'INDEX_INITIALIZATION_UNAVAILABLE', 'Existing index state cannot be initialized')
+        require_unused_index_metadata(self.s, key)
+        return route, database
+
     def index(self,request):
+        from migration_project_registry import require_writable
+        request_check()
+        source_scope=None
+        if request_active():
+            try: publication_reference();source_scope=require_index_session()
+            except WindowError as error:
+                raise self.s.HTTPException(503,{'kind':error.kind,'message':str(error),'metadata':error.metadata}) from error
+        initialize = getattr(request, 'initializationDecision', False)
+        fail(type(initialize) is bool and not (initialize and getattr(request, 'rebuild', False)),
+             'INDEX_INITIALIZATION_UNAVAILABLE', 'Invalid initialization request')
+        remote = bool(os.environ.get('CONSENSE_QDRANT_URL'))
+        fail(not remote or request_active(),
+             'MIGRATION_INDEX_WRITE_UNISOLATED', 'Server writes require a request-owned source frame')
+        route = require_writable(self.s, self.s.project_key(request.projectId), self)
+        def recheck_write_route():
+            fail(require_writable(self.s, self.s.project_key(request.projectId), self) == route,
+                 'MIGRATION_ROUTE_CHANGED', 'Project route changed during index write')
         from qdrant_client import models
         import numpy as np
         s=self.s;key=s.project_key(request.projectId);chunks=[c.model_dump(exclude_none=True)for c in request.chunks]
@@ -320,41 +443,128 @@ class WindowRuntime:
         s.validate_corpus(chunks);signed=self.signature(chunks);rebuild=getattr(request,'rebuild',False)
         fail(type(rebuild) is bool,'INDEX_REBUILD_INVALID','Explicit rebuild must be a boolean')
         with s.LOCK:
+            request_check()
             path=s.metadata_path(key)
-            prior=file_identity(path) if path.exists() else None
+            if remote:
+                recover = getattr(s, 'recover_project_publication_for_read', None)
+                if recover is not None: recover(key)
+            if hasattr(s,'verify_project_publication'):s.verify_project_publication(key,None)
+            if remote and initialize: require_unused_index_metadata(s, key)
+            if initialize and not remote:
+                checked_route, initial_database = self.preflight_initialization(key, rebuild)
+                initial_identity = getattr(s, '_database_configuration', None)
+                require_initial_database_binding(s, initial_database, initial_identity)
+                fail(checked_route == route, 'MIGRATION_ROUTE_CHANGED', 'Project route changed during index write')
             if path.exists():
+                if hasattr(s,'require_project_metadata_for_load'):s.require_project_metadata_for_load(key)
+                prior=file_identity(path)
+            else:prior=None
+            if remote and prior is None:
+                fail(initialize, 'INDEX_INITIALIZATION_UNAVAILABLE', 'New Server indexes require explicit initialization')
+            if path.exists():
+                if hasattr(s,'require_project_metadata_for_load'):s.require_project_metadata_for_load(key)
                 existing=json.loads(path.read_text(encoding='utf-8'))
+                if hasattr(s,'verify_project_publication'):s.verify_project_publication(key,existing)
                 reusable=existing.get('contract')==self.contract() and self.signature_matches(existing.get('signature',{}),chunks)
                 if not rebuild and legacy_candidate(existing.get('signature',{}),signed):
                     fail(reusable,'INDEX_SIGNATURE_ADAPTER_REQUIRED','Frozen legacy index needs its pinned source adapter; no automatic re-embedding was started')
                 if not rebuild and reusable:
                     signed=existing['signature']
-                    s._projects.pop(key,None)
+                    s.forget_project(key)
                     self.validate_metadata(existing)
                     collection=self.index_collection(key,signed,existing.get('generation'))
                     try:verify_reuse(s.database() if chunks else None,existing,key=key,collection=collection,chunks=chunks,signature=signed)
                     except WindowError:raise
                     except Exception as error:
                         raise WindowError('INDEX_REUSE_UNAVAILABLE','Complete persisted index integrity cannot be verified') from error
+                    request_check();recheck_write_route()
                     s._projects[key]=existing
                     return {'projectId':key,'indexed':len(chunks),'vectorPoints':existing['vectorPoints'],'signature':s.digest(signed),'cached':True,'contract':self.contract()}
-            s._projects.pop(key,None)
-            generation=uuid.uuid4().hex if rebuild else None
+            request_check();s.forget_project(key)
+            generation=uuid.uuid4().hex if rebuild or request_active() else None
             collection=self.index_collection(key,signed,generation)
+            if remote:
+                from contextlib import ExitStack
+                frame_var = getattr(getattr(self, 'source_registry', None), '_validation_frame', None)
+                frame = frame_var.get() if frame_var is not None else None
+                fail(bool(chunks) and isinstance(frame, dict) and isinstance(frame.get('leaseStack'), ExitStack),
+                     'INDEX_INITIALIZATION_UNAVAILABLE', 'Server initialization requires a request-owned source frame')
+                if prior is None:
+                    require_unused_index_metadata(s, key)
+                    initial_database = require_empty_project_storage(s, key)
+                    require_unused_index_metadata(s, key)
+                else:
+                    initial_database = s.database()
+                initial_identity = getattr(s, '_database_configuration', None)
+                require_initial_database_binding(s, initial_database, initial_identity)
+                recheck_write_route()
+                fail(source_scope.get('projectId') == key and source_scope.get('module') == getattr(self, 'target_module', None)
+                     and isinstance(source_scope.get('sourceScopeSha256'), str)
+                     and re.fullmatch('[a-f0-9]{64}', source_scope['sourceScopeSha256']) is not None,
+                     'SOURCE_SCOPE_IDENTITY_INVALID',
+                     'Index session must bind the exact project before index writes')
+                request_prewrite({'projectId':key, 'generation':generation, 'collection':collection,
+                    'priorMetadataSha256':prior['sha256'] if prior is not None else None, 'module':source_scope.get('module'),
+                    'sourceScopeSha256':source_scope.get('sourceScopeSha256'),
+                    'routeIdentity':route.get('configurationIdentity')})
+                writer_created = False
+            def check_initial_target():
+                require_initial_database_binding(s, initial_database, initial_identity)
+                if remote:
+                    fail(initial_database.collection_exists(collection) is writer_created,
+                         'INDEX_INITIALIZATION_UNAVAILABLE', 'Controlled target changed during initialization')
             started=time.perf_counter();structure=None
             if self.structural_recipe.enabled:
                 structure=self.prepared_structure(chunks)
                 rows=structure['points'];self.emit('dual-granularity-source-plan',structure)
             else:rows=self.prepare_windows(chunks,'embedding')
-            cache_hits=encoded=0;persisted_vector_hashes={};dimension=0
+            if request_active() and not remote:
+                recheck_write_route()
+                fail(source_scope.get('projectId') == key, 'SOURCE_SCOPE_IDENTITY_INVALID',
+                     'Index session must bind the exact project before index writes')
+                request_prewrite({'projectId':key, 'generation':generation, 'collection':collection,
+                    'priorMetadataSha256':prior['sha256'] if prior is not None else None,
+                    'module':source_scope.get('module'), 'sourceScopeSha256':source_scope.get('sourceScopeSha256'),
+                    'routeIdentity':route.get('configurationIdentity')})
+            cache_hits=encoded=reused=0;persisted_vector_hashes={};dimension=0;reuse=None
             try:
                 if chunks:
-                    model,db=s.embedding_model(),s.database();dimension=int(model.get_sentence_embedding_dimension())
-                    if not db.collection_exists(collection):db.create_collection(collection,vectors_config=models.VectorParams(size=dimension,distance=models.Distance.COSINE))
+                    model,db=s.embedding_model(),initial_database if (initialize or remote) else s.database();dimension=int(model.get_sentence_embedding_dimension())
+                    request_check()
+                    old_key=os.environ.get('CONSENSE_QDRANT_HISTORY_RECEIPT_PROJECT_ID','')
+                    marker='::canonical::advisory::'
+                    from same_project_vector_reuse import gpu_code_matches
+                    if (getattr(self,'target_module',None)=='advisory' and marker in key and marker in old_key and gpu_code_matches()
+                            and key.split(marker,1)[0]==old_key.split(marker,1)[0] and key!=old_key):
+                        from migrated_qdrant_index import SealedHistoryIndex
+                        from same_project_vector_reuse import SameProjectVectorReuse
+                        env=dict(os.environ)
+                        for suffix in ('','_SHA256'):
+                            env['CONSENSE_QDRANT_MIGRATION_RECEIPT'+suffix]=env['CONSENSE_QDRANT_HISTORY_RECEIPT'+suffix]
+                        try:
+                            reuse=SameProjectVectorReuse(SealedHistoryIndex(env),self,db,key,'advisory')
+                        except WindowError as incompatible:
+                            if incompatible.kind not in ('MIGRATED_INDEX_QUERY_RECIPE','MIGRATED_INDEX_QUERY_MODEL'):raise
+                    if initialize or remote:
+                        fail(not db.collection_exists(collection), 'INDEX_INITIALIZATION_UNAVAILABLE',
+                             'Existing index state cannot be initialized')
+                        recheck_write_route()
+                        check_initial_target()
+                        fail(db.create_collection(collection,vectors_config=models.VectorParams(size=dimension,distance=models.Distance.COSINE)) is True,
+                             'INDEX_INITIALIZATION_UNAVAILABLE', 'New index collection could not be created')
+                        if remote: writer_created = True
+                    elif not db.collection_exists(collection):
+                        recheck_write_route()
+                        db.create_collection(collection,vectors_config=models.VectorParams(size=dimension,distance=models.Distance.COSINE))
                     cache_identity=self.embedding_cache_identity(dimension)
                     for begin in range(0,len(rows),128):
+                        request_check()
                         group=rows[begin:begin+128];vectors=[None]*len(group);missing=[]
+                        if reuse is not None:
+                            reused_group=reuse.vectors(group);reused+=len(reused_group)
+                            for i,value in reused_group.items():vectors[i]=np.asarray(value,dtype=np.float32)
                         for i,w in enumerate(group):
+                            if vectors[i] is not None:continue
                             eligible=self.cache_whitelist and any(x.get('sourceHash')==w['sourceHash']and x.get('role')==w['role']for x in self.cache_whitelist.get('sources',[]))
                             if self.cache_root and eligible:
                                 vector,receipt=fixed_lookup(self.cache_root,w,self.cache_whitelist,cache_identity)
@@ -367,12 +577,14 @@ class WindowRuntime:
                             for i,v in zip(missing,values):vectors[i]=v
                         for vector in vectors:fail(len(vector)==dimension and np.isfinite(vector).all(),'INVALID_EMBEDDING_VECTOR','Embedding vectors require exact dimension and finite values')
                         for window,vector in zip(group,vectors):persisted_vector_hashes[window['id']]=vector_sha256(vector.tolist(),dimension)
-                        db.upsert(collection,points=[models.PointStruct(id=w['id'],vector=v.tolist(),payload={**w,'indexSignature':s.digest(signed)})for w,v in zip(group,vectors)])
+                        request_check();recheck_write_route()
+                        if initialize or remote:check_initial_target()
+                        db.upsert(collection,points=[models.PointStruct(id=w['id'],vector=v.tolist(),payload={**w,'indexSignature':s.digest(signed)})for w,v in zip(group,vectors)],wait=True)
                         self.emit('window-index-upsert',{'begin':begin,'windowIds':[w['id']for w in group],'parentIds':[w['parentId']for w in group],
                                                         'vectors':np.asarray(vectors).tolist(),'dimension':dimension,'fixedCacheHitsCumulative':cache_hits,'encodedWindowsCumulative':encoded})
                     fail(db.count(collection,exact=True).count==len(rows),'INDEX_POINT_COUNT','Persisted vector point count differs from windows')
                 metadata={'contract':self.contract(),'projectId':key,'signature':signed,'collection':collection,'chunks':chunks,'windows':rows,'windowManifestSha256':digest(rows),
-                          'vectorPoints':len(rows),'parentCount':len(chunks),'fixedCacheHits':cache_hits,'encodedWindows':encoded,'createdAt':time.time()}
+                          'vectorPoints':len(rows),'parentCount':len(chunks),'fixedCacheHits':cache_hits,'reusedWindows':reused,'encodedWindows':encoded,'createdAt':time.time()}
                 integrity=inspect_points(db,collection,rows,signed,dimension) if chunks else {
                     'schema':INDEX_INTEGRITY_PROTOCOL,'dimension':0,'dtype':'float32-le','pointCount':0,
                     'embeddingSignatureSha256':digest(signed),'pointsSha256':digest([])}
@@ -380,18 +592,45 @@ class WindowRuntime:
                 integrity['sealSha256']=digest(integrity)
                 metadata['vectorIntegrity']=integrity
                 if generation:metadata['generation']=generation
+                if request_active():metadata['publicationJournal']=publication_reference()
+                if source_scope is not None:metadata['sourceScope']=source_scope
                 if structure:metadata.update(structureContexts=structure['contexts'],structureBindings=structure['bindings'],structuralCoverage=structure['coverage'])
                 fail((file_identity(path) if path.exists() else None)==prior,'INDEX_METADATA_CHANGED','Published metadata changed during index construction')
-                if rebuild and prior is not None:
+                if prior is not None and (rebuild or remote):
                     history=path.parent/'index-history'/(path.stem+'-'+generation+'.json')
                     history.parent.mkdir(parents=True,exist_ok=True)
                     with path.open('rb') as reader,history.open('xb') as handle:shutil.copyfileobj(reader,handle,1024*1024)
                     fail(file_identity(history)['sha256']==prior['sha256'],'INDEX_METADATA_CHANGED','Previous metadata changed while preserving rebuild evidence')
                     metadata['previousMetadataFile']=str(history.relative_to(path.parent))
                     metadata['previousMetadataSha256']=prior['sha256']
-                path.parent.mkdir(parents=True,exist_ok=True);pending=path.with_suffix('.json.pending');pending.write_text(json.dumps(metadata,ensure_ascii=False),encoding='utf-8');pending.replace(path)
-                s._projects[key]=metadata
-                return {'projectId':key,'indexed':len(chunks),'vectorPoints':len(rows),'fixedCacheHits':cache_hits,'encodedWindows':encoded,'signature':s.digest(signed),'cached':False,'contract':self.contract(),'seconds':time.perf_counter()-started,
+                request_check()
+                if initialize or remote:check_initial_target()
+                path.parent.mkdir(parents=True,exist_ok=True)
+                pending=path.with_name(path.name+'.pending-'+uuid.uuid4().hex)
+                owned_request=request_active()
+                with pending.open('x',encoding='utf-8') as output:
+                    output.write(json.dumps(metadata,ensure_ascii=False))
+                    if owned_request:output.flush();os.fsync(output.fileno())
+                pending_identity=file_identity(pending)
+                def commit_index():
+                    if reuse is not None:fail(gpu_code_matches(),'REUSE_GPU_IMPLEMENTATION_CHANGED','GPU implementation changed before index publication')
+                    recheck_write_route()
+                    with s.LOCK:
+                        fail((file_identity(path) if path.exists() else None)==prior and file_identity(pending)==pending_identity,
+                             'INDEX_METADATA_CHANGED','Index metadata or staged bytes changed before publication')
+                        request_check()
+                        if initialize or remote:check_initial_target()
+                        pending.replace(path)
+                        try:
+                            if owned_request:sync_index_directory(path.parent)
+                        except OSError as error:
+                            raise WindowError('INDEX_PUBLICATION_DURABILITY_UNCERTAIN',
+                                              'Index publication could not be durably confirmed') from error
+                        s._projects[key]=metadata
+                intent={'projectId':key,'generation':generation,'metadataSha256':pending_identity['sha256'],
+                        'priorMetadataSha256':prior['sha256'] if prior is not None else None} if owned_request else None
+                request_stage(commit_index,intent)
+                return {'projectId':key,'indexed':len(chunks),'vectorPoints':len(rows),'fixedCacheHits':cache_hits,'reusedWindows':reused,'encodedWindows':encoded,'signature':s.digest(signed),'cached':False,'contract':self.contract(),'seconds':time.perf_counter()-started,
                         **({'structuralCoverage':structure['coverage']} if structure else {})}
             except WindowError as e:raise s.HTTPException(503,{'kind':e.kind,'message':str(e),'metadata':e.metadata})from e
             except Exception as e:raise s.HTTPException(503,{'kind':'WINDOW_INDEX_UNAVAILABLE','type':type(e).__name__,'message':str(e)})from e
@@ -418,6 +657,7 @@ class WindowRuntime:
         return np.asarray([by_parent[c['id']]for c in candidates])
 
     def retrieve(self,request):
+        request_check()
         from qdrant_client import models
         from rank_bm25 import BM25Okapi
         import numpy as np
@@ -430,8 +670,13 @@ class WindowRuntime:
             self.emit('retrieval-phase',{'phase':name,'status':status,'querySha256':query_sha,
                 'elapsedSeconds':time.perf_counter()-retrieval_started,**counts})
         with s.LOCK:
+            request_check()
             phase('metadata','started');phase_started=time.perf_counter()
             metadata=s.read_project(key)
+            holder=_retrieved_metadata.get()
+            if holder is not None:
+                fail(not holder,'INDEX_REQUEST_METADATA_CONFLICT','One verified metadata object is required per retrieval')
+                holder.append(metadata)
             try:parents,bound=self.validate_query_metadata(metadata)
             except WindowError as error:raise s.HTTPException(503,{'kind':error.kind,'message':str(error),'metadata':error.metadata})from error
             source_selection=getattr(request,'sourceSha256',None)
@@ -448,6 +693,7 @@ class WindowRuntime:
                   parents=len(parents),windows=len(bound),selectedParents=len(scope),
                   selectedSources=len(source_selection) if source_selection is not None else len(known_sources))
             if not scope:
+                request_check()
                 hits,units=select_source_units(scope,[],request.limit,
                                               hierarchy_context=self.structural_recipe.enabled)
                 phase('complete','completed',returnedParents=0)
@@ -472,6 +718,7 @@ class WindowRuntime:
                     fetch_ordinal=0
                     def fetch(limit):
                         nonlocal fetch_ordinal
+                        request_check()
                         fetch_ordinal+=1;fetch_started=time.perf_counter()
                         counts={'granularity':granularity,'fetchOrdinal':fetch_ordinal,'filterKey':filter_key,
                                 'filterValues':len(filter_values),'requestedWindows':limit}
@@ -512,7 +759,7 @@ class WindowRuntime:
                 candidates=[lookup_[id_]for id_ in candidate_ids]
                 self.emit('parent-rrf-candidates',{'constant':s.RRF_CONSTANT,'allFusedInOrder':[{'id':id_,'score':fused[id_]}for id_ in sorted(fused,key=lambda id_:(-fused[id_],id_))],'submittedParentIds':candidate_ids})
                 phase('rerank','started',candidateParents=len(candidates));phase_started=time.perf_counter()
-                ranked=self.rerank(request.query,candidates,scope)if self.structural_recipe.enabled else s.rerank_candidates(request.query,candidates)
+                request_check();ranked=self.rerank(request.query,candidates,scope)if self.structural_recipe.enabled else s.rerank_candidates(request.query,candidates)
                 phase('rerank','completed',durationSeconds=time.perf_counter()-phase_started,candidateParents=len(candidates))
                 scores=np.asarray(ranked).reshape(-1);order=sorted(range(len(candidates)),key=lambda i:(-float(scores[i]),candidates[i]['id']))
                 reranked=[{'id':candidates[i]['id'],'score':float(scores[i]),'payload':candidates[i]}for i in order]
@@ -535,7 +782,7 @@ class WindowRuntime:
                     **({'ranking':units['ranking']}if exact else {}),
                     'returnedIds':[h['id']for h in hits], 'rawParentTopKIds':units['rawParentTopKIds'],'selectionPolicy':units['policy']})
                 self.emit('source-unit-closure',units)
-                phase('complete','completed',returnedParents=len(hits))
+                request_check();phase('complete','completed',returnedParents=len(hits))
                 return {'hits':hits,'sourceUnits':units,'mode':self.contract(),'projectId':key,
                         'indexSignature':s.digest(metadata['signature']),'seconds':time.perf_counter()-started,'denseWindowExpansion':receipt,**source_receipt,
                         'scoreMeaning':'Observed structure-context relevance, compared with the same-pool short-window baseline; not evidence validity or defect probability'if self.structural_recipe.enabled else 'Max pair-window reranker score, not evidence validity or probability of a contract defect',

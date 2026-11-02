@@ -1,6 +1,7 @@
 package com.consense.ai;
 
 import com.consense.common.BizException;
+import com.consense.common.DiagnosticSummary;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -352,7 +353,7 @@ public class OpenAiLlmClient implements LlmClient {
                     : http.get(endpoint, 4000, authHeader());
             return JsonUtils.parse(raw).has("data");
         } catch (Exception e) {
-            log.debug("OpenAI 兼容端点不可达: {}", e.getMessage());
+            log.debug("OpenAI 兼容端点不可达: {}", DiagnosticSummary.of(e));
             return false;
         }
     }

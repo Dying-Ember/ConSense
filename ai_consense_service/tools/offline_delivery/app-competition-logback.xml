@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Competition runtime: set logging.file.name to a writable persistent path. -->
+<configuration>
+  <conversionRule conversionWord="safeException" converterClass="com.consense.common.SafeExceptionCategory"/>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+  <include resource="org/springframework/boot/logging/logback/file-appender.xml"/>
+  <appender name="SAFE_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] %-40.40logger{39} : framework exception details withheld; %safeException%n%nopex</pattern><charset>${CONSOLE_LOG_CHARSET}</charset></encoder>
+  </appender>
+  <appender name="SAFE_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_FILE}.framework</file>
+    <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] %-40.40logger{39} : framework exception details withheld; %safeException%n%nopex</pattern><charset>${FILE_LOG_CHARSET}</charset></encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_FILE}.framework.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+      <cleanHistoryOnStart>${LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START:-false}</cleanHistoryOnStart>
+      <maxFileSize>${LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE:-10MB}</maxFileSize>
+      <totalSizeCap>${LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP:-0}</totalSizeCap>
+      <maxHistory>${LOGBACK_ROLLINGPOLICY_MAX_HISTORY:-7}</maxHistory>
+    </rollingPolicy>
+  </appender>
+  <logger name="org.hibernate.engine.jdbc.spi.SqlExceptionHelper" additivity="false"><appender-ref ref="SAFE_CONSOLE"/><appender-ref ref="SAFE_FILE"/></logger>
+  <logger name="org.springframework.transaction.support.TransactionTemplate" additivity="false"><appender-ref ref="SAFE_CONSOLE"/><appender-ref ref="SAFE_FILE"/></logger>
+  <root level="INFO"><appender-ref ref="CONSOLE"/><appender-ref ref="FILE"/></root>
+</configuration>

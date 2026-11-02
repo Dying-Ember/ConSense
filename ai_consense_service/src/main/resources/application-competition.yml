@@ -1,0 +1,7 @@
+# The competition deployment supplies its own OpenAI-compatible vLLM endpoint.
+# Keep the regular and local-rehearsal profiles independent of this opt-in.
+consense:
+  qwen:
+    base-url: "${CONSENSE_QWEN_BASE_URL:}"
+  qwen-flash:
+    base-url: "${CONSENSE_QWEN_BASE_URL:}"

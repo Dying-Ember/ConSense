@@ -165,7 +165,7 @@ class CompletePointPagingTests(unittest.TestCase):
         self.db=FakeDb();self.db.create_collection('owned',vectors_config=models.VectorParams(size=2,distance=models.Distance.COSINE))
         self.signature={'AUTHORED-only':'signature'}
         self.windows=[{'id':str(uuid.UUID(int=i+1)),'content':str(i),'sourceHash':'AUTHORED-source'} for i in range(600)]
-        self.db.upsert('owned',points=[models.PointStruct(id=w['id'],payload={**w,'indexSignature':digest(self.signature)},vector=[1.,0.]) for w in self.windows])
+        self.db.upsert('owned',points=[models.PointStruct(id=w['id'],payload={**w,'indexSignature':digest(self.signature)},vector=[1.,0.]) for w in self.windows],wait=True)
 
     def inspect(self):return inspect_points(self.db,'owned',self.windows,self.signature,2)
 

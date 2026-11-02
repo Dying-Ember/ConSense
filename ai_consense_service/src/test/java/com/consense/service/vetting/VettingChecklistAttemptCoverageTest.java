@@ -225,8 +225,8 @@ class VettingChecklistAttemptCoverageTest {
             LlmClient local=mock(LlmClient.class);profiles=new LlmProfiles(props,local,local,new QwenChatClient(props.getQwen(),http),local);
             review=new VettingSemanticReview(new AiGateway(local,profiles),props,mock(VettingRetrievalClient.class));review.setQwenUsagePreflight(new QwenChatUsagePreflight(props,mock(QwenGenerationLedger.class)));
             OerBusinessEvidence oer=mock(OerBusinessEvidence.class);review.setOerBusinessEvidence(oer);
-            Constructor<OerBusinessEvidence.Session> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);constructor.setAccessible(true);
-            OerBusinessEvidence.Session session=constructor.newInstance("authored","vetting",Collections.singletonList(1L),Collections.emptyList(),new LinkedHashMap<>(),Collections.emptyMap());
+            Constructor<OerBusinessEvidence.Session> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class,Map.class);constructor.setAccessible(true);
+            OerBusinessEvidence.Session session=constructor.newInstance("authored","vetting",Collections.singletonList(1L),Collections.emptyList(),new LinkedHashMap<>(),Collections.emptyMap(),Collections.emptyMap());
             Class<?> type=Class.forName(OerBusinessEvidence.class.getName()+"$Corpus");Constructor<?> create=type.getDeclaredConstructor(OerBusinessEvidence.Session.class,List.class);create.setAccessible(true);
             @SuppressWarnings("unchecked") List<Chunk> bound=(List<Chunk>)create.newInstance(session,Arrays.asList(tender,extra));corpus=bound;
             when(oer.retrieveReviewText(eq(session),anyString(),nullable(String.class),any(),anyInt())).thenAnswer(call->{

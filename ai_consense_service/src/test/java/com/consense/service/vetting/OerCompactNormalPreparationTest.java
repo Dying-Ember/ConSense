@@ -39,9 +39,28 @@ class OerCompactNormalPreparationTest {
     }
     @Test void unsupportedCompactCapabilityRetainsTheExistingFramePath()throws Exception {
         Fixture f=new Fixture();when(f.retrieval.compactNormalPreparationAvailable(anyString(),anyList())).thenReturn(false);
-        assertEquals("AUTHORED old frame path",assertThrows(IllegalStateException.class,()->f.service.loadSemantic("authored","vetting",f.sources)).getMessage());
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs=new ch.qos.logback.core.read.ListAppender<>();logs.start();logger.addAppender(logs);
+        String request="01234567-89ab-cdef-0123-456789abcdef";org.slf4j.MDC.put("vettingSearchRequestId",request);
+        try {
+            assertEquals("AUTHORED old frame path",assertThrows(IllegalStateException.class,()->f.service.loadSemantic("authored","vetting",f.sources)).getMessage());
+            assertTrue(logs.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .anyMatch(line->line.equals("Vetting search requestId="+request+" documentId=1000 stage=prepare_source")));
+            assertFalse(logs.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).anyMatch(line->line.contains("AUTHORED document")));
+        } finally {logger.detachAppender(logs);logs.stop();org.slf4j.MDC.remove("vettingSearchRequestId");}
         verify(f.evidence,times(1)).verifiedSemanticBindings(anyString(),anyString(),anyList());verify(f.retrieval,never()).prepareCompactNormalSources(anyString(),anyList());
     }
+    @Test void fallbackTimingAppenderFailureCannotReplaceTheOriginalSourceFailure()throws Exception {
+        Fixture f=new Fixture();when(f.retrieval.compactNormalPreparationAvailable(anyString(),anyList())).thenReturn(false);
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);
+        ch.qos.logback.core.AppenderBase<ch.qos.logback.classic.spi.ILoggingEvent> broken=new ch.qos.logback.core.AppenderBase<ch.qos.logback.classic.spi.ILoggingEvent>(){
+            @Override protected void append(ch.qos.logback.classic.spi.ILoggingEvent event){throw new AssertionError("appender failure");}
+        };
+        broken.start();logger.addAppender(broken);org.slf4j.MDC.put("vettingSearchRequestId","01234567-89ab-cdef-0123-456789abcdef");
+        try {assertEquals("AUTHORED old frame path",assertThrows(IllegalStateException.class,()->f.service.loadSemantic("authored","vetting",f.sources)).getMessage());}
+        finally {logger.detachAppender(broken);broken.stop();org.slf4j.MDC.remove("vettingSearchRequestId");}
+    }
+
     @Test void admissionLogsOnePayloadFreeDecisionForEligibleForeignCapabilityAndStoredAuthorityPaths()throws Exception {
         for(String reason:Arrays.asList("eligible","foreign_latest_binding","native_capability_unavailable","stored_authority_not_normal")){
             Fixture f=new Fixture();ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);

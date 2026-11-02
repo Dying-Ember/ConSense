@@ -1,7 +1,8 @@
-"""Fake inference/vector providers only; zero real model/index/query/DB calls."""
+"""Fake inference, synthetic vector fixtures and isolated Qdrant Local; no real models or Server."""
 import copy
 from contextlib import ExitStack
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
@@ -30,7 +31,8 @@ class FakeDb:
         selected=rows[begin:begin+limit]
         next_offset=rows[begin+limit].id if begin+limit<len(rows) else None
         return [SimpleNamespace(id=p.id,payload=copy.deepcopy(p.payload),vector=copy.deepcopy(p.vector)) for p in selected],next_offset
-    def upsert(self,name,points):
+    def upsert(self,name,points,*,wait):
+        if wait is not True:raise AssertionError('index upsert must wait')
         for p in points:self.collections[name][str(p.id)]=p
     def count(self,name,**kwargs):return SimpleNamespace(count=len(self.collections[name]))
     def query_points(self,name,query,limit,query_filter=None):
@@ -55,6 +57,7 @@ class ServerTests(unittest.TestCase):
         # Authored local providers use the existing unconfigured-coordinator interface.
         self.runtime_fakes=ExitStack();self.addCleanup(self.runtime_fakes.close)
         self.runtime_fakes.enter_context(patch.object(s,'gpu_coordinator',return_value=None))
+        self.runtime_fakes.enter_context(patch.object(s,'_request_evidence',None))
         self.tmp=tempfile.TemporaryDirectory();self.db=FakeDb();self.events=[];self.encodes=[];s.STATE=Path(self.tmp.name);s._projects={};s._selected_device='cpu';s.MODEL_DTYPE='float32'
         self.rt=WindowRuntime(s);self.rt.overlap=2
         self.rt.tokenizer=lambda kind:CharacterTokenizer();self.rt.identity=lambda kind:{'kind':kind,'tokenizerSha256':'test'}
@@ -74,6 +77,14 @@ class ServerTests(unittest.TestCase):
     def query(self,project='one',**kwargs):return s.retrieve(s.RetrieveRequest(projectId=project,query='q',limit=1,candidates=2,**kwargs))
     def test_index_points_are_windows_not_original_parents(self):
         r=self.index();self.assertGreater(r['vectorPoints'],r['indexed']);self.assertEqual(r['indexed'],1);self.assertEqual(r['contract'],CONTRACT)
+    def test_index_upsert_waits_with_local_qdrant(self):
+        from qdrant_client import QdrantClient
+        client=QdrantClient(path=str(Path(self.tmp.name)/'local-qdrant'))
+        self.db=client
+        try:
+            result=self.index();metadata=s.read_project('one')
+            self.assertEqual(result['vectorPoints'],client.count(metadata['collection'],exact=True).count)
+        finally:client.close()
     def test_vector_fixture_applies_role_and_granularity_conditions_together(self):
         rows=[SimpleNamespace(id=str(index),payload={'content':'authored source','role':role,'granularity':lane})
               for index,(role,lane)in enumerate([('standard','short'),('standard','structure'),('tender','structure')])]
@@ -99,7 +110,8 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(s.HTTPException)as e:self.query()
         self.assertEqual(e.exception.detail['kind'],'DENSE_WINDOW_SCOPE_INCOMPLETE')
     def test_old_signature_rejected(self):
-        self.index();metadata=s._projects['one'];metadata['signature']['signatureVersion']=2
+        self.index();path=s.metadata_path('one');metadata=json.loads(path.read_text(encoding='utf-8'))
+        metadata['signature']['signatureVersion']=2;path.write_text(json.dumps(metadata),encoding='utf-8')
         with self.assertRaises(s.HTTPException)as e:s.read_project('one')
         self.assertEqual(e.exception.status_code,409)
     def test_add_remove_change_invalidates_full_corpus_signature(self):
@@ -153,6 +165,26 @@ class ServerTests(unittest.TestCase):
         self.index();n=len(self.encodes);r=self.query(role='standard');self.assertEqual(r['hits'],[]);self.assertEqual(n,len(self.encodes))
     def test_original_native_part_payload_is_retained(self):
         self.p['parts'][0]['cells']=[{'column':1,'text':'中文😀'}];self.index();r=self.query();self.assertEqual(r['hits'][0]['payload']['parts'],self.p['parts'])
+
+
+class JournalFixtureIsolationTests(unittest.TestCase):
+    def test_direct_fixture_cleanup_restores_journal_between_roots(self):
+        sentinel=object()
+        with patch.object(s,'_request_evidence',sentinel),patch.object(s,'STATE',s.STATE):
+            roots=[]
+            for _ in range(2):
+                fixture=ServerTests('runTest')
+                fixture.setUp()
+                try:
+                    expected=s.STATE/'run-evidence'
+                    journal=s.request_evidence()
+                    self.assertEqual(journal.root,expected)
+                    self.assertIs(s.request_evidence(),journal)
+                    roots.append(expected)
+                finally:
+                    fixture.tearDown()
+                self.assertIs(s._request_evidence,sentinel)
+            self.assertNotEqual(*roots)
 
 
 if __name__=='__main__':unittest.main()

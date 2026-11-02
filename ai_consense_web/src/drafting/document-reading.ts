@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import JSZip from 'jszip'
 import mammoth from 'mammoth/mammoth.browser.min.js'
+import { sha256Bytes } from '@/api/sha256Bytes'
 import { documentParagraphText as htmlParagraphText } from './document-reading-text'
 import { hideUnverifiedListMarkers } from './reading-list-markers'
 
@@ -133,8 +134,7 @@ export function readableOfficeMath(element: Element): { fragment: DocumentFragme
 
 /** Convert the exact source/revision bytes into a read-only main-document flow. */
 export async function convertDocumentReading(bytes: ArrayBuffer, expectedSha256: string): Promise<DocumentReading> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  const docxSha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  const docxSha256 = (await sha256Bytes(bytes)).hex
   if (!/^[a-f0-9]{64}$/i.test(expectedSha256) || docxSha256 !== expectedSha256.toLowerCase()) {
     throw new Error('DOCX_VERSION_MISMATCH: document bytes do not match the expected source/revision SHA-256.')
   }
@@ -333,6 +333,11 @@ export async function convertDocumentReading(bytes: ArrayBuffer, expectedSha256:
     spanningCell.append(marker)
     mapped.set(paragraph.id, marker)
     hiddenMergedCellParagraphs.push({ id: paragraph.id, ordinal: paragraph.ordinal })
+  }
+  // Mammoth drops a final page break; retain its native text offset without changing layout.
+  for (const paragraph of paragraphs) {
+    const block = mapped.get(paragraph.id), run = elements[paragraph.ordinal - 1]?.lastElementChild, last = run?.lastElementChild
+    if (block && run?.namespaceURI === WORD && run.localName === 'r' && last?.namespaceURI === WORD && last.localName === 'br' && last.getAttributeNS(WORD, 'type') === 'page' && `${block.textContent}\n` === paragraph.text) block.append(document.createTextNode('\n'))
   }
   const textMismatches: DocumentReadingCoverage['textMismatches'] = []
   let exactTextMatchCount = 0, normalizedTextMatchCount = 0

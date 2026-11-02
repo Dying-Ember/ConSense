@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import sys
+import os
 
 from complete_ocr_config import prepare_complete_ocr
 
@@ -80,6 +81,45 @@ class CompleteOcrConfigTest(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError): self.prepare()
             self.assertFalse((self.root/'prepared').exists())
             provider.clear(); provider.update(original)
+
+    @unittest.skipIf(os.name == 'nt', 'fixed GPU uses POSIX private token permissions')
+    def test_fixed_gpu_configuration_is_reported_without_token_contents(self):
+        token = self.root/'token'; token.write_text('private-token'); os.chmod(token, 0o600)
+        for name, stage, port in (('paddleocr-vl','paddle',28771), ('mineru','mineru',28772)):
+            self.config[name]['baseUrl'] = f'http://127.0.0.1:{port}'
+            self.config[name]['ownedFixed'] = {'gatewayProfileSha256':'d'*64, 'stage':stage, 'socketPath':str(self.root/'gateway.sock'),
+                'tokenFile':str(token), 'readyTimeoutSeconds':10, 'cleanupTimeoutSeconds':2}
+        receipt = self.prepare()
+        self.assertEqual(receipt['handoffStatus'], 'owned_native_release_required')
+        self.assertEqual(receipt['providers']['mineru']['ownedFixed'], self.config['mineru']['ownedFixed'])
+        self.assertNotIn('private-token', json.dumps(receipt))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX permission and symlink checks')
+    def test_fixed_gpu_rejects_shared_token_and_unsafe_socket_path(self):
+        token = self.root/'token'; token.write_text('private-token'); os.chmod(token, 0o644)
+        provider = self.config['paddleocr-vl']; provider['baseUrl'] = 'http://127.0.0.1:28771'
+        provider['ownedFixed'] = {'gatewayProfileSha256':'d'*64, 'stage':'paddle', 'socketPath':str(self.root/'gateway.sock'),
+            'tokenFile':str(token), 'readyTimeoutSeconds':10, 'cleanupTimeoutSeconds':2}
+        with self.assertRaisesRegex(ValueError, 'private'): self.prepare()
+        os.chmod(token, 0o600)
+        provider['ownedFixed']['socketPath'] = 'relative.sock'
+        with self.assertRaisesRegex(ValueError, 'socket path'): self.prepare()
+        provider['ownedFixed']['socketPath'] = str(self.root/'gateway.sock')
+        link = self.root/'token-link'; link.symlink_to(token); provider['ownedFixed']['tokenFile'] = str(link)
+        with self.assertRaisesRegex(ValueError, 'token file'): self.prepare()
+
+    @unittest.skipIf(os.name == 'nt', 'fixed GPU uses POSIX private token permissions')
+    def test_fixed_gpu_requires_independently_pinned_gateway_profile(self):
+        token = self.root/'token'; token.write_text('private-token'); os.chmod(token, 0o600)
+        provider = self.config['paddleocr-vl']; provider['baseUrl'] = 'http://127.0.0.1:28771'
+        provider['ownedFixed'] = {'stage':'paddle', 'socketPath':str(self.root/'gateway.sock'),
+            'tokenFile':str(token), 'readyTimeoutSeconds':10, 'cleanupTimeoutSeconds':2}
+        for pin in (None, '', 'a'*63, 'A'*64, 'g'*64, 12):
+            with self.subTest(pin=pin):
+                if pin is None: provider['ownedFixed'].pop('gatewayProfileSha256', None)
+                else: provider['ownedFixed']['gatewayProfileSha256'] = pin
+                with self.assertRaisesRegex(ValueError, 'gateway profile SHA256 pin'): self.prepare()
+                self.assertFalse((self.root/'prepared').exists())
 
 
 if __name__ == '__main__':

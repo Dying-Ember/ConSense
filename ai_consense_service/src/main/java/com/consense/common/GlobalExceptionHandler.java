@@ -16,7 +16,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BizException.class)
     public ApiResponse<Void> handleBiz(BizException ex) {
-        log.warn("business error: {}", ex.getMessage());
+        log.warn("business error: {}", DiagnosticSummary.of(ex));
         return ApiResponse.fail(ex.getCode(), ex.getMessage(), ex.getPublicReason());
     }
 
@@ -36,7 +36,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ApiResponse<Void> handleOther(Exception ex) {
-        log.error("unexpected error", ex);
+        log.error("unexpected error: {}", DiagnosticSummary.unexpected(ex));
         return ApiResponse.fail(5000, PublicErrorMessages.from(ex,"服务内部错误，请稍后重试；若仍失败，请联系维护人员。"));
     }
 }

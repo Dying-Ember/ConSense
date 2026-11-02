@@ -101,7 +101,7 @@ public class DocumentParser {
     public static void progress(String message) {
         if(PROGRESS.get()==null)return;
         try { PROGRESS.get().accept(message); }
-        catch(RuntimeException failure) { log.warn("解析进度写入失败；内容解析继续",failure); }
+        catch(RuntimeException failure) { log.warn("解析进度写入失败；内容解析继续: {}",com.consense.common.DiagnosticSummary.of(failure)); }
     }
 
     public ParsedDocument parse(String fileName, byte[] bytes) {
@@ -304,7 +304,7 @@ public class DocumentParser {
             throw e;
         } catch (Exception e) {
             probe.originalFailure("parse_failure",null,e);
-            log.warn("解析 {} 失败: {}", fileName, e.getMessage());
+            log.warn("解析文件失败: {}", com.consense.common.DiagnosticSummary.of(e));
             BizException wrapped=new BizException(4003, "无法解析文件 " + fileName + "：" + e.getMessage());operationFailure=wrapped;throw wrapped;
         } catch(Error e){operationFailure=e;probe.originalFailure("parse_failure",null,e);throw e;
         } finally {probe.finish(returnedNormally?"returned_normally":"aborted",operationFailure);}
@@ -478,7 +478,7 @@ public class DocumentParser {
                         if(nativeFirst&&!coverage.getNeedsReviewPages().contains(pageNo))coverage.getNeedsReviewPages().add(pageNo);
                         coverage.getLimitations().add("Page " + pageNo + ": " + abbreviate(e.getMessage(), 180));
                         status = "ocr_failed";
-                        log.warn("第 {} 页 OCR 未完成: {}", pageNo, e.getMessage());
+                        log.warn("第 {} 页 OCR 未完成: {}", pageNo, com.consense.common.DiagnosticSummary.of(e));
                     } finally {if(image!=null)image.flush();}
                 }
                 boolean pageParsed=!"ocr_failed".equals(status)&&!(nativeFirst&&JsonUtils.isBlankText(text));

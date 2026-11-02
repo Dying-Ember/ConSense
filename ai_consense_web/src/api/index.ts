@@ -1,4 +1,4 @@
-import { api, type PreparedDownload } from './client'
+import { api, captureLlmSelection, type PreparedDownload } from './client'
 import type { FixedBaselineEvidence } from './fixedBaselineEvidence'
 import { reviewSourceBindings } from './source-locations'
 import type { ReviewBootstrap, ReviewGraph, ReviewGraphDelta, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary, ReviewSaveReceipt, ReviewSource } from '@/drafting/source-review-types'
@@ -58,7 +58,8 @@ export { api, ApiError, setApiErrorReporter, captureLlmSelection, setLlmProfileR
 
 /* ------------------------------------------------------------ 项目 */
 
-export interface FixedSlSource { editionId: string; sha256: string; label?: string }
+export interface FixedSlSource { editionId: string; sha256: string; label?: string; manifestSha256?: string }
+export interface FixedSelectionState { projectId: string; status: 'checking' | 'disabled' | 'ready' | 'needs-selection' | 'unavailable' }
 export interface FixedReferenceSelection { manifestSha256: string; slSources: FixedSlSource[] }
 export interface FixedReferenceSelectionStatus { manifestSha256: string; availableSlSources: FixedSlSource[]; selection: FixedReferenceSelection | null }
 export const fixedReferenceApi = {
@@ -92,6 +93,18 @@ export const projectApi = {
 
 /* ------------------------------------------------------------ 起草 */
 
+const documentSourcesInFlight = new Map<string, Promise<Blob>>()
+function documentSource(projectId: string, fileKey: string, revisionId: string): Promise<Blob> {
+  const selection = captureLlmSelection()
+  const key = JSON.stringify([projectId, fileKey, revisionId, selection.profileId])
+  const existing = documentSourcesInFlight.get(key)
+  if (existing) return existing
+  const request = api.blob(`/drafting/${projectId}/documents/${fileKey}/source?revisionId=${encodeURIComponent(revisionId)}`, undefined, false, selection)
+  const shared = request.finally(() => { if (documentSourcesInFlight.get(key) === shared) documentSourcesInFlight.delete(key) })
+  documentSourcesInFlight.set(key, shared)
+  return shared
+}
+
 export const draftingApi = {
   automationStart: (projectId: string, body: DraftAutomationStart, llmSelection: LlmSelection) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation`, body, { timeout: 30000, llmSelection, reportError: false }),
   automationLatest: (projectId: string, signal?: AbortSignal) => api.get<DraftAutomationRun | null>(`/drafting/${projectId}/graph/automation/latest`, { timeout: 30000, signal, llmSelection: { profileId: null }, reportError: false }),
@@ -119,6 +132,8 @@ export const draftingApi = {
   reviewRevision: (projectId: string, revisionId: string) => api.get<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}`),
   reviewConfirmDefinitions: (projectId: string, revisionId: string, expectedCurrentRevisionId: string | null, reason: string, acknowledgeUnresolved: boolean, fieldIds?: string[], reuseForEdition?: boolean, completeEdition?: boolean) => api.post<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/confirm-definitions`, { expectedCurrentRevisionId, reason, acknowledgeUnresolved, ...(fieldIds ? { fieldIds } : {}), ...(reuseForEdition ? { reuseForEdition: true } : {}), ...(completeEdition ? { completeEdition: true } : {}) }, { reportError: false }),
   pdfSccReference: (projectId: string, revisionId: string, sourceId: string, query = '', offset = 0) => api.get<{ available: boolean; sourceSha256?: string; status?: string; limitations?: string[]; candidates?: { pointId: string; label: string; kind: string; clause: string; relationStatus: string; summary: string; ruleCount: number }[]; total?: number; nextOffset?: number | null }>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/pdf-scc-reference?sourceId=${encodeURIComponent(sourceId)}&q=${encodeURIComponent(query)}&offset=${offset}`, { reportError: false }),
+  packagedPdfSccReference: (projectId: string, query = '', offset = 0) => api.get<{ available: boolean; sourceSha256?: string; status?: string; limitations?: string[]; candidates?: { pointId: string; label: string; kind: string; clause: string; relationStatus: string; summary: string; ruleCount: number }[]; total?: number; nextOffset?: number | null }>(`/drafting/${projectId}/packaged-pdf-scc-reference?q=${encodeURIComponent(query)}&offset=${offset}`, { reportError: false }),
+  packagedPdfSccReferencePoint: (projectId: string, pointId: string) => api.get<{ available: boolean; sourceSha256?: string; status?: string; limitations?: string[]; point?: { pointId: string; label: string; kind: string; clause: string; relationStatus: string; meaning?: string; applicability?: string; valueSource?: string; impacts?: string[]; evidence?: { page: number; lineStart?: number; lineEnd?: number; quote: string }[] }; rules?: Record<string, unknown>[] }>(`/drafting/${projectId}/packaged-pdf-scc-reference/${encodeURIComponent(pointId)}`, { reportError: false }),
   pdfSccReferenceFacts: (projectId: string, revisionId: string, sourceId: string) => api.get<{ available: boolean; sourceSha256?: string; status?: string; facts?: { inputRef: string; valueType: string; referencePoints: { pointId: string; label: string; clause: string; sourceStatus: string }[] }[] }>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/pdf-scc-reference/facts?sourceId=${encodeURIComponent(sourceId)}`, { reportError: false }),
   pdfSccRelatedRules: (projectId: string, revisionId: string, sourceId: string, offset = 0) => api.get<{ available: boolean; sourceSha256?: string; status?: string; limitations?: string[]; confirmedInputCount?: number; total?: number; nextOffset?: number | null; coverage?: string; rules?: { ruleId: string; label: string; relationType: string; impactType: string; pointIds: string[]; inputs: { inputRef: string; role: string; stage: string; confirmedNodeIds: string[] }[]; branches: { id: string; when: unknown }[]; status: string; targetBinding: string; executable: boolean }[] }>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/pdf-scc-reference/related-rules?sourceId=${encodeURIComponent(sourceId)}&offset=${offset}`, { reportError: false }),
   pdfSccReferencePoint: (projectId: string, revisionId: string, sourceId: string, pointId: string) => api.get<{ available: boolean; sourceSha256?: string; status?: string; limitations?: string[]; point?: { pointId: string; label: string; kind: string; clause: string; relationStatus: string; meaning?: string; applicability?: string; valueSource?: string; impacts?: string[]; evidence?: { page: number; lineStart?: number; lineEnd?: number; quote: string }[] }; rules?: Record<string, unknown>[] }>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/pdf-scc-reference/${encodeURIComponent(pointId)}?sourceId=${encodeURIComponent(sourceId)}`, { reportError: false }),
@@ -185,15 +200,14 @@ export const draftingApi = {
     // Full SCC templates are generated in many model calls; keep the request alive.
     api.post<DraftDocument[]>(`/drafting/${projectId}/generate?lang=en`, undefined, { timeout: 3600000, llmSelection }),
   documents: (projectId: string) => api.get<DraftDocument[]>(`/drafting/${projectId}/documents`),
-  documentSource: (projectId: string, fileKey: string, revisionId: string) =>
-    api.blob(`/drafting/${projectId}/documents/${fileKey}/source?revisionId=${encodeURIComponent(revisionId)}`, undefined, false),
+  documentSource,
   updateDocument: (projectId: string, fileKey: string, patch: DraftBodyPatch) =>
     api.put<DraftDocument>(`/drafting/${projectId}/documents/${fileKey}`, patch),
   refreshToc: (projectId: string, fileKey: string, head: { revisionId: string; docxSha256: string }) => api.post<{ document: DraftDocument; tocFinalization: { status: string; reason?: string; headingFlowStatus?: string; headingFlowReason?: string }; updated: boolean }>(`/drafting/${projectId}/documents/${fileKey}/refresh-toc`, head, { timeout: 300000, llmSelection: { profileId: null }, reportError: false }),
   previewDocument: (projectId: string, fileKey: string, revisionId?: string) =>
     api.blob(`/drafting/${projectId}/documents/${fileKey}/preview.pdf${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`),
   exportDocument: (projectId: string, fileKey: string, format: 'docx' | 'pdf', revisionId?: string) =>
-    api.download(`/drafting/${projectId}/documents/${fileKey}/export.${format}${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`, `ConSense_${fileKey}.${format}`),
+    api.download(`/drafting/${projectId}/documents/${fileKey}/export.${format}${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`, `ConSense_${fileKey}.${format}`, { timeout: 3600000 }),
   download: (projectId: string, fileKey: string, fallbackName: string) =>
     api.download(`/drafting/${projectId}/documents/${fileKey}/download`, fallbackName)
 }

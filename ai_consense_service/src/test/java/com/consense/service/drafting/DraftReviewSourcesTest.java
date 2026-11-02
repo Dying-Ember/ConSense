@@ -16,6 +16,12 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +29,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -89,9 +97,73 @@ class DraftReviewSourcesTest {
         DraftReviewSources reader=new DraftReviewSources(storage,properties);ObjectNode passage=JsonUtils.mapper().createObjectNode().put("docId","ntt").put("text","42 months");
         DraftReviewSources.BoundSource binding=reader.bindSource(source);
         assertEquals(reader.bind(source,passage),binding.bind(passage));assertEquals("missing",binding.bindObservation(passage).path("status").asText());
-        assertEquals("bound",binding.bind(passage).path("status").asText());verify(storage,times(2)).read(Paths.get(source.getStoragePath()).toRealPath().toString());
+        assertEquals("bound",binding.bind(passage).path("status").asText());verify(storage,times(2)).readWithinStorage(source.getStoragePath(),Paths.get(source.getStoragePath()).toRealPath());
         Files.write(Paths.get(source.getStoragePath()),docx("Changed original bytes must not borrow the earlier binding."));
         BizException changed=assertThrows(BizException.class,()->reader.bindSource(source));assertEquals("REVIEW_SOURCE_BYTES_CHANGED",changed.getMessage());
+    }
+
+    @Test void transactionReusesPreparationOnlyForSameVerifiedProjectSourceAndBytes() throws Exception {
+        byte[] bytes=docx("A source-bound duration of 42 months.");SourceDocument source=source(1,"NTT",bytes);
+        ObjectNode anchor=JsonUtils.mapper().createObjectNode().put("docId","ntt").put("text","42 months");
+        JsonNode expected=sources.bind(source,anchor);
+        TransactionSynchronizationManager.initSynchronization();TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionName("com.consense.service.drafting.DraftTemplateGraphService.save");
+        try {
+            assertEquals(expected,sources.bindSource(source).bind(anchor));
+            assertEquals(expected,sources.bindSource(source).bind(anchor));
+            Map<?,?> cache=(Map<?,?>)TransactionSynchronizationManager.getResource(sources);assertEquals(1,cache.size());
+            SourceDocument other=source(2,"NTT",bytes);other.setId(source.getId());other.setProjectId("other-project");
+            assertEquals("bound",sources.bindSource(other).bind(anchor).path("status").asText());assertEquals(2,cache.size());
+            byte[] changed=docx("A changed duration of 36 months.");Files.write(Paths.get(source.getStoragePath()),changed);
+            assertEquals("REVIEW_SOURCE_BYTES_CHANGED",assertThrows(BizException.class,()->sources.bindSource(source)).getMessage());
+            source.setSourceSha256(DraftTemplateRouting.sha(changed));
+            assertNotEquals("bound",sources.bindSource(source).bind(anchor).path("status").asText());assertEquals(3,cache.size());
+        } finally {
+            for(TransactionSynchronization synchronization:TransactionSynchronizationManager.getSynchronizations())synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+            TransactionSynchronizationManager.clearSynchronization();TransactionSynchronizationManager.setActualTransactionActive(false);TransactionSynchronizationManager.setCurrentTransactionName(null);
+        }
+        assertFalse(TransactionSynchronizationManager.hasResource(sources));
+    }
+
+    @Test void realRollbackAndRequiresNewDoNotSharePreparedTemplates() throws Exception {
+        byte[] bytes=docx("42 months");SourceDocument source=source(1,"NTT",bytes);
+        ObjectNode anchor=JsonUtils.mapper().createObjectNode().put("docId","ntt").put("text","42 months");
+        DataSourceTransactionManager manager=transactionManager();TransactionTemplate outer=graphTransaction(manager),inner=graphTransaction(manager);
+        inner.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        outer.execute(status->{
+            assertEquals("bound",sources.bindSource(source).bind(anchor).path("status").asText());
+            Object outerCache=TransactionSynchronizationManager.getResource(sources);assertNotNull(outerCache);
+            inner.execute(nested->{
+                assertNull(TransactionSynchronizationManager.getResource(sources));
+                assertEquals("bound",sources.bindSource(source).bind(anchor).path("status").asText());
+                assertNotSame(outerCache,TransactionSynchronizationManager.getResource(sources));nested.setRollbackOnly();return null;
+            });
+            assertSame(outerCache,TransactionSynchronizationManager.getResource(sources));status.setRollbackOnly();return null;
+        });
+        assertFalse(TransactionSynchronizationManager.hasResource(sources));
+        outer.execute(status->{assertNull(TransactionSynchronizationManager.getResource(sources));sources.bindSource(source);return null;});
+        assertFalse(TransactionSynchronizationManager.hasResource(sources));
+        new TransactionTemplate(manager).execute(status->{sources.bindSource(source);assertNull(TransactionSynchronizationManager.getResource(sources));return null;});
+    }
+
+    @Test void concurrentTransactionsKeepSeparatePreparationCaches() throws Exception {
+        byte[] bytes=docx("42 months");SourceDocument source=source(1,"NTT",bytes);
+        DataSourceTransactionManager manager=transactionManager();CountDownLatch both=new CountDownLatch(2);ExecutorService pool=Executors.newFixedThreadPool(2);
+        try {
+            Callable<Object> work=()->{
+                Object result=graphTransaction(manager).execute(status->{sources.bindSource(source);Object cache=TransactionSynchronizationManager.getResource(sources);
+                    both.countDown();try{if(!both.await(10,TimeUnit.SECONDS))throw new IllegalStateException("Parallel transaction did not start");}catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IllegalStateException(interrupted);}return cache;});
+                assertFalse(TransactionSynchronizationManager.hasResource(sources));return result;
+            };
+            Future<Object> first=pool.submit(work),second=pool.submit(work);assertNotSame(first.get(20,TimeUnit.SECONDS),second.get(20,TimeUnit.SECONDS));
+        } finally {pool.shutdownNow();}
+    }
+
+    private static DataSourceTransactionManager transactionManager() {
+        return new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:draft_review_cache;DB_CLOSE_DELAY=-1","sa",""));
+    }
+    private static TransactionTemplate graphTransaction(DataSourceTransactionManager manager) {
+        TransactionTemplate transaction=new TransactionTemplate(manager);transaction.setName("com.consense.service.drafting.DraftTemplateGraphService.save");return transaction;
     }
 
     @Test void sparseNativeSpansRetainTheirOwnBoundariesAndRejectOverlap() throws Exception {

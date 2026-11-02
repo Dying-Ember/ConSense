@@ -22,6 +22,7 @@ function loadVue(file, { boundaries = {}, globals = {} } = {}) {
       require(name) {
         if (name === 'vue') return vue
         if (Object.hasOwn(boundaries, name)) return boundaries[name]
+        if (name === '@noble/hashes/sha256') return require(name)
         const resolved = name.startsWith('@/') ? path.resolve(root, name.slice(2)) : name.startsWith('.') ? path.resolve(path.dirname(target), name) : null
         if (!resolved) throw new Error(`Undeclared external boundary: ${name}`)
         const next = [resolved, `${resolved}.ts`, `${resolved}.vue`, path.join(resolved, 'index.ts')].find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isFile())

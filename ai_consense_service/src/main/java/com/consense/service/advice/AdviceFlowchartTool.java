@@ -19,7 +19,12 @@ final class AdviceFlowchartTool {
             + "Do not return answer sections, self-checks, Mermaid source, Markdown or provider tool_calls. "
             + "The application renders and labels this as an unverified draft, with no complete legal conclusion.";
 
-    static String system(List<CitationVO> sources,String question){return INSTRUCTION+"\nTool schema:\n"+schema(sources)+AdvisoryHarness.languageInstruction(question);}
+    static String system(List<CitationVO> sources,String question){
+        ObjectNode promptSchema=(ObjectNode)schema(sources).deepCopy();
+        ((ObjectNode)promptSchema.at("/properties/citations/items")).remove("enum");
+        ((ObjectNode)promptSchema.at("/properties/evidenceRequests/items/properties/citation")).remove("enum");
+        return INSTRUCTION+"\nTool schema:\n"+promptSchema+AdvisoryHarness.languageInstruction(question);
+    }
 
     static JsonNode schema(List<CitationVO> sources) {
         ObjectNode schema=(ObjectNode)JsonUtils.parse("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"tool\",\"nodes\",\"edges\",\"citations\"],\"properties\":{"
@@ -82,6 +87,36 @@ final class AdviceFlowchartTool {
                 ||java.util.regex.Pattern.compile("(?im)(?:^|;)\\s*(?:click|classDef|style|linkStyle)\\b").matcher(mermaid).find())
             throw AdvisoryHarness.invalid("Flowchart labels contain a directive rejected by the diagram renderer");
         return new Result(mermaid,citations,requests);
+    }
+    /** A closed diagnostic vocabulary avoids logging model text or schema enum values. */
+    static String safeFailureCode(Throwable failure) {
+        if(!(failure instanceof AdvisoryHarness.ContractViolation))return "other_invalid";
+        String reason=String.valueOf(failure.getMessage());
+        int next=reason.indexOf("; ");if(next>=0)reason=reason.substring(0,next);
+        switch(reason) {
+            case "Flowchart tool output is missing or too large": return "missing_or_oversize";
+            case "Flowchart tool requires one JSON object":
+            case "Flowchart tool requires valid JSON": return "invalid_json";
+            case "Flowchart needs at least two nodes and one edge": return "empty_graph";
+            case "Flowchart contains an unknown source alias":
+            case "Invalid or duplicate evidence ID": return "invalid_citation";
+            case "Flowchart node IDs must be unique": return "duplicate_node_id";
+            case "Flowchart node labels cannot be blank": return "blank_label";
+            case "Flowchart edge refers to an unknown node": return "unknown_edge_node";
+            case "Flowchart labels contain a directive rejected by the diagram renderer": return "unsafe_directive";
+            case "Flowchart labels must be safe single-line text": return "unsafe_label";
+            default: break;
+        }
+        if(!reason.startsWith("answer"))return "other_contract";
+        String section=reason.startsWith("answer.nodes")?"nodes":reason.startsWith("answer.edges")?"edges"
+                :reason.startsWith("answer.citations")?"citations":reason.startsWith("answer.evidenceRequests")?"evidence_requests"
+                :reason.startsWith("answer.tool")?"tool":"root";
+        String constraint=reason.contains(": required field is missing")?"required":reason.contains(": expected an array")?"array"
+                :reason.contains(": expected bounded text")?"text":reason.contains(": text must match")?"pattern"
+                :reason.contains(": value must be one of")?"enum":reason.contains(": fields must be only")?"fields"
+                :reason.contains(": value is required and cannot be null")?"null":reason.contains(": expected an object")?"object"
+                :reason.contains(": expected a boolean")?"boolean":"other";
+        return "schema_"+section+"_"+constraint;
     }
     private static String label(String text) {
         if(text.matches("(?s).*[<>`\\p{Cntrl}].*"))throw AdvisoryHarness.invalid("Flowchart labels must be safe single-line text");

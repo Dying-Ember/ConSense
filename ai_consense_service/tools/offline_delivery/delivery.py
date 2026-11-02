@@ -3,8 +3,10 @@ import argparse
 import hashlib
 import json
 import ipaddress
-from pathlib import Path
+import posixpath
+from pathlib import Path, PurePosixPath
 import re
+import stat
 
 STAGES = ('paddle', 'mineru', 'document-embedding', 'query-embedding-rerank', 'business-llm')
 CONTRACT = 'consense-offline-delivery-v1'
@@ -31,6 +33,62 @@ def asset(root, row):
     require(isinstance(row.get('bytes'), int) and row['bytes'] > 0 and path.stat().st_size == row['bytes']
             and re.fullmatch('[a-f0-9]{64}', row.get('sha256', '')) and sha(path) == row['sha256'], 'asset bytes or SHA256 changed')
     return path
+
+
+def app_release_scope(app):
+    jar_parent = PurePosixPath(app['jar']).parent.as_posix()
+    scope = posixpath.commonpath((jar_parent, app['webDirectory']))
+    return scope or '.'
+
+
+def app_release_files(manifest):
+    scope = app_release_scope(manifest['externalApp'])
+    return sorted(PurePosixPath(row['path']).relative_to(scope).as_posix()
+                  for row in manifest['assets']
+                  if scope == '.' or row['path'].startswith(scope + '/'))
+
+
+def app_release_list(paths):
+    return ''.join(path + '\n' for path in sorted(paths)).encode('utf8')
+
+
+def validate_app_inventory_size(jar, web_files, release_files):
+    require(len(jar) + 67 + sum(2 * len(path) + 68 for path in web_files)
+            + sum(len(path) + 1 for path in release_files) < 800000, 'combined App inventory too large')
+
+
+def prepare_local_app_release_inventory(root, expected_entry_sha):
+    """Add an inventory to a new local App release and return its independent pin."""
+    root = Path(root).absolute()
+    require(re.fullmatch(r'[a-f0-9]{64}', expected_entry_sha), 'invalid entrypoint pin')
+    require(not any(path.is_symlink() for path in (root, *root.parents)), 'symlinked release root')
+    require(root.is_dir() and sha(root / 'app-entrypoint.sh') == expected_entry_sha, 'release root or entrypoint identity differs')
+    listing = root / 'manifest/release-files'
+    require(not listing.exists() and not listing.is_symlink(), 'release inventory already exists')
+    web = (root / 'manifest/web-files').read_text(encoding='utf8').splitlines()
+    require(web and web == sorted(set(web)) and all(re.fullmatch(r'web/[A-Za-z0-9_][A-Za-z0-9_./-]*', name)
+            and all(part not in ('', '.', '..') for part in name.split('/')) for name in web), 'invalid web inventory')
+    pairs = {}
+    for line in (root / 'manifest/sha256sums').read_text(encoding='utf8').splitlines():
+        require(re.fullmatch(r'[a-f0-9]{64}  [A-Za-z0-9_][A-Za-z0-9_./-]*', line) and line[66:] not in pairs,
+                'invalid checksum list')
+        pairs[line[66:]] = line[:64]
+    expected = {'app-entrypoint.sh', 'app.jar', 'manifest/web-files', 'manifest/sha256sums', *web}
+    require(set(pairs) == {'app.jar', *web}, 'checksum scope differs')
+    require(all(sha(root / name) == value for name, value in pairs.items()), 'release file checksum differs')
+    actual = set()
+    for path in root.rglob('*'):
+        mode = path.lstat().st_mode
+        if stat.S_ISREG(mode):
+            actual.add(path.relative_to(root).as_posix())
+        else:
+            require(stat.S_ISDIR(mode), 'release contains non-regular entry')
+    require(actual == expected, 'release inventory differs')
+    data = app_release_list(expected | {'manifest/release-files'})
+    with listing.open('xb') as stream:
+        stream.write(data)
+    return {'releaseFilesSha256': hashlib.sha256(data).hexdigest(),
+            'contentManifestSha256': sha(root / 'manifest/sha256sums')}
 
 
 def validate(manifest, root):
@@ -71,7 +129,17 @@ def validate(manifest, root):
         require(actual == declared and all(re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._/-]*', path)
                 and all(part not in ('', '.', '..') for part in path.split('/')) for path in declared),
                 'complete safe web file inventory required')
-        require(len(jar) + 66 + sum(2 * len(path) + 67 for path in declared) < 800000, 'web file inventory too large')
+        scope = app_release_scope(external_app)
+        release_root = Path(root) / scope
+        entries = list(release_root.rglob('*'))
+        require(all(not item.is_symlink() and (item.is_dir() or item.is_file()) for item in entries),
+                'App release must contain only regular files and directories')
+        actual = {item.relative_to(release_root).as_posix() for item in entries if item.is_file()}
+        expected = app_release_files(manifest)
+        require(set(expected) == actual and all(re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._/-]*', path)
+                and all(part not in ('', '.', '..') for part in path.split('/')) for path in expected),
+                'complete safe App release file inventory required')
+        validate_app_inventory_size(jar, declared, expected)
     stages = manifest.get('stages', [])
     require([stage.get('name') for stage in stages] == list(STAGES), 'complete ordered GPU stages required')
     paths = {row['path'] for row in rows}
@@ -159,9 +227,12 @@ def documents(manifest, manifest_sha):
     if external_app is not None:
         jar, web = external_app['jar'], external_app['webDirectory']
         app_assets = sorted((row for row in manifest['assets'] if row['path'] == jar or row['path'].startswith(web + '/')), key=lambda row: row['path'])
+        release_files = app_release_list(app_release_files(manifest)).decode('utf8')
+        content_manifest = ''.join(row['sha256'] + '  ' + row['path'] + '\n' for row in app_assets)
         docs.append({'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata('consense-app-files-' + release), 'immutable': True,
-                     'data': {'sha256sums': ''.join(row['sha256'] + '  ' + row['path'] + '\n' for row in app_assets),
-                              'web-files': ''.join(row['path'] + '\n' for row in app_assets if row['path'].startswith(web + '/'))}})
+                     'data': {'sha256sums': content_manifest,
+                               'web-files': ''.join(row['path'] + '\n' for row in app_assets if row['path'].startswith(web + '/')),
+                               'release-files': release_files}})
         cpu = tuple(row for row in cpu if row[0] != 'web')
     for name, port, cores, memory, mount, claim, env in cpu:
         if name == 'backend' and manifest.get('coordinator'):
@@ -179,6 +250,9 @@ def documents(manifest, manifest_sha):
         if name == 'backend' and external_app is not None:
             container['command'] = ['/bin/sh', '/app/app-entrypoint.sh']
             env.extend([{'name': 'APP_JAR', 'value': jar}, {'name': 'APP_WEB_DIRECTORY', 'value': web}])
+            env.extend([{'name': 'APP_RELEASE_DIRECTORY', 'value': app_release_scope(external_app)},
+                        {'name': 'APP_RELEASE_FILES_SHA256', 'value': hashlib.sha256(release_files.encode('utf8')).hexdigest()},
+                        {'name': 'APP_CONTENT_MANIFEST_SHA256', 'value': hashlib.sha256(content_manifest.encode('utf8')).hexdigest()}])
             container['volumeMounts'].extend([{'name': 'artifacts', 'mountPath': '/artifacts', 'readOnly': True},
                                                {'name': 'app-files', 'mountPath': '/app-files', 'readOnly': True}])
             pod['volumes'].extend([{'name': 'artifacts', 'persistentVolumeClaim': {'claimName': 'consense-artifacts', 'readOnly': True}},
@@ -262,6 +336,9 @@ def prepare(manifest_path, artifact_root, output):
     manifest = validate(json.loads(raw), artifact_root)
     digest = hashlib.sha256(raw).hexdigest()
     require(not output.exists(), 'fresh output directory required')
+    if manifest.get('externalApp') is not None:
+        release_root = (Path(artifact_root) / app_release_scope(manifest['externalApp'])).resolve()
+        require(not output.resolve().is_relative_to(release_root), 'prepared output must be outside App release root')
     output.mkdir(parents=True)
     (output / 'manifest.json').write_bytes(raw)
     resources = documents(manifest, digest)

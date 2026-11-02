@@ -418,7 +418,10 @@ class VettingDirectionWorkflowTest {
         assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(55),VettingSemanticReview.directionRunNanos(props.getVetting().getSemanticRunMinutes()));
         assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(1),VettingSemanticReview.directionRunNanos(0));
         assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(1),VettingSemanticReview.directionRunNanos(-5));
-        assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(120),VettingSemanticReview.directionRunNanos(Integer.MAX_VALUE));
+        assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(120),VettingSemanticReview.directionRunNanos(120));
+        assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(360),VettingSemanticReview.directionRunNanos(360));
+        assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(1440),VettingSemanticReview.directionRunNanos(1440));
+        assertEquals(java.util.concurrent.TimeUnit.MINUTES.toNanos(1440),VettingSemanticReview.directionRunNanos(Integer.MAX_VALUE));
     }
     private void exerciseTargetedFollowup(boolean standardNeed,long initialSeconds)throws Exception{exerciseTargetedFollowup(standardNeed,initialSeconds,false);}
     private void exerciseTargetedFollowup(boolean standardNeed,long initialSeconds,boolean multipleNeeds)throws Exception{exerciseTargetedFollowup(standardNeed,initialSeconds,multipleNeeds,initialSeconds==0?55:24);}

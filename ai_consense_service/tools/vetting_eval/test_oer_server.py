@@ -195,7 +195,7 @@ class OerHttpContractTest(unittest.TestCase):
             response = self.client.get('/health')
         self.assertEqual(200, response.status_code)
         body = response.json()
-        self.assertEqual(4, body['indexSignatureVersion'])
+        self.assertEqual(6, body['indexSignatureVersion'])
         self.assertEqual(FRESH_RECIPE, body['oer']['recipe'])
         windows = body['retrieval']['sourceWindows']
         self.assertEqual(self.policy.policyIdentity, windows['competitionScope'])
@@ -273,7 +273,10 @@ class OerHttpContractTest(unittest.TestCase):
         self.assertIs(recipe['rerankRuntime']['serialOffload'], True)
         self.assertIn('cuda-fp32', recipe['oerIndexRecipe'])
         calls = len(self.encodes)
-        stored['signature']['runtime']['device'] = 'cpu'
+        path = self.backend.metadata_path('oer-test')
+        persisted = json.loads(path.read_text(encoding='utf-8'))
+        persisted['signature']['runtime']['device'] = 'cpu'
+        path.write_text(json.dumps(persisted), encoding='utf-8')
         with self.assertRaises(self.backend.HTTPException) as error:
             self.backend.read_project('oer-test')
         self.assertEqual(409, error.exception.status_code)
@@ -347,7 +350,10 @@ class OerHttpContractTest(unittest.TestCase):
 
     def test_persisted_excluded_input_is_rejected_before_query_embedding(self):
         self.assertEqual(200, self.index().status_code)
-        self.backend._projects['oer-test']['chunks'][0]['sourceClass'] = 'works_related_pss'
+        path = self.backend.metadata_path('oer-test')
+        persisted = json.loads(path.read_text(encoding='utf-8'))
+        persisted['chunks'][0]['sourceClass'] = 'works_related_pss'
+        path.write_text(json.dumps(persisted), encoding='utf-8')
         count = len(self.encodes)
         response = self.query()
         self.assertEqual(422, response.status_code)
@@ -432,7 +438,17 @@ class OerHttpContractTest(unittest.TestCase):
         directories = [p for p in root.iterdir() if p != directory]
         self.assertEqual(1, len(directories))
         query_dir = directories[0]
-        self.assertEqual(actual.json(), json.loads((query_dir / 'response.json').read_text(encoding='utf-8')))
+        result = actual.json()
+        recorded = json.loads((query_dir / 'response.json').read_text(encoding='utf-8'))
+        self.assertIn('summary_only', recorded['recording'])
+        self.assertEqual(result['indexSignature'], recorded['indexSignature'])
+        self.assertEqual([(hit['id'], hit['score']) for hit in result['hits']],
+                         [(hit['id'], hit['score']) for hit in recorded['hits']])
+        self.assertTrue(all('payload' not in hit for hit in recorded['hits']))
+        self.assertEqual(result['sourceUnits']['policy'], recorded['sourceUnits']['policy'])
+        self.assertEqual([unit['unitId'] for unit in result['sourceUnits']['units']],
+                         [unit['unitId'] for unit in recorded['sourceUnits']['units']])
+        self.assertTrue(all('members' not in unit for unit in recorded['sourceUnits']['units']))
         events = [json.loads(line) for line in (query_dir / 'events.jsonl').read_text(encoding='utf-8').splitlines()]
         stages = {e['stage'] for e in events}
         self.assertTrue({'parent-rrf-candidates', 'rerank-same-pool-structure-comparison',

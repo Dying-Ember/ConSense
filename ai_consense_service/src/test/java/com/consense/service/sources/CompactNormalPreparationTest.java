@@ -50,6 +50,35 @@ class CompactNormalPreparationTest {
         }
     }
 
+    @Test void searchProgressNamesOnlyRequestDocumentAndPhaseEvenWhenConsumerFails()throws Exception {
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(CanonicalEvidenceService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs=new ch.qos.logback.core.read.ListAppender<>();
+        logs.start();logger.addAppender(logs);String request="01234567-89ab-cdef-0123-456789abcdef";org.slf4j.MDC.put("vettingSearchRequestId",request);
+        try(Wire wire=new Wire(1)){
+            OutOfMemoryError oom=new OutOfMemoryError("secret-doc-content");
+            assertSame(oom,assertThrows(OutOfMemoryError.class,()->wire.prepare((source,graph)->{throw oom;})));
+            List<String> lines=new ArrayList<>();for(ch.qos.logback.classic.spi.ILoggingEvent event:logs.list){
+                lines.add(event.getFormattedMessage());assertNull(event.getThrowableProxy());
+            }
+            assertEquals(Arrays.asList("verify_binding","read_registry","read_source","verify_source","verify_graph","consume_graph"),
+                    lines.stream().map(line->line.substring(line.lastIndexOf('=')+1)).collect(java.util.stream.Collectors.toList()));
+            for(String line:lines){assertTrue(line.contains("requestId="+request+" documentId=1"));assertFalse(line.contains("secret-doc-content"));}
+        }finally{logger.detachAppender(logs);logs.stop();org.slf4j.MDC.remove("vettingSearchRequestId");}
+    }
+
+    @Test void searchIdentifiesDocumentBeforeReadingChangedRegistry()throws Exception {
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(CanonicalEvidenceService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs=new ch.qos.logback.core.read.ListAppender<>();
+        logs.start();logger.addAppender(logs);org.slf4j.MDC.put("vettingSearchRequestId","01234567-89ab-cdef-0123-456789abcdef");
+        try(Wire wire=new Wire(1)){
+            wire.replaceRaw(1L,"{\"schema\":\"consense.normal-observed.v1\",\"producerKind\":\"normal_observed\",\"changed\":\"secret-content\"}");
+            assertReason("CANONICAL_STORED_BYTES_CHANGED",()->wire.prepare((source,graph)->fail("must not consume")));
+            List<String> lines=new ArrayList<>();for(ch.qos.logback.classic.spi.ILoggingEvent event:logs.list)lines.add(event.getFormattedMessage());
+            assertEquals(2,lines.size());assertTrue(lines.get(0).endsWith("documentId=1 stage=verify_binding"));
+            assertTrue(lines.get(1).endsWith("documentId=1 stage=read_registry"));assertFalse(lines.toString().contains("secret-content"));
+        }finally{logger.detachAppender(logs);logs.stop();org.slf4j.MDC.remove("vettingSearchRequestId");}
+    }
+
     @Test void changedRawClobBytesRejectBeforeConsumingTheCurrentSource()throws Exception {
         try(Wire wire=new Wire(1)){
             wire.replaceRaw(1L,"{\"schema\":\"consense.normal-observed.v1\",\"producerKind\":\"normal_observed\",\"changed\":\"😀\"}");

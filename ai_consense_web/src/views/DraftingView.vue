@@ -17,16 +17,18 @@ import DraftingExtractionReport from '@/components/DraftingExtractionReport.vue'
 import DraftingBillDistribution from '@/components/DraftingBillDistribution.vue'
 import DraftingDocumentWorkspace from '@/components/DraftingDocumentWorkspace.vue'
 import DraftingTemplatePreview from '@/components/DraftingTemplatePreview.vue'
+import DraftingPdfSccReference from '@/components/DraftingPdfSccReference.vue'
 import DraftingValueDisplay from '@/components/DraftingValueDisplay.vue'
 import DraftingUnresolvedItems from '@/components/DraftingUnresolvedItems.vue'
 import DraftingBodyEditor from '@/components/DraftingBodyEditor.vue'
 import { bodyDirty, bodyPatch, createBodyDraft, setBodyDeletion, setBodyScopeDeletion } from '@/drafting/body-edit'
-import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, incompleteCandidateBlocksAdoption, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, trustedConditionValues, validationIssue, type DraftValue, type DraftViewState } from '@/drafting/state'
+import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, incompleteCandidateBlocksAdoption, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, savedDraftDownloadReady, trustedConditionValues, validationIssue, type DraftValue, type DraftViewState } from '@/drafting/state'
 import { adoptionPlanMatches, adoptionVariablesMatch, captureAdoptionRefresh, type AdoptionRefreshContext } from '@/drafting/adoption-refresh'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import { buildBusinessGraph } from '@/drafting/business-graph'
 const DraftingBusinessGraph = defineAsyncComponent(() => import('@/components/DraftingBusinessGraph.vue').then(module => module.default))
 
+const packagedPdfSource: ReviewSource = { id:'packaged-reference', sourceDocumentId:'packaged-reference', docId:'packaged-reference', editionId:'scc-pdf-1bebab1afbc0', fileKey:'SCC', fileName:'07_Special Conditions of Contract (SCC).pdf', format:'pdf', sourceSha256:'1bebab1afbc0faaf8aa9c0b9e6c51b023c24e53a094d4987d746fdeb65b30741', parseStatus:'UNSELECTED_AUXILIARY_CANDIDATE', canEdit:false }
 const store = useAppStore()
 const w = (key: DraftWord) => draftWord(key, store.locale)
 const l = (text: Parameters<typeof localized>[0]) => localized(text, store.locale)
@@ -84,12 +86,23 @@ async function loadAutomationSources(id = projectId.value, token = generation) {
         if (automationSourcesRefreshPending) continue
         if (!Array.isArray(sources)) throw Error(phrase('原件列表不完整，请重新读取。', 'The source list is incomplete. Reload it.'))
         automationSources.value = sources.filter(source => ['NTT', 'SCT', 'SCC'].includes(source.fileKey ?? ''))
+        const scc = automationSources.value.filter(source => source.fileKey === 'SCC')
+        if (scc.length > 1) {
+          const explicitlySelected = scc.filter(source => automationSourceSelection.value[String(source.id)] === true)
+          for (const source of scc) automationSourceSelection.value[String(source.id)] = explicitlySelected.length === 1 && String(explicitlySelected[0]!.id) === String(source.id)
+        }
       } catch (caught) {
         if (!current(id, token)) return
         if (!automationSourcesRefreshPending) automationSourcesError.value = caught instanceof Error ? caught.message : String(caught)
       }
     } while (automationSourcesRefreshPending)
   } finally { if (current(id, token)) automationSourcesLoading.value = false }
+}
+function chooseAutomationSource(source: ReviewSource, checked: boolean) {
+  if (busy.value || automationActive.value || automationSourcesLoading.value) return
+  if (checked && source.fileKey === 'SCC') for (const other of automationSources.value) if (other.fileKey === 'SCC') automationSourceSelection.value[String(other.id)] = false
+  automationSourceSelection.value[String(source.id)] = checked
+  snapshotDraft(projectId.value)
 }
 async function refreshAutomationResult(id = projectId.value, token = generation) {
   const run = automation.value
@@ -179,7 +192,7 @@ async function extractReviewedCandidates() {
   const revision = candidateExtractionRevision.value
   if (!revision || !candidateExtractionReady.value || automationActive.value || reviewDirty.value || candidateDirty.value || dirtyInputs.value || documentDirty.value) return
   const selection = store.captureLlmSelection()
-  await action(phrase('正在按已确认的变量定义提取项目候选值', 'Extracting candidates for confirmed variable definitions'), async (id, token) => {
+  await action(phrase('正在提取项目候选值，未确认定义仍待核对', 'Extracting project candidates; unconfirmed definitions remain under review'), async (id, token) => {
     await draftingApi.reviewExtract(id, revision.id, selection)
     if (!current(id, token)) return
     await refresh(id, token)
@@ -289,10 +302,16 @@ const graphMode = computed(() => !!catalog.value.graphRevisionId)
 const conditionValues = computed(() => graphMode.value ? trustedConditionValues(fields.value,values,variableMap.value,catalog.value.graphRevisionId!,dirty) : values)
 const pendingGraphReview = computed(() => !!draftRevisionId.value && draftRevisionId.value !== catalog.value.graphRevisionId && !(generationReview.value?.current && generationReview.value.current.id === catalog.value.graphRevisionId && generationReview.value.current.parentRevisionId === draftRevisionId.value))
 const candidateExtractionRevision = computed(() => pendingGraphReview.value ? candidateReviewRevision.value : generationWorkingRevision.value ?? candidateReviewRevision.value)
-const candidateExtractionReady = computed(() => !!candidateExtractionRevision.value && !candidateExtractionRevision.value.sourceStale && candidateExtractionRevision.value.definitionGraphReview?.valid === true)
+const candidateExtractionReady = computed(() => !!candidateExtractionRevision.value && !candidateExtractionRevision.value.sourceStale && (candidateExtractionRevision.value.definitionGraphReview?.valid === true || candidateExtractionRevision.value.definitionGraphReview?.fixedCandidateExtractionAllowed === true))
 const dirtyInputs = computed(() => fields.value.some(dirty))
 const documentAccess = computed(() => documentCapabilities(activeDocument.value, documentDirty.value))
 const canExport = computed(() => documentAccess.value.exportable)
+const canDownloadOriginalDraft = computed(() => savedDraftDownloadReady(canExport.value, activeDocument.value?.revisionId, { inputs: dirtyInputs.value, review: reviewDirty.value, candidate: candidateDirty.value, automation: automationActive.value }))
+const originalDraftDownload = ref<{ url: string; filename: string } | null>(null)
+let originalDraftIdentity = 0
+function clearOriginalDraftDownload() { if (originalDraftDownload.value) URL.revokeObjectURL(originalDraftDownload.value.url); originalDraftDownload.value = null }
+watch(() => [routeActive.value, store.activeProjectId, projectId.value, activeFile.value, activeDocument.value?.revisionId, activeDocument.value?.docxSha256, canDownloadOriginalDraft.value], () => { originalDraftIdentity++; clearOriginalDraftDownload() }, { flush: 'sync' })
+watch(busy, value => { if (value) clearOriginalDraftDownload() }, { flush: 'sync' })
 const canRefreshToc = computed(() => !!projectId.value && activeFile.value === 'SCC' && documentAccess.value.editable && !!activeDocument.value?.revisionId && !!activeDocument.value?.docxSha256 && !busy.value && !documentDirty.value && !dirtyInputs.value && !reviewDirty.value && !candidateDirty.value && !automationActive.value)
 const durationKnown = computed(() => values.contractPeriodMonths !== null && values.contractPeriodMonths !== undefined && values.contractPeriodMonths !== '' && Number.isFinite(Number(values.contractPeriodMonths)) && Number(values.contractPeriodMonths) >= 0)
 const durationAdopted = computed(() => durationKnown.value && (dirty(fields.value.find(field => field.key === 'contractPeriodMonths') ?? { key: 'contractPeriodMonths', kind: 'number', label: { en: '', zhHans: '', zhHant: '' } }) || variableMap.value.get('contractPeriodMonths')?.confirmed || variableMap.value.get('contractPeriodMonths')?.manuallyEdited))
@@ -682,6 +701,17 @@ function workspaceKeydown(event: KeyboardEvent) {
   containTab(event, documentWorkspace.value)
 }
 async function exportDocument(format: 'docx' | 'pdf') { if (canExport.value) await action(w('exporting'), id => draftingApi.exportDocument(id, activeFile.value, format, activeDocument.value?.revisionId)) }
+async function downloadSavedOriginalDraft() {
+  const file = activeFile.value, revision = activeDocument.value?.revisionId, identity = originalDraftIdentity
+  if (!canDownloadOriginalDraft.value || !revision) return
+  clearOriginalDraftDownload()
+  await action(phrase('正在准备草稿…', 'Preparing draft…', '正在準備草稿…'), async (id, token) => {
+    const blob = await draftingApi.documentSource(id, file, revision)
+    if (!current(id, token) || !routeActive.value || store.activeProjectId !== id) return
+    if (identity !== originalDraftIdentity || !canDownloadOriginalDraft.value || activeFile.value !== file || activeDocument.value?.revisionId !== revision) throw Error(phrase('文稿或待保存修改已变化，请核对后重新准备草稿。', 'The document or pending changes have changed. Review them and prepare the draft again.', '文稿或待儲存修改已變化，請核對後重新準備草稿。'))
+    originalDraftDownload.value = { url: URL.createObjectURL(blob), filename: `ConSense_${file}_original-language_unreviewed_draft.docx` }
+  })
+}
 async function move(next: Step) {
   if (busy.value || documentDirty.value || candidateDirty.value || automationActive.value && !['inputs', 'review'].includes(next)) return
   if (next === 'variables' && pendingGraphReview.value) {
@@ -888,7 +918,7 @@ onDeactivated(() => {
   if (planTimer) clearTimeout(planTimer)
   immersiveDocument.value = false
 })
-onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(); alive = false; generation++; planGeneration++; stopAutomationPolling(); if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
+onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(); clearOriginalDraftDownload(); alive = false; generation++; planGeneration++; stopAutomationPolling(); if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
 </script>
 
 <template>
@@ -901,10 +931,11 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(
     <section v-if="projectId && ['inputs', 'review'].includes(step)" class="flow-card" data-automation-source-selection>
       <div class="card-head"><h3>{{ phrase('本次识别原件', 'Sources for this identification') }}</h3><span>{{ automationSourceIds.length }} / {{ automationSources.length }} {{ phrase('已选择', 'selected') }}</span></div>
       <p class="hint">{{ phrase('新建识别任务只处理下方所选原件。已有识别记录不代表已经核对；续跑始终沿用原任务的原件集合，不受这里的勾选影响。', 'A new identification processes only the selected originals below. A saved identification record is not a review confirmation. Resuming always uses the original task’s source set, regardless of these selections.') }}</p>
+      <p class="hint">{{ phrase('一次识别最多选择一版 SCC；也可只选 NTT／SCT。切换 SCC 时请先在来源核对中选择并保存对应版本。', 'Select at most one SCC edition per identification; NTT or SCT can also be identified alone. When switching SCC, first select and save that edition in source review.') }}</p>
       <p v-if="automationSourcesLoading" class="hint" role="status">{{ phrase('正在读取可选原件…', 'Loading source choices…') }}</p>
       <p v-if="automationSourcesError" class="flow-error" role="alert">{{ automationSourcesError }} <button type="button" class="btn" data-reload-automation-sources :disabled="!!busy || automationActive || automationSourcesLoading" @click="loadAutomationSources()">{{ phrase('重新读取原件列表', 'Reload source list') }}</button></p>
       <fieldset class="automation-sources" :disabled="!!busy || automationActive || automationSourcesLoading">
-        <label v-for="source in automationSources" :key="source.id" class="automation-source-choice"><input type="checkbox" :data-automation-source-id="String(source.id)" :checked="automationSourceSelection[String(source.id)] !== false" @change="!busy && !automationActive && !automationSourcesLoading && (automationSourceSelection[String(source.id)] = ($event.target as HTMLInputElement).checked, snapshotDraft(projectId))"><span>{{ source.fileKey }} · {{ source.fileName }} · {{ source.format.toUpperCase() }}</span><small v-if="recordedAutomationSources.has(`${source.id}:${source.sourceSha256}`)" :data-automation-source-record="String(source.id)">{{ phrase('有已存识别记录', 'Saved identification record') }}</small></label>
+        <label v-for="source in automationSources" :key="source.id" class="automation-source-choice"><input type="checkbox" :data-automation-source-id="String(source.id)" :checked="automationSourceSelection[String(source.id)] !== false" @change="chooseAutomationSource(source, ($event.target as HTMLInputElement).checked)"><span>{{ source.fileKey }} · {{ source.fileName }} · {{ source.format.toUpperCase() }}</span><small v-if="recordedAutomationSources.has(`${source.id}:${source.sourceSha256}`)" :data-automation-source-record="String(source.id)">{{ phrase('有已存识别记录', 'Saved identification record') }}</small></label>
       </fieldset>
       <p v-if="!automationSourcesLoading && !automationSourcesError && !automationSources.length" class="hint">{{ phrase('请先上传用于识别的模板原件。', 'Upload template originals to identify.') }}</p>
       <p v-else-if="!automationSourcesLoading && !automationSourceIds.length" class="hint">{{ phrase('至少选择一份原件才能开始新的识别。', 'Select at least one original to start a new identification.') }}</p>
@@ -924,6 +955,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(
           <input :id="`template-upload-${key}`" type="file" hidden accept=".doc,.docx,.pdf,.txt,.md" :disabled="!!busy || automationActive" @change="upload($event, 'templates', key)" />
         </div>
       </section>
+      <DraftingPdfSccReference :project-id="projectId" revision-id="packaged-reference" :source="packagedPdfSource" :variables="[]" :locale="store.locale" :disabled="true" :packaged="true" />
       <section class="flow-card"><div class="card-head"><h3>{{ w('evidence') }}</h3><label class="btn" :class="{ disabled: !!busy || automationActive }">{{ w('uploadEvidence') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md,.eml,.msg" multiple :disabled="!!busy || automationActive" @change="upload($event, 'inputs')" /></label></div><p class="hint">{{ w('evidenceNote') }}</p><p v-if="!inputs.length" class="hint">{{ w('emptyEvidence') }}</p><div v-for="input in inputs" :key="input.id ?? input.code" class="evidence-row"><div class="card-head"><strong>{{ input.fileName || l(input.title) }}</strong><div class="row"><span>{{ input.status === 'PARSED' ? w('parsedStatus') : ['FAILED', 'PARSE_FAILED'].includes(input.status) ? w('failedStatus') : w('waitingStatus') }}</span><button v-if="input.id !== null && input.id !== undefined" class="btn text-link" :data-remove-input="input.id" :disabled="!!busy || automationActive" @click="removalItem = input">{{ w('removeCorrespondence') }}</button></div></div><small>{{ l(input.message) }} {{ input.pageCount || '' }}</small></div></section>
       <p v-if="automationError" class="flow-error" role="alert">{{ automationError }} <button class="btn" data-reload-automation :disabled="!!busy || automationChecking" @click="loadAutomation(projectId, generation)">{{ phrase('重新读取任务进度', 'Reload task progress') }}</button></p>
       <p class="hint">{{ phrase('本步识别模板变量、进行原子拆解并构建待审图谱。核对并保存变量定义后，再单独从项目资料提取候选值。', 'This step identifies template variables, decomposes atomic capabilities and builds a graph for review. Review and save variable definitions before separately extracting project candidates.') }}</p>
@@ -959,24 +991,25 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(
       <fieldset class="automation-review" :disabled="!!busy || automationActive"><DraftingSourceReview ref="sourceReview" :project-id="projectId" :locale="store.locale" :active="routeActive && step === 'review'" :locked="candidateDirty || automationActive" @dirty="reviewDirty = $event" @saved="reviewSaved" @confirmed="reviewConfirmed" @replace="move('inputs')" />
       </fieldset>
       <DraftingAutomationResults v-if="automationRevision && !automationActive" :revision="automationRevision" :locale="store.locale" :disabled="!!busy || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @locate="locateCandidate" @question="locateAutomationQuestion" @review-relations="reviewAutomationRelations" />
-      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ phrase('返回文件识别', 'Back to file identification') }}</button><button class="btn primary" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取已确认变量的项目候选值', 'Extract candidates for confirmed variables') }}</button><button class="btn" :disabled="!!busy || automationActive || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看候选值与采用方案', 'Review candidate values and adoption plan') }}</button></footer>
-      <p v-if="candidateExtractionReady && candidateExtractionRevision?.definitionGraphReview?.confirmedFieldIds" class="hint" data-confirmed-extraction-count>{{ phrase('已确认变量','Confirmed variables') }}: {{ candidateExtractionRevision.definitionGraphReview.confirmedFieldIds.length }} · {{ phrase('仍待核变量','Variables awaiting review') }}: {{ candidateExtractionRevision.definitionGraphReview.pendingFieldIds?.length ?? '—' }}. {{ phrase('优先提取新增确认的变量；没有新增时将重新提取已确认部分。','Newly confirmed variables are extracted first; if none were added, the confirmed group is extracted again.') }}</p>
-      <p v-if="!candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请先保存并确认当前可用的变量与关系图谱，再提取新的项目候选值。已有候选和人工值保留。','Save and confirm the usable variable and relationship graph before extracting new project candidates. Existing candidates and manual values are retained.') }}</p>
+      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ phrase('返回文件识别', 'Back to file identification') }}</button><button class="btn primary" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取项目候选值', 'Extract project candidates') }}</button><button class="btn" :disabled="!!busy || automationActive || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看候选值与采用方案', 'Review candidate values and adoption plan') }}</button></footer>
+      <p v-if="candidateExtractionRevision?.definitionGraphReview?.fixedCandidateExtractionAllowed" class="hint">{{ phrase('可从已核对原件身份的固定定义提取候选值；定义和候选仍待审核，不会自动采用。','Candidates can be extracted from fixed definitions bound to verified originals; definitions and values remain unconfirmed and are not adopted automatically.') }}</p>
+      <p v-if="candidateExtractionReady && candidateExtractionRevision?.definitionGraphReview?.confirmedFieldIds" class="hint" data-confirmed-extraction-count>{{ phrase('已确认变量','Confirmed variables') }}: {{ candidateExtractionRevision.definitionGraphReview.confirmedFieldIds.length }} · {{ phrase('仍待核变量','Variables awaiting review') }}: {{ candidateExtractionRevision.definitionGraphReview.pendingFieldIds?.length ?? '—' }}.</p>
+      <p v-if="!candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请先保存当前图谱，并确认其包含可提取的固定候选或已确认定义。已有候选和人工值保留。','Save the current graph with eligible fixed candidates or confirmed definitions before extracting. Existing candidates and manual values are retained.') }}</p>
     </div>
     <p v-if="projectId && generationSourceBlocked" class="condition-note" data-generation-source-block role="status">{{ nonEditableSelectedSources.length ? phrase('所选版次只有 PDF 或不可编辑原件，仍可阅读和核对；生成 Word 需先上传同版可编辑 DOCX 并重新核对确认。不能借另一版 Word。', 'The selected edition has a PDF or non-editable original. Reading and review remain available; Word generation needs an editable DOCX of that edition and a newly confirmed review. Another Word edition cannot be substituted.') : phrase('当前确认版本或来源绑定已变化，请在来源核对步骤刷新并确认后再生成。', 'The confirmed revision or source binding changed. Refresh and confirm it in Source review before generation.') }} {{ nonEditableSelectedSources.map(source => source.fileName).join(' · ') }}</p>
     <section v-if="projectId && step === 'variables' && pendingGraphReview" class="flow-card input-stack" data-pending-graph-review>
       <h3>{{ phrase('本次识别的候选值', 'Candidate values from this identification') }}</h3>
       <p>{{ phrase('以下候选值对应第二步保存的图谱。请先核对重复变量、条件和修改位置，并确认这版模板，再采用变量值和生成修改方案。', 'These candidate values belong to the graph saved in step 2. Review duplicate variables, conditions and amendment locations, then confirm this template before adopting values and generating the plan.') }}</p>
       <button class="btn primary" :disabled="candidateDirty" @click="move('review')">{{ phrase('返回第二步核对并确认图谱', 'Review and confirm the graph in step 2') }}</button>
-      <button class="btn" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取已确认变量的项目候选值', 'Extract candidates for confirmed variables') }}</button>
-      <p v-if="!candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请返回变量核对，确认当前可用图谱后再提取；已有候选仍可查看。','Return to variable review and confirm the usable graph before extracting. Existing candidates remain readable.') }}</p>
+      <button class="btn" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取项目候选值', 'Extract project candidates') }}</button>
+      <p v-if="!candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请返回变量核对，保存包含可提取定义的图谱；已有候选仍可查看。','Return to variable review and save a graph with eligible definitions. Existing candidates remain readable.') }}</p>
       <button v-if="trace" class="btn" data-pending-extraction-report @click="traceOpen = true">{{ w('trace') }}</button>
       <DraftingCandidateReview :project-id="projectId" :revision-id="draftRevisionId" :review="candidateReviewRevision" :locale="store.locale" :reload-key="candidateReload" :allow-adoption="catalog.graphRevisionId === draftRevisionId && !busy && !reviewDirty && !dirtyInputs && !documentDirty && !automationActive" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" @adopt-composite="adoptCompositeBill" />
     </section>
     <div v-if="projectId && step === 'variables' && !pendingGraphReview" class="input-stack">
       <DraftingCandidateReview v-if="catalog.graphRevisionId" :project-id="projectId" :revision-id="catalog.graphRevisionId" :locale="store.locale" :reload-key="candidateReload" :review="generationWorkingRevision ?? undefined" :allow-adoption="!busy && !reviewDirty && !dirtyInputs && !documentDirty && !automationActive" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" @corrected="action(w('loading'), refresh)" @adopt-composite="adoptCompositeBill" />
       <p v-if="generationWorkingRevision?.status === 'DRAFT'" class="condition-note" data-partial-draft-notice>{{ phrase('本次图谱仍在核对。可以保存并采用明确的变量值；只有已核对的修改才会执行。现在生成的未完成草稿会保留未决原文，并附标记及未处理清单。', 'This graph is under review. You can save and adopt known values; only reviewed changes will apply. Incomplete drafts retain unresolved source wording and include a notice and outstanding-items list.') }}</p>
-      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button v-if="graphMode" class="btn" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取已确认变量的项目候选值', 'Extract candidates for confirmed variables') }}</button><button class="btn" :disabled="!!busy" @click="move('review')">{{ phrase('变量识别与图谱任务', 'Variable identification and graph task') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
+      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button v-if="graphMode" class="btn" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取项目候选值', 'Extract project candidates') }}</button><button class="btn" :disabled="!!busy" @click="move('review')">{{ phrase('变量识别与图谱任务', 'Variable identification and graph task') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
       <p v-if="graphMode && candidateExtractionReady && candidateExtractionRevision?.definitionGraphReview?.confirmedFieldIds" class="hint" data-confirmed-extraction-count>{{ phrase('已确认变量','Confirmed variables') }}: {{ candidateExtractionRevision.definitionGraphReview.confirmedFieldIds.length }} · {{ phrase('仍待核变量','Variables awaiting review') }}: {{ candidateExtractionRevision.definitionGraphReview.pendingFieldIds?.length ?? '—' }}. {{ phrase('优先提取新增确认的变量；没有新增时将重新提取已确认部分。','Newly confirmed variables are extracted first; if none were added, the confirmed group is extracted again.') }}</p>
       <p v-if="graphMode && !candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请先确认当前可用图谱，再提取新的候选；已有值仍保留。','Confirm the usable graph before extracting new candidates; existing values remain available.') }}</p>
       <div class="question-tools"><input v-model="search" :placeholder="w('search')" :aria-label="w('search')" /><select v-model="statusFilter" :aria-label="w('all')"><option value="all">{{ w('all') }}</option><option v-for="status in ['missing', 'suggested', 'adopted', 'manual', 'needs_review', 'conflict', 'inactive'] as DraftWord[]" :key="status" :value="status">{{ w(status) }}</option></select><button class="btn" @click="search = ''; statusFilter = 'all'">{{ w('clearFilters') }}</button></div>
@@ -1004,6 +1037,9 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(
         <div class="row"><button v-if="immersiveDocument" type="button" class="btn" data-open-business-graph="immersive" :disabled="!!busy || documentDirty || !catalog.groups.length" @click="openGraph">{{ w('businessGraph') }}</button><button v-if="activeFile === 'SCC' && activeDocument?.generated" type="button" class="btn" data-refresh-toc :disabled="!canRefreshToc" @click="refreshDocumentToc">{{ phrase('更新目录及预览', 'Update contents and preview', '更新目錄及預覽') }}</button><button class="btn" :disabled="!!busy || !canExport" @click="exportDocument('docx')">{{ w('exportWord') }}</button><button class="btn primary" :disabled="!!busy || !canExport" @click="exportDocument('pdf')">{{ w('exportPdf') }}</button><button ref="immersiveToggle" type="button" class="btn" :aria-expanded="immersiveDocument" @click="setImmersive(!immersiveDocument)">{{ immersiveDocument ? w('exitImmersive') : w('immersivePreview') }}</button></div>
       </div>
       <p class="hint" data-generated-output-language>{{ w('englishOutput') }}</p>
+      <div class="row"><button type="button" class="btn" data-download-original-language-draft :disabled="!!busy || !canDownloadOriginalDraft" @click="downloadSavedOriginalDraft">{{ phrase('准备原语言草稿（语言未经核查）', 'Prepare original-language draft (language not reviewed)', '準備原語言草稿（語言未經核查）') }}</button><a v-if="originalDraftDownload && !busy" class="btn" data-ready-original-language-draft :href="originalDraftDownload.url" :download="originalDraftDownload.filename">{{ phrase('点击下载已准备的草稿', 'Click to download the prepared draft', '點擊下載已準備的草稿') }}</a></div>
+      <p v-if="dirtyInputs || reviewDirty || candidateDirty || automationActive" class="condition-note" data-saved-draft-pending>{{ phrase('请先保存或取消未保存的填写、核对和候选修改，并等待自动识别结束，再下载已保存草稿。', 'Save or cancel unsaved inputs, review and candidate edits, and wait for automation to finish before downloading the saved draft.', '請先儲存或取消未儲存的填寫、核對和候選修改，並等待自動識別結束，再下載已儲存草稿。') }}</p>
+      <p class="hint" data-original-language-draft-notice>{{ phrase('该文件保留已保存文稿及其中已有的未完成草稿标识；内容语言未经核查，不代表已完成英文翻译。', 'This file preserves the saved draft and any incomplete-draft notice. Its language has not been reviewed and it is not a completed English translation.', '該檔案保留已儲存文稿及其中已有的未完成草稿標識；內容語言未經核查，不代表已完成英文翻譯。') }}</p>
       <div v-show="!immersiveDocument || documentInfoOpen" class="document-info" id="draft-document-info">
       <h3>{{ activeDocument?.title }}</h3>
       <p v-if="activeDocument?.revisionId" class="document-revision-status" role="status"><span>{{ phrase('当前显示已保存的文稿', 'Showing the saved document', '目前顯示已儲存的文稿') }}</span><strong v-if="documentDirty">{{ w('pendingBodyRevision') }}</strong></p>

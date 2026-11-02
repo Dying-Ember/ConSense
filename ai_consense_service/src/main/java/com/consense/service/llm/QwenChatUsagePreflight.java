@@ -25,6 +25,7 @@ public final class QwenChatUsagePreflight {
     public static final String SCOPE="configured_qwen_chat_usage_preflight_not_exact_template_observation";
     public static final long CONTEXT=1000000,MARGIN=32768;
     public static final int OUTPUT=16384;
+    public static final int FILE_EXPORT_MAX_BATCHES=64;
     private final ConsenseProperties props;
     private final QwenGenerationLedger ledger;
     public QwenChatUsagePreflight(ConsenseProperties props,QwenGenerationLedger ledger){this.props=props;this.ledger=ledger;}
@@ -49,14 +50,14 @@ public final class QwenChatUsagePreflight {
         ConsenseProperties.QwenUsagePreflight p=props.getQwenUsagePreflight();
         if(!p.isEnabled())throw new IllegalStateException("qwen_usage_preflight_policy_disabled");
         if("vetting".equals(module))return new QwenGenerationLedger.Limits(p.getVettingMaxPreflights(),p.getVettingMaxAnswers(),p.getVettingMaxTotal(),p.getActionLifetimeMs());
-        if("file-export".equals(module))return new QwenGenerationLedger.Limits(24,24,48,p.getActionLifetimeMs());
+        if("file-export".equals(module))return new QwenGenerationLedger.Limits(FILE_EXPORT_MAX_BATCHES,FILE_EXPORT_MAX_BATCHES,2*FILE_EXPORT_MAX_BATCHES,p.getActionLifetimeMs());
         if(!"advice".equals(module)||h<0||h>100)throw new IllegalArgumentException("Qwen bounded action scope required");
         return new QwenGenerationLedger.Limits(h+4,4,h+8,p.getActionLifetimeMs());
     }
     private String policySha(String module,int h) {
         QwenGenerationLedger.Limits l=limits(module,h);
         return hash(JsonUtils.write(Arrays.asList(VERSION,KIND,CONTEXT,OUTPUT,MARGIN,module,h,l.preflights,l.answers,l.total,l.lifetimeMs,
-                "cap1_is_real_generation_no_replay_no_refund","exact_response_model_required","complete_input_output_margin_policy",
+                "vetting".equals(module)?"vetting_direct_unmeasured_no_replay_v1":"cap1_is_real_generation_no_replay_no_refund", "exact_response_model_required","complete_input_output_margin_policy",
                 "vetting".equals(module)?"qwen-27b-json-object-records-v1":"advice".equals(module)?"qwen-27b-json-object-answer-v1":"file-export".equals(module)?"qwen-27b-file-export-json-object-records-v1":"ordinary-structured-output")));
     }
     public final class Operation {
@@ -71,7 +72,7 @@ public final class QwenChatUsagePreflight {
         private Operation(LlmOperation selected,String scope,int history) {
             chat=selected;module=scope;historyLimit=history;profileSha=profileIdentity(LlmProfiles.configuration(props,chat.getIdentity().getProfileId()));policySha=policySha(scope,history);limits=limits(scope,history);
             if(!(chat.getClient() instanceof QwenChatClient))throw new IllegalArgumentException("Qwen prepared adapter required");client=(QwenChatClient)chat.getClient();
-            identity=new ModelIdentity(chat.getIdentity().getProfileId(),"qwen-chat-completions",chat.getIdentity().getModel(),hash(profileSha+"|"+policySha),"configured_qwen_usage_preflight_policy");assertCurrent();
+            identity=new ModelIdentity(chat.getIdentity().getProfileId(),"qwen-chat-completions",chat.getIdentity().getModel(),hash(profileSha+"|"+policySha),"vetting".equals(scope)?"configured_qwen_vetting_direct_policy":"configured_qwen_usage_preflight_policy");assertCurrent();
         }
         public ModelIdentity getIdentity(){return identity;}
         public String getPolicySha256(){return policySha;}
@@ -181,8 +182,10 @@ public final class QwenChatUsagePreflight {
         public String generate(PreparedRequest request,VettingInputBudget.Result budget,String phase,Runnable guard,Consumer<String> delta,Consumer<Runnable> cancel) {return generate(request,budget,phase,guard,delta,cancel,null,0,null);}
         private String generate(PreparedRequest request,VettingInputBudget.Result budget,String phase,Runnable guard,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<JsonNode> metadata,int attemptOrdinal,Consumer<DispatchReady> ready) {
             bound(request.input);VettingInputBudget.Result checked=new VettingInputBudget.Result();checked.setSerializedInputSha256(request.input.getSerializedInputSha256());
-            if(budget==null||!budget.isExtraDispatchPermitted()||!Objects.equals(budget.getSerializedInputSha256(),request.input.getSerializedInputSha256())||budget.getObservation()==null
-                    ||!checkEstimate(request.input,budget.getObservation(),checked).isExtraDispatchPermitted())throw new IllegalArgumentException("Qwen bound usage-preflight acceptance required");
+            boolean direct="vetting".equals(module)&&directVettingAccepted(request.input,budget);
+            if(!direct&&!(("file-export".equals(module)||"advice".equals(module))&&budget==null)
+                    &&(budget==null||!budget.isExtraDispatchPermitted()||!Objects.equals(budget.getSerializedInputSha256(),request.input.getSerializedInputSha256())||budget.getObservation()==null
+                    ||!checkEstimate(request.input,budget.getObservation(),checked).isExtraDispatchPermitted()))throw new IllegalArgumentException("Qwen bound input admission required");
             ActionContext context=current(guard);QwenGenerationLedger.Reservation reservation=ledger.reserve(context.id,identity.getConfigurationSha256(),phase,request.input.getSerializedInputSha256(),true);boolean terminal=false;
             Map<String,Object> receipt=new LinkedHashMap<>();receipt.put("requestSha256",request.input.getQwenWire().getGenerationEntitySha256());
             try {
@@ -252,6 +255,19 @@ public final class QwenChatUsagePreflight {
         public int getUserChars(){return userChars;}
     }
     public static boolean isQwen(VettingInputBudget.Input in){return in!=null&&in.getQwenWire()!=null;}
+    /** Direct dispatch is not a token count; the provider can still reject the complete request. */
+    public static VettingInputBudget.Result directVettingBudget(VettingInputBudget.Input in) {
+        if(!isQwen(in)||!VettingInputBudget.validBinding(in))throw new IllegalArgumentException("Qwen bound input required");
+        VettingInputBudget.Result result=new VettingInputBudget.Result();
+        result.setSerializedInputSha256(in.getSerializedInputSha256());result.setStatus("direct_unmeasured");
+        result.setReason("token_not_counted_provider_validates");result.setExtraDispatchPermitted(true);return result;
+    }
+    public static boolean directVettingAccepted(VettingInputBudget.Input in,VettingInputBudget.Result result) {
+        return isQwen(in)&&VettingInputBudget.validBinding(in)&&result!=null&&result.isExtraDispatchPermitted()
+                &&result.getObservation()==null&&"direct_unmeasured".equals(result.getStatus())
+                &&"token_not_counted_provider_validates".equals(result.getReason())
+                &&Objects.equals(in.getSerializedInputSha256(),result.getSerializedInputSha256());
+    }
     public static VettingInputBudget.Result checkEstimate(VettingInputBudget.Input in,VettingInputBudget.Observation o,VettingInputBudget.Result result) {
         WireIdentity w=in.getQwenWire();UsageEstimate e=o.getQwenUsageEstimate();
         if(w==null||e==null||!"qwen-chat-completions".equals(in.getProvider())||in.getWire()!=null||o.getProviderEstimate()!=null||!VERSION.equals(w.getVersion())||!KIND.equals(w.getKind())||!SCOPE.equals(o.getScope())

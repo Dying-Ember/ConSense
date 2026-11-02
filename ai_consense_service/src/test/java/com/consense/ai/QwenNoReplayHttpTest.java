@@ -86,11 +86,25 @@ class QwenNoReplayHttpTest {
             }finally{release.countDown();server.stop(0);worker.shutdownNow();assertTrue(worker.awaitTermination(3,java.util.concurrent.TimeUnit.SECONDS));}
         }
     }
-    @Test void refusedLoopbackConnectionKeepsSafeTransportCategory()throws Exception{
+    @Test @ExtendWith(OutputCaptureExtension.class)
+    void refusedLoopbackConnectionKeepsSafeTransportCategory(CapturedOutput output)throws Exception{
         int port;try(java.net.ServerSocket reservation=new java.net.ServerSocket(0,0,java.net.InetAddress.getByName("127.0.0.1"))){port=reservation.getLocalPort();}
         ConsenseProperties.Llm cfg=new ConsenseProperties().getQwen();cfg.setBaseUrl("http://127.0.0.1:"+port);cfg.setApiKey("SYNTHETIC_REFUSED_KEY_SECRET");cfg.setTimeoutMs(2000);QwenChatClient client=new QwenChatClient(cfg,localOnlyHttp(port));
         QwenChatClient.PreparedRequest request=client.prepare(authoredTurns(),JsonUtils.mapper().createObjectNode(),false);
         assertSafeFailure(assertThrows(RuntimeException.class,()->client.usageProbe(request,null)),"CONNECTION_FAILED","preflight");
+        assertTrue(output.getAll().contains("stage=request_or_response_headers, cause=connect"));
+        assertFalse(output.getAll().contains("SECRET"));assertFalse(output.getAll().contains("127.0.0.1"));
+    }
+    @Test @ExtendWith(OutputCaptureExtension.class)
+    void invalidUtf8ResponseHasSafeDistinctTransportDiagnostic(CapturedOutput output)throws Exception{
+        HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/v1/chat/completions",exchange->{exchange.getRequestBody().close();byte[] body={(byte)0xc3,(byte)0x28};exchange.sendResponseHeaders(200,body.length);exchange.getResponseBody().write(body);exchange.close();});server.start();
+        try{
+            QwenChatClient client=client(server,2000);
+            assertSafeFailure(assertThrows(RuntimeException.class,()->client.usageProbe(client.prepare(authoredTurns(),JsonUtils.mapper().createObjectNode(),false),null)),"CONNECTION_FAILED","preflight");
+            assertTrue(output.getAll().contains("stage=response_utf8, cause=invalid_utf8"));
+            assertFalse(output.getAll().contains("SECRET"));assertFalse(output.getAll().contains("127.0.0.1"));
+        }finally{server.stop(0);}
     }
     @Test void midCallThreadInterruptionIsCancellationWithoutInvokingCancelCallback()throws Exception{
         HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);AtomicInteger calls=new AtomicInteger();java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);

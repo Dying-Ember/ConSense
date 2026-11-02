@@ -24,6 +24,20 @@ def _sha(value):
     return hashlib.sha256(_bytes(value)).hexdigest()
 
 
+# This pin approves only the exact release-validation change in these two files.
+_OWNED_FIXED_SELF_PIN = '3d08c47d247b3a1c48409acd07d709f4f712cf36db85aa2527cac9a32478c6d0'
+_OWNED_FIXED_PROVIDER_SHA = '625aa6ca047aa3544513d3805e2b09655e20ebb7185e7304d6c08c7eff87d772'
+_OWNED_FIXED_OLD_SELF_SHA = 'fcbd551173dee4f39390b81eb3af4a48abd39baa1244fb05ea203112ce05826f'
+_OWNED_FIXED_OLD_PROVIDER_SHA = '67a0d1a2b43f6549ee7296446ed670cf04fda732df21416147cae93b3960229b'
+
+
+def _approved_owned_fixed_recipe(raw, provider_sha):
+    pin = ("_OWNED_FIXED_SELF_PIN = '" + _OWNED_FIXED_SELF_PIN + "'").encode('ascii')
+    return (provider_sha == _OWNED_FIXED_PROVIDER_SHA and raw.count(pin) == 1
+            and hashlib.sha256(raw.replace(pin, b"_OWNED_FIXED_SELF_PIN = '<self>'", 1)).hexdigest()
+            == _OWNED_FIXED_SELF_PIN)
+
+
 def task_binding(parser, source, mapping, input_identity, provider, options, source_context):
     here = Path(__file__).resolve().parent
     dependencies = [here/name for name in ('complete_ocr.py', 'provider_task_cache.py',
@@ -31,11 +45,18 @@ def task_binding(parser, source, mapping, input_identity, provider, options, sou
         'native_provider_lifecycle.py', 'artifact_store.py')]
     dependencies += [here.parent/'offline_delivery'/name for name in
                      ('native_session_worker.py', 'native_job_provider.py', 'request_stage.py')]
+    if provider.get('ownedFixed') is not None:
+        dependencies.append(here.parent/'offline_delivery'/'fixed_gpu_provider.py')
+    implementation = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in dependencies}
+    if (provider.get('ownedFixed') is not None
+            and _approved_owned_fixed_recipe(Path(__file__).read_bytes(), implementation['fixed_gpu_provider.py'])):
+        implementation['provider_task_cache.py'] = _OWNED_FIXED_OLD_SELF_SHA
+        implementation['fixed_gpu_provider.py'] = _OWNED_FIXED_OLD_PROVIDER_SHA
     return {'schema': 'consense.provider-task-binding.v1', 'parser': parser,
         'source': copy.deepcopy(source), 'pageMap': copy.deepcopy(mapping),
         'input': copy.deepcopy(input_identity), 'provider': copy.deepcopy(provider),
         'requestOptions': copy.deepcopy(options), 'sourceContext': copy.deepcopy(source_context),
-        'implementation': {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in dependencies}}
+        'implementation': implementation}
 
 
 def _released(lifecycle, provider):
@@ -58,6 +79,22 @@ def _released(lifecycle, provider):
             and isinstance(lifecycle.get('operationBindingSha256'), str)
             and bool(re.fullmatch('[a-f0-9]{64}', lifecycle['operationBindingSha256']))
             and receipt.get('transactionStatus') != 'failed')
+    if provider.get('ownedFixed') is not None:
+        operation = lifecycle.get('operationId')
+        directory = str(Path(__file__).resolve().parent.parent/'offline_delivery')
+        if directory not in sys.path:
+            sys.path.insert(0, directory)
+        from fixed_gpu_client import gpu_release_proven
+        release = {key:value for key,value in receipt.items()
+                   if key not in ('operationId', 'transactionStatus', 'transactionSha256')}
+        return (lifecycle.get('mode') == 'owned_fixed_gpu'
+            and isinstance(operation, str) and bool(re.fullmatch('[a-f0-9]{32}', operation))
+            and receipt.get('operationId') == operation and gpu_release_proven(release, owned_tree=True)
+            and receipt.get('transactionStatus') == 'persisted'
+            and receipt.get('transactionSha256') == _sha(lifecycle.get('transaction', {}))
+            and lifecycle.get('taskBinding') == lifecycle.get('transaction', {}).get('taskBinding')
+            and isinstance(lifecycle.get('operationBindingSha256'), str)
+            and bool(re.fullmatch('[a-f0-9]{64}', lifecycle['operationBindingSha256'])))
     return False
 
 
@@ -88,7 +125,7 @@ def load_success(store, binding):
     silently deleted, replaced or treated as an empty successful response.
     """
     provider = binding['provider']
-    if provider.get('ownedBoot') is None and provider.get('ownedJob') is None:
+    if all(provider.get(key) is None for key in ('ownedBoot', 'ownedJob', 'ownedFixed')):
         return None
     path = _index_path(store, binding)
     if not path.exists():

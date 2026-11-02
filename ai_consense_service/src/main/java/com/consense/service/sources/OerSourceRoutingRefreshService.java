@@ -109,7 +109,7 @@ public class OerSourceRoutingRefreshService {
         require(before.getFileName()!=null&&before.getFileName().toLowerCase(Locale.ROOT).endsWith(".docx"),HttpStatus.BAD_REQUEST,"SOURCE_NATIVE_RECHECK_DOCX_ONLY");
         require(JsonUtils.isBlankText(before.getFileKey())||Arrays.asList("UNKNOWN","OTHER","PRE").contains(before.getFileKey()),HttpStatus.CONFLICT,"SOURCE_ROUTING_KIND_CHANGED");
         assertCurrent(before);verifyOriginal(before);List<DocumentBlock> observed;
-        try{Path original=Paths.get(before.getStoragePath()).toRealPath();require(original.startsWith(Paths.get(properties.getStorageRoot()).toRealPath()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");observed=NativeDocxIdentityObservation.read(original,expectedOriginalSha);}
+        try{Path original=StorageService.resolveStoredPath(Paths.get(properties.getStorageRoot()),before.getStoragePath());require(original.startsWith(Paths.get(properties.getStorageRoot()).toRealPath()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");observed=NativeDocxIdentityObservation.read(original,expectedOriginalSha);}
         catch(Exception unavailable){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_NATIVE_IDENTITY_UNAVAILABLE");}
         StringBuilder text=new StringBuilder();for(DocumentBlock block:observed)text.append(block.getText()).append('\n');
         OerDocumentIdentity identity=new OerSourceRouting().routeRetained(before.getFileName(),expectedOriginalSha,text.toString(),observed);

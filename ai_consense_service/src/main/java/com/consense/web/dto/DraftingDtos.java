@@ -477,6 +477,7 @@ public final class DraftingDtos {
         private String ruleVersion;
         private boolean stale;
         private boolean contentEdited;
+        private String artifactStatus;
         private String revisionId;
         private String docxSha256;
         private String sourceSha256;

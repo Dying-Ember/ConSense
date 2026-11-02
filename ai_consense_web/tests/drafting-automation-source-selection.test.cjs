@@ -47,9 +47,19 @@ function harness({ sources = [ntt], initial = null, overrides = {} } = {}) {
 }
 
 ;(async () => {
+  const incremental = harness({ sources: [ntt, sct, sccWord, sccPdf] }); await settle()
+  await incremental.click('data-start-automation')
+  assert.deepEqual(incremental.calls.find(call => call[0] === 'start')[2].sourceIds, [String(ntt.id), sct.id], 'NTT and SCT can be identified without selecting an SCC')
+  incremental.dispose()
+
   const selected = harness({ sources: [ntt, sccWord, sccPdf, communication] }); await settle()
   assert.equal(selected.calls.filter(call => call[0] === 'sources').length, 1, 'Opening a project loads actual sources once')
-  for (const id of [ntt.id, sccWord.id, sccPdf.id]) assert.equal(selected.control('data-automation-source-id', String(id)).props.checked, true, 'First-seen template originals default to selected')
+  assert.equal(selected.control('data-automation-source-id', String(ntt.id)).props.checked, true)
+  for (const id of [sccWord.id, sccPdf.id]) assert.equal(selected.control('data-automation-source-id', String(id)).props.checked, false, 'Multiple SCC editions require an explicit choice')
+  await selected.choose(sccWord.id, true); await selected.choose(sccPdf.id, true)
+  assert.equal(selected.control('data-automation-source-id', sccWord.id).props.checked, false, 'Choosing the PDF clears the Word SCC')
+  assert.equal(selected.control('data-automation-source-id', String(ntt.id)).props.checked, true, 'Choosing an SCC does not change NTT')
+  await selected.choose(sccPdf.id, false); await selected.choose(sccWord.id, true)
   assert.equal(selected.control('data-automation-source-id', 'STD-NTT'), undefined, 'Template catalogue placeholders are never source IDs')
   assert.equal(selected.control('data-automation-source-id', communication.id), undefined, 'Project correspondence is not a template identification choice')
   assert.match(text(selected.control('data-automation-source-selection')), /SCC original 201.docx.*DOCX.*SCC original 202.pdf.*PDF/s)

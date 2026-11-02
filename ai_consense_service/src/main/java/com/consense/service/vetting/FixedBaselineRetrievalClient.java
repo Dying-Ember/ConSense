@@ -32,6 +32,8 @@ public class FixedBaselineRetrievalClient {
     private final FixedBaselineProperties properties;
     @Autowired(required=false) private ProjectRepository projectRepository;
     private volatile Catalog catalog;
+    private volatile FixedBaselineRetrievalClient secondaryClient;
+    private volatile String secondaryConfigIdentity;
     private final Set<String> verifiedSourceUnits = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
     private final Set<String> explicitRefinements = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
     private static final class Row {
@@ -72,6 +74,64 @@ public class FixedBaselineRetrievalClient {
     }
     public FixedBaselineRetrievalClient(HttpSupport http,FixedBaselineProperties properties) { this.http=http;this.properties=properties; }
     public boolean enabled() { return properties.isEnabled(); }
+    private synchronized FixedBaselineRetrievalClient secondary() {
+        if(properties.getSecondaryManifestPath()==null||properties.getSecondaryManifestPath().trim().isEmpty()){require(secondaryClient==null,"fixed_reference_configuration_changed");return null;}
+        if(secondaryClient==null){
+            FixedBaselineProperties p=new FixedBaselineProperties();p.setEnabled(properties.isEnabled());p.setSharedSource(properties.isSharedSource());
+            p.setManifestPath(properties.getSecondaryManifestPath());p.setManifestSha256(properties.getSecondaryManifestSha256());
+            p.setProjectId(properties.getSecondaryProjectId());p.setIndexSignature(properties.getSecondaryIndexSignature());
+            p.setBaseUrl(properties.getBaseUrl());p.setTimeoutMs(properties.getTimeoutMs());p.setCandidates(properties.getCandidates());
+            p.setMaxRecordBytes(properties.getMaxRecordBytes());p.setMaxResponseBytes(properties.getMaxResponseBytes());
+            p.setLegacyPathPrefix(properties.getLegacyPathPrefix());p.setLegacyMountRoot(properties.getLegacyMountRoot());
+            p.setSecondaryLegacyPathPrefix(properties.getSecondaryLegacyPathPrefix());p.setSecondaryLegacyMountRoot(properties.getSecondaryLegacyMountRoot());
+            secondaryClient=new FixedBaselineRetrievalClient(http,p);secondaryClient.projectRepository=projectRepository;secondaryConfigIdentity=configIdentity();
+        }
+        require(secondaryConfigIdentity.equals(configIdentity()),"fixed_reference_configuration_changed");return secondaryClient;
+    }
+    private List<FixedBaselineRetrievalClient> clients(){
+        FixedBaselineRetrievalClient other=secondary();return other==null?Collections.singletonList(this):Arrays.asList(this,other);
+    }
+    private FixedBaselineRetrievalClient clientForManifest(String sha){
+        FixedBaselineRetrievalClient found=null;
+        for(FixedBaselineRetrievalClient c:clients())if(c.properties.getManifestSha256().equals(sha)){
+            require(found==null,"fixed_reference_catalog_ambiguous");found=c;
+        }
+        require(found!=null,"fixed_sl_selection_required_or_stale");return found;
+    }
+    private JsonNode normalizeSelection(JsonNode selection){
+        requireSingleSlVersion(selection);JsonNode choice=selection.path("slSources").get(0);
+        String edition=choice.path("editionId").asText(),sha=choice.path("sha256").asText(),saved=selection.path("manifestSha256").asText();
+        FixedBaselineRetrievalClient owner=null;JsonNode matched=null;
+        for(FixedBaselineRetrievalClient client:clients()){
+            Catalog c=client.ready();client.checkCurrent(c);
+            boolean current=client.properties.getManifestSha256().equals(saved);
+            boolean old=c.manifest.path("sourceLineage").path("frozenManifestSha256").asText().equals(saved)&&!saved.isEmpty();
+            for(JsonNode row:slSources(c.manifest)){
+                boolean legacy=old&&edition.equals("legacy:"+sha);
+                if(sha.equals(row.path("sha256").asText())&&(edition.equals(row.path("editionId").asText())||legacy)&&(current||old)){
+                    require(owner==null,"fixed_sl_selection_ambiguous");owner=client;matched=row;
+                }
+            }
+        }
+        require(owner!=null,"fixed_sl_selection_required_or_stale");
+        ObjectNode normalized=JSON.createObjectNode();normalized.put("manifestSha256",owner.properties.getManifestSha256());
+        normalized.putArray("slSources").addObject().put("editionId",matched.path("editionId").asText()).put("sha256",sha);
+        return normalized;
+    }
+    public JsonNode frozenManifestForProject(String projectId){
+        if(secondary()==null)return frozenManifest();
+        JsonNode selection=projectSelection(projectId);return clientForManifest(selection.path("manifestSha256").asText()).frozenManifest();
+    }
+    public List<JsonNode> allOriginalSources(){
+        List<JsonNode> result=new ArrayList<>();for(FixedBaselineRetrievalClient c:clients())result.addAll(originalSources(c.frozenManifest()));return result;
+    }
+    public ArrayNode allSlSources(){
+        ArrayNode result=JSON.createArrayNode();Set<String> editions=new HashSet<>(),shas=new HashSet<>();
+        for(FixedBaselineRetrievalClient client:clients())for(JsonNode raw:slSources(client.frozenManifest())){
+            ObjectNode row=((ObjectNode)raw).deepCopy();require(editions.add(row.path("editionId").asText())&&shas.add(row.path("sha256").asText()),"fixed_sl_source_catalog_ambiguous");
+            row.put("manifestSha256",client.properties.getManifestSha256());result.add(row);
+        }return result;
+    }
     public JsonNode frozenManifest() { Catalog c=ready();checkCurrent(c);return c.manifest.deepCopy(); }
     public List<VectorStore.SearchHit> search(String module,String query,int limit) {
         List<VectorStore.SearchHit> hits=new ArrayList<>();
@@ -80,7 +140,8 @@ public class FixedBaselineRetrievalClient {
     }
     public List<VectorStore.SearchHit> searchForProject(String projectId,String module,String query,int limit) {
         List<VectorStore.SearchHit> hits=new ArrayList<>();
-        for(FixedReferenceEvidence e:searchEvidence(module,query,limit,projectSelection(projectId)))hits.add(e.asHit());
+        JsonNode selection=projectSelection(projectId);FixedBaselineRetrievalClient owner=secondary()==null?this:clientForManifest(selection.path("manifestSha256").asText());
+        for(FixedReferenceEvidence e:owner.searchEvidence(module,query,limit,selection))hits.add(e.asHit());
         return hits;
     }
     private Project project(String projectId) {
@@ -90,16 +151,24 @@ public class FixedBaselineRetrievalClient {
     public JsonNode projectSelection(String projectId) {
         String value=project(projectId).getFixedReferenceSelectionJson();
         JsonNode selection=value==null?defaultSelection(ready().manifest):parse(value);
-        selectedSources(ready().manifest,selection);return selection.deepCopy();
+        if(secondary()!=null){selection=normalizeSelection(selection);FixedBaselineRetrievalClient owner=clientForManifest(selection.path("manifestSha256").asText());owner.selectedSources(owner.ready().manifest,selection);}
+        else selectedSources(ready().manifest,selection);return selection.deepCopy();
     }
     public JsonNode selectionStatus(String projectId) {
         Catalog c=ready();checkCurrent(c);String saved=project(projectId).getFixedReferenceSelectionJson();
-        ObjectNode result=JSON.createObjectNode();result.put("manifestSha256",properties.getManifestSha256());result.set("availableSlSources",slSources(c.manifest));
-        result.set("selection",saved==null?defaultSelection(c.manifest):parse(saved));result.put("projectAdoptionRequired",true);return result;
+        ObjectNode result=JSON.createObjectNode();result.put("manifestSha256",properties.getManifestSha256());
+        JsonNode selection=saved==null?defaultSelection(c.manifest):parse(saved);
+        if(secondary()!=null){result.set("availableSlSources",allSlSources());
+            try{selection=normalizeSelection(selection);result.put("manifestSha256",selection.path("manifestSha256").asText());}
+            catch(IllegalStateException stale){/* Preserve the saved selection so a project can explicitly choose again. */}
+        }else result.set("availableSlSources",slSources(c.manifest));
+        result.set("selection",selection);result.put("projectAdoptionRequired",true);return result;
     }
     @Transactional
     public JsonNode saveProjectSelection(String projectId,JsonNode selection) {
-        Catalog c=ready();checkCurrent(c);selectedSources(c.manifest,selection);Project p=project(projectId);
+        Catalog c=ready();checkCurrent(c);
+        if(secondary()!=null){selection=normalizeSelection(selection);FixedBaselineRetrievalClient owner=clientForManifest(selection.path("manifestSha256").asText());owner.selectedSources(owner.ready().manifest,selection);}
+        else selectedSources(c.manifest,selection);Project p=project(projectId);
         p.setFixedReferenceSelectionJson(write(selection));projectRepository.save(p);return selectionStatus(projectId);
     }
     private JsonNode defaultSelection(JsonNode manifest) {
@@ -125,13 +194,18 @@ public class FixedBaselineRetrievalClient {
     }
     private Set<String> selectedSources(JsonNode manifest,JsonNode selection) {
         require(selection!=null&&selection.isObject()&&properties.getManifestSha256().equals(selection.path("manifestSha256").asText())&&selection.path("slSources").isArray(),"fixed_sl_selection_required_or_stale");
-        Set<String> selected=new TreeSet<>(),editions=new HashSet<>();ArrayNode available=slSources(manifest);
+        ArrayNode available=slSources(manifest);if(available.size()>0)requireSingleSlVersion(selection);
+        Set<String> selected=new TreeSet<>(),editions=new HashSet<>();
         for(JsonNode choice:selection.path("slSources")) {String hash=choice.path("sha256").asText(),edition=choice.path("editionId").asText();boolean found=false;
             for(JsonNode source:available)if(hash.equals(source.path("sha256").asText())&&edition.equals(source.path("editionId").asText()))found=true;
             require(found&&selected.add(hash)&&editions.add(edition),"fixed_sl_selection_outside_catalog");}
         require(available.size()==0||!selected.isEmpty(),"fixed_sl_selection_empty");
-        for(String key:Arrays.asList("gccSource","gctSource")){JsonNode source=manifest.path("originalSources").path(key);if(source.isObject())selected.add(source.path("sha256").asText());}
+        if(!properties.isSharedSource())for(String key:Arrays.asList("gccSource","gctSource")){JsonNode source=manifest.path("originalSources").path(key);if(source.isObject())selected.add(source.path("sha256").asText());}
         return selected;
+    }
+    static void requireSingleSlVersion(JsonNode selection) {
+        require(selection!=null&&selection.path("slSources").isArray()&&selection.path("slSources").size()==1,
+                "fixed_sl_single_version_required");
     }
     public List<FixedReferenceEvidence> searchEvidence(String module,String query,int limit) {
         return searchEvidence(module,query,limit,defaultSelection(ready().manifest));
@@ -141,7 +215,8 @@ public class FixedBaselineRetrievalClient {
         require(query!=null&&!query.trim().isEmpty()&&limit>0&&limit<=50,"invalid_fixed_reference_query");
         Catalog c=ready();checkCurrent(c);
         Set<String> selected=selectedSources(c.manifest,selection);
-        JsonNode health=parse(http.get(baseUrl()+"/health",properties.getTimeoutMs())); validateHealth(c,health);
+        String healthUrl=baseUrl()+"/health"+(properties.isSharedSource()?"?fixedReference="+properties.getManifestSha256():"");
+        JsonNode health=parse(http.get(healthUrl,properties.getTimeoutMs())); validateHealth(c,health);
         ObjectNode request=JSON.createObjectNode();request.put("projectId",properties.getProjectId());request.put("query",query);
         request.put("role","standard");request.put("candidates",Math.max(limit,properties.getCandidates()));request.put("limit",limit);
         boolean scoped=c.manifest.path("originalSources").has("slSources");
@@ -242,8 +317,9 @@ public class FixedBaselineRetrievalClient {
         for(Map.Entry<String,FixedReferenceEvidence> entry:ranked.entrySet())added.putIfAbsent(entry.getKey(),entry.getValue());return added;
     }
     public FixedReferenceEvidence evidence(VectorStore.SearchHit hit) {
-        require(hit!=null&&hit.getPayload()!=null,"fixed_reference_hit_missing");Catalog c=ready();checkCurrent(c);
-        return evidence(c,hit);
+        require(hit!=null&&hit.getPayload()!=null,"fixed_reference_hit_missing");
+        if(secondary()!=null){FixedBaselineRetrievalClient owner=clientForManifest(String.valueOf(hit.getPayload().get("fixedBaselineManifestSha256")));if(owner!=this)return owner.evidence(hit);}
+        Catalog c=ready();checkCurrent(c);return evidence(c,hit);
     }
     private FixedReferenceEvidence evidence(Catalog c,VectorStore.SearchHit hit) {
         require(hit!=null&&hit.getPayload()!=null,"fixed_reference_hit_missing");
@@ -265,20 +341,39 @@ public class FixedBaselineRetrievalClient {
     public Runnable currentReadGuard(List<VectorStore.SearchHit> hits) {
         return currentReadGuard(hits,null);
     }
+    public Runnable currentReadGuardForProject(String projectId,List<VectorStore.SearchHit> hits,java.util.function.Consumer<JsonNode> checkedManifest) {
+        JsonNode selection=projectSelection(projectId);String selectedManifest=selection.path("manifestSha256").asText();
+        FixedBaselineRetrievalClient owner=secondary()==null?this:clientForManifest(selectedManifest);
+        Set<String> selected=owner.selectedSources(owner.ready().manifest,selection);
+        JsonNode choice=selection.path("slSources").get(0);
+        for(VectorStore.SearchHit hit:hits){
+            require(hit!=null&&hit.getPayload()!=null&&selectedManifest.equals(hit.getPayload().get("fixedBaselineManifestSha256")),"fixed_reference_hit_outside_project_selection");
+            JsonNode payload=JSON.valueToTree(hit.getPayload());
+            require(selected.contains(payload.path("originalSourceSha256").asText()),"fixed_reference_hit_outside_project_selection");
+            if("SL".equals(payload.path("sourceQuality").path("family").asText()))
+                require(choice.path("sha256").equals(payload.path("originalSourceSha256"))&&choice.path("editionId").equals(payload.path("fixedBaselineEditionId")),"fixed_reference_hit_outside_project_selection");
+        }
+        Runnable guard=owner.currentReadGuard(hits,checkedManifest);
+        return ()->{require(selection.equals(projectSelection(projectId)),"fixed_sl_selection_changed");guard.run();};
+    }
     public Runnable currentReadGuard(List<VectorStore.SearchHit> hits,java.util.function.Consumer<JsonNode> checkedManifest) {
+        if(secondary()!=null&&hits!=null&&!hits.isEmpty()){
+            FixedBaselineRetrievalClient owner=clientForManifest(String.valueOf(hits.get(0).getPayload().get("fixedBaselineManifestSha256")));
+            if(owner!=this)return owner.currentReadGuard(hits,checkedManifest);
+        }
         Catalog c=ready();List<JsonNode> selected=new ArrayList<>();
         for(VectorStore.SearchHit hit:hits)selected.add(evidence(c,hit).getPayload());
         Map<Path,Pin> pins=new LinkedHashMap<>();
         try {
             for(JsonNode parent:selected){JsonNode descriptor=originalDescriptor(c,parent.path("originalSourceSha256").asText());
-                Path path=Paths.get(descriptor.path("path").asText()).toAbsolutePath().normalize();pins.putIfAbsent(path,new Pin(path));}
+                Path path=resolveDescriptorPath(descriptor.path("path").asText()).toAbsolutePath().normalize();pins.putIfAbsent(path,new Pin(path));}
             if(migrationConfigured()) {
                 for(String path:Arrays.asList(properties.getMigrationReceiptPath(),properties.getQueryRuntimePath())){
                     Path file=Paths.get(path).toAbsolutePath().normalize();pins.putIfAbsent(file,new Pin(file));}
                 JsonNode receipt=pinned(properties.getMigrationReceiptPath(),properties.getMigrationReceiptSha256());
                 List<JsonNode> artifacts=new ArrayList<>();artifacts.add(receipt.path("candidateMetadata"));
                 for(String kind:Arrays.asList("embedding","reranker"))artifacts.add(c.manifest.path("modelPublications").path(kind));
-                for(JsonNode artifact:artifacts){Path file=Paths.get(artifact.path("path").asText()).toAbsolutePath().normalize();pins.putIfAbsent(file,new Pin(file));}
+                for(JsonNode artifact:artifacts){Path file=resolveDescriptorPath(artifact.path("path").asText()).toAbsolutePath().normalize();pins.putIfAbsent(file,new Pin(file));}
             }
         }catch(IOException unavailable){throw new IllegalStateException("fixed_reference_read_guard_unavailable",unavailable);}
         assertOriginals(c,selected);checkCurrent(c);
@@ -296,8 +391,19 @@ public class FixedBaselineRetrievalClient {
         return FixedBaselineModelMaterial.render(rows,maxCharacters);
     }
     public VectorStore.SearchHit readOnlyHitById(String id) {
+        if(secondary()!=null){FixedBaselineRetrievalClient owner=null;
+            for(FixedBaselineRetrievalClient client:clients()){Catalog item=client.ready();client.checkCurrent(item);if(item.rows.containsKey(id)){require(owner==null,"fixed_reference_parent_ambiguous");owner=client;}}
+            require(owner!=null,"fixed_reference_parent_not_found");if(owner!=this)return owner.readOnlyHitById(id);
+        }
         Catalog c=ready();checkCurrent(c);JsonNode p=readParent(c,id);assertOriginals(c,Collections.singletonList(p));checkCurrent(c);
         return makeEvidence(c,id,0,p,null,false).asHit();
+    }
+    public List<VectorStore.SearchHit> readOnlyHitsForProject(String projectId,Collection<String> ids) {
+        JsonNode selection=projectSelection(projectId);
+        FixedBaselineRetrievalClient owner=secondary()==null?this:clientForManifest(selection.path("manifestSha256").asText());
+        Catalog c=owner.ready();owner.checkCurrent(c);List<VectorStore.SearchHit> hits=new ArrayList<>();
+        for(String id:ids){JsonNode p=owner.readParent(c,id);hits.add(owner.makeEvidence(c,id,0,p,null,false).asHit());}
+        currentReadGuardForProject(projectId,hits,null).run();return hits;
     }
     private FixedReferenceEvidence makeEvidence(Catalog c,String id,double score,JsonNode original,JsonNode unit,boolean origin) {
         boolean literal=unit!=null&&explicitRefinements.contains(id+"|"+normalizedDigest(unit));
@@ -326,11 +432,12 @@ public class FixedBaselineRetrievalClient {
             require(hash(raw).equals(properties.getManifestSha256()),"frozen_manifest_sha_mismatch");JsonNode manifest=parse(raw);
             require("consense.frozen-fixed-development-baseline.v1".equals(manifest.path("schema").asText())&&manifest.path("developmentBaseline").asBoolean()
                     &&!manifest.path("finalParsingAccepted").asBoolean(true)&&!manifest.path("businessAccepted").asBoolean(true),"frozen_manifest_acceptance_invalid");
-            require(stringSet(manifest.path("scope")).equals(new HashSet<>(Arrays.asList("GCC","GCT","all-applicable-SL-technical"))),"frozen_manifest_scope_invalid");
+            Set<String> scope=stringSet(manifest.path("scope"));
+            require(acceptableReferenceScope(scope,properties.isSharedSource()),"frozen_manifest_scope_invalid");
             require(properties.getIndexSignature().equals(manifest.path("indexSignature").asText()),"frozen_manifest_index_signature_mismatch");
             JsonNode plan=readDescriptor(manifest.path("runtimePlan"),properties.getMaxResponseBytes());
             require(properties.getProjectId().equals(plan.path("projectId").asText())&&properties.getIndexSignature().equals(plan.path("indexSignatureSha256").asText()),"runtime_plan_identity_mismatch");
-            JsonNode desc=manifest.path("corpus");Path cp=Paths.get(desc.path("path").asText()).toAbsolutePath().normalize();Pin corpusPin=new Pin(cp);
+            JsonNode desc=manifest.path("corpus");Path cp=resolveDescriptorPath(desc.path("path").asText()).toAbsolutePath().normalize();Pin corpusPin=new Pin(cp);
             require(desc.path("bytes").isIntegralNumber()&&desc.path("bytes").asLong()==corpusPin.bytes&&shaText(desc.path("sha256").asText()),"frozen_corpus_descriptor_invalid");
             Map<String,Row> rows=new HashMap<>();Map<String,String> titles=new HashMap<>();ExactIndex exact=new ExactIndex();MessageDigest digest=sha();long offset=0;ByteArrayOutputStream line=new ByteArrayOutputStream();
             try(InputStream input=new BufferedInputStream(Files.newInputStream(cp))) {
@@ -353,6 +460,10 @@ public class FixedBaselineRetrievalClient {
         String id=p.path("id").asText();require(!rows.containsKey(id),"frozen_corpus_duplicate_parent");Row row=new Row(offset,bytes.length,hash(bytes),normalizedDigest(p),p);rows.put(id,row);exact.add(id,row);
         String family=p.path("sourceQuality").path("family").asText();String title=Arrays.asList("GCC","GCT").contains(family)?FixedReferenceEvidence.observedDocumentTitle(p.path("content").asText(),family):"";
         if(!title.isEmpty()){String source=p.path("originalSourceSha256").asText();titles.merge(source,title,(oldTitle,newTitle)->oldTitle.equalsIgnoreCase(newTitle)?oldTitle:"");}
+    }
+    static boolean acceptableReferenceScope(Set<String> scope,boolean sharedSource) {
+        return scope.equals(new HashSet<>(Arrays.asList("GCC","GCT","all-applicable-SL-technical")))
+                ||(sharedSource&&scope.equals(Collections.singleton("all-applicable-SL-technical")));
     }
     private void validateParent(Catalog c,String id,JsonNode p) {
         Row row=c.rows.get(id);require(row!=null&&id.equals(p.path("id").asText()),"retrieval_unknown_or_mismatched_parent");
@@ -386,7 +497,7 @@ public class FixedBaselineRetrievalClient {
             String expected=parent.path("originalSourceSha256").asText();if(!checked.add(expected))continue;
             JsonNode descriptor=originalDescriptor(c,expected);
             try {
-                Path path=Paths.get(descriptor.path("path").asText()).toAbsolutePath().normalize();Pin before=new Pin(path);
+                Path path=resolveDescriptorPath(descriptor.path("path").asText()).toAbsolutePath().normalize();Pin before=new Pin(path);
                 require(Files.isRegularFile(path)&&before.bytes==descriptor.path("bytes").asLong(),"fixed_original_size_changed");
                 MessageDigest digest=sha();long count=0;byte[] buffer=new byte[65536];
                 try(InputStream input=new BufferedInputStream(Files.newInputStream(path))) {
@@ -406,6 +517,26 @@ public class FixedBaselineRetrievalClient {
         return descriptor;
     }
     private void validateHealth(Catalog c,JsonNode h) {
+        if(properties.isSharedSource()) {
+            JsonNode sig=c.plan.path("signature"),w=h.path("retrieval").path("sourceWindows"),rr=h.path("runtime").path("reranker");
+            require("ok".equals(h.path("status").asText())&&"fixed-reference-query".equals(h.path("mode").asText())
+                    &&"cuda".equals(h.path("device").asText())&&h.path("offline").asBoolean()
+                    &&properties.getManifestSha256().equals(h.path("fixedReferenceManifestSha256").asText())
+                    &&properties.getIndexSignature().equals(h.path("fixedReferenceIndexSignature").asText())
+                    &&sig.path("signatureVersion").equals(h.path("indexSignatureVersion")),"fixed_shared_health_identity_invalid");
+            require(sig.path("embedding").equals(h.path("models").path("embedding"))
+                    &&sig.path("runtime").equals(h.path("runtime").path("embedding"))
+                    &&"BAAI/bge-reranker-v2-m3".equals(h.path("models").path("reranker").path("name").asText())
+                    &&"953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e".equals(h.path("models").path("reranker").path("revision").asText())
+                    &&"cuda".equals(rr.path("device").asText())&&"float16".equals(rr.path("dtype").asText())
+                    &&rr.path("maxTokens").asInt()==512&&rr.path("batchSize").asInt()==4&&rr.path("serialOffload").asBoolean()
+                    &&rr.equals(w.path("rerankRuntime")),"fixed_shared_health_model_invalid");
+            require("source-bound-window-points-full-parent-results-v1".equals(w.path("contract").asText())
+                    &&"max".equals(w.path("denseAggregation").asText())&&"max".equals(w.path("rerankAggregation").asText())
+                    &&sig.path("windowRecipe").equals(w.path("embeddingWindows"))
+                    &&sig.path("windowRecipe").equals(w.path("rerankWindows")),"fixed_shared_health_recipe_invalid");
+            return;
+        }
         if(migrationConfigured()) { validateMigratedHealth(c,h);return; }
         JsonNode signature=c.plan.path("signature"),w=h.path("retrieval").path("sourceWindows");
         int version=signature.path("signatureVersion").asInt();
@@ -422,9 +553,33 @@ public class FixedBaselineRetrievalClient {
     }
     private JsonNode readDescriptor(JsonNode d,int maximum) {
         require(d.isObject()&&text(d.path("path"))&&d.path("bytes").isIntegralNumber()&&d.path("bytes").asLong()>=0&&d.path("bytes").asLong()<=maximum&&shaText(d.path("sha256").asText()),"fixed_artifact_descriptor_invalid");
-        try {Path p=Paths.get(d.path("path").asText());require(Files.size(p)==d.path("bytes").asLong(),"fixed_artifact_size_changed");byte[] raw=Files.readAllBytes(p);require(hash(raw).equals(d.path("sha256").asText()),"fixed_artifact_sha_changed");return parse(raw);}catch(IOException e){throw new IllegalStateException("fixed_artifact_unavailable",e);}
+        try {Path p=resolveDescriptorPath(d.path("path").asText());require(Files.size(p)==d.path("bytes").asLong(),"fixed_artifact_size_changed");byte[] raw=Files.readAllBytes(p);require(hash(raw).equals(d.path("sha256").asText()),"fixed_artifact_sha_changed");return parse(raw);}catch(IOException e){throw new IllegalStateException("fixed_artifact_unavailable",e);}
     }
-    private String configIdentity(){return properties.getManifestPath()+"|"+properties.getManifestSha256()+"|"+properties.getProjectId()+"|"+properties.getIndexSignature()+"|"+baseUrl()+"|"+properties.getMigrationReceiptPath()+"|"+properties.getMigrationReceiptSha256()+"|"+properties.getQueryRuntimePath()+"|"+properties.getQueryRuntimeSha256();}
+    /** Rebase only a configured historical Windows prefix; the signed descriptor remains unchanged. */
+    public Path resolveDescriptorPath(String raw) {
+        String legacy=properties.getLegacyPathPrefix(),mount=properties.getLegacyMountRoot();
+        String second=properties.getSecondaryLegacyPathPrefix(),secondMount=properties.getSecondaryLegacyMountRoot();
+        if(legacy==null&&mount==null&&second==null&&secondMount==null)return Paths.get(raw);
+        require((legacy==null&&mount==null)||(legacy!=null&&!legacy.trim().isEmpty()&&mount!=null&&!mount.trim().isEmpty()),"fixed_reference_path_mapping_incomplete");
+        require((second==null&&secondMount==null)||(second!=null&&!second.trim().isEmpty()&&secondMount!=null&&!secondMount.trim().isEmpty()),"fixed_reference_path_mapping_incomplete");
+        String normalized=raw.replace('\\','/');
+        Path mapped=resolveMappedPath(normalized,legacy,mount);
+        if(mapped==null)mapped=resolveMappedPath(normalized,second,secondMount);
+        if(mapped!=null)return mapped;
+        require(!normalized.matches("^[A-Za-z]:/.*"),"fixed_reference_path_outside_mapping");
+        return Paths.get(raw);
+    }
+    private Path resolveMappedPath(String normalized,String legacy,String mount) {
+        if(legacy==null)return null;
+        String prefix=legacy.replace('\\','/');if(!prefix.endsWith("/"))prefix+="/";
+        if(!normalized.regionMatches(true,0,prefix,0,prefix.length()))return null;
+        Path root=Paths.get(mount).toAbsolutePath().normalize(),resolved=root.resolve(normalized.substring(prefix.length())).normalize();
+        require(resolved.startsWith(root),"fixed_reference_path_outside_mapping");
+        try { Path realRoot=root.toRealPath(),real=resolved.toRealPath();
+            require(real.startsWith(realRoot),"fixed_reference_path_symlink_escape");return real;
+        } catch(IOException e) { throw new IllegalStateException("fixed_reference_mapped_path_unavailable",e); }
+    }
+    private String configIdentity(){return properties.getSecondaryManifestPath()+"|"+properties.getSecondaryManifestSha256()+"|"+properties.getSecondaryProjectId()+"|"+properties.getSecondaryIndexSignature()+"|"+properties.isSharedSource()+"|"+properties.getLegacyPathPrefix()+"|"+properties.getLegacyMountRoot()+"|"+properties.getSecondaryLegacyPathPrefix()+"|"+properties.getSecondaryLegacyMountRoot()+"|"+properties.getManifestPath()+"|"+properties.getManifestSha256()+"|"+properties.getProjectId()+"|"+properties.getIndexSignature()+"|"+baseUrl()+"|"+properties.getMigrationReceiptPath()+"|"+properties.getMigrationReceiptSha256()+"|"+properties.getQueryRuntimePath()+"|"+properties.getQueryRuntimeSha256();}
     private boolean migrationConfigured() {
         return properties.getMigrationReceiptPath()!=null||properties.getMigrationReceiptSha256()!=null
                 ||properties.getQueryRuntimePath()!=null||properties.getQueryRuntimeSha256()!=null;
@@ -438,7 +593,7 @@ public class FixedBaselineRetrievalClient {
     private void verifyArtifact(JsonNode descriptor) {
         require(text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()&&descriptor.path("bytes").asLong()>0
                 &&shaText(descriptor.path("sha256").asText()),"migration_artifact_descriptor_invalid");
-        try {Path path=Paths.get(descriptor.path("path").asText());Pin before=new Pin(path);MessageDigest d=sha();long count=0;
+        try {Path path=resolveDescriptorPath(descriptor.path("path").asText());Pin before=new Pin(path);MessageDigest d=sha();long count=0;
             try(InputStream stream=new BufferedInputStream(Files.newInputStream(path))) {byte[] bytes=new byte[65536];int n;while((n=stream.read(bytes))!=-1){d.update(bytes,0,n);count+=n;}}
             before.current();require(count==descriptor.path("bytes").asLong()&&hex(d.digest()).equals(descriptor.path("sha256").asText()),"migration_artifact_changed");
         }catch(IOException e){throw new IllegalStateException("migration_artifact_unavailable",e);}
@@ -465,9 +620,11 @@ public class FixedBaselineRetrievalClient {
             require(m.path("targetVectorIntegrity").path(field).equals(c.manifest.path("vectorIntegrity").path(field))
                     &&m.path("sourceVectorIntegrity").path(field).equals(c.manifest.path("vectorIntegrity").path(field)),"migration_vector_seal_changed:"+field);
         // Local warm cosine values and cold stored float32 values have separately recorded exact hashes.
+        JsonNode sourceSeal=m.path("sourceVectorIntegrity"),targetSeal=m.path("targetVectorIntegrity");
         require(shaText(c.manifest.path("vectorIntegrity").path("persistedPointsSha256").asText())
-                &&m.path("sourceVectorIntegrity").path("pointsSha256").equals(c.manifest.path("vectorIntegrity").path("persistedPointsSha256"))
-                &&m.path("targetVectorIntegrity").equals(m.path("sourceVectorIntegrity")),"migration_original_persisted_vectors_changed");
+                &&sourceSeal.path("pointsSha256").equals(c.manifest.path("vectorIntegrity").path("persistedPointsSha256"))
+                &&shaText(targetSeal.path("pointsSha256").asText())
+                &&(targetSeal.equals(sourceSeal)||boundedMigrationDifference(m)),"migration_original_persisted_vectors_changed");
         require("consense.migrated-server-query-runtime.v1".equals(q.path("schema").asText())
                 &&properties.getMigrationReceiptSha256().equals(q.path("migrationReceiptSha256").asText())
                 &&baseUrl().equals(q.path("queryApiBaseUrl").asText())&&q.path("target").equals(m.path("target"))
@@ -524,6 +681,13 @@ public class FixedBaselineRetrievalClient {
                 &&properties.getMigrationReceiptSha256().equals(access.path("migrationReceiptSha256").asText()),"migrated_response_access_invalid");
         for(String field:Arrays.asList("target","queryIdentity","queryRecipe","queryRuntimeSignature","fullVectorIntegrity"))
             require(access.path(field).equals(q.path(field)),"migrated_response_identity_changed:"+field);
+    }
+    private static boolean boundedMigrationDifference(JsonNode migration) {
+        for(String field:Arrays.asList("maximumVectorDifference","maximumCosineDelta")) {
+            JsonNode value=migration.path(field);double number=value.asDouble(Double.NaN);
+            if(!value.isNumber()||!Double.isFinite(number)||number<0||number>1e-6)return false;
+        }
+        return true;
     }
     private String baseUrl(){String u=properties.getBaseUrl();require(u!=null&&u.matches("https?://[^/]+/?"),"fixed_reference_base_url_invalid");return u.endsWith("/")?u.substring(0,u.length()-1):u;}
     private JsonNode parse(String text){require(text!=null&&text.getBytes(StandardCharsets.UTF_8).length<=properties.getMaxResponseBytes(),"fixed_wire_too_large");return parse(text.getBytes(StandardCharsets.UTF_8));}

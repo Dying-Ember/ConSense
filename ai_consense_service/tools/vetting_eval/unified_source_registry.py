@@ -4,12 +4,13 @@ Collection roots are bounded HTTP identities; hydrated complete parents are an
 internal retrieval view only. PDF signals are dispatched before the broader
 native-DOCX candidate detector, which also matches PDF recipe/block prefixes.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from contextvars import ContextVar
 from collections import OrderedDict
 import hashlib
 import json
 import os
+import sys
 from threading import RLock
 from typing import NamedTuple
 from dataclasses import asdict
@@ -398,7 +399,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
             self.artifact_store.verify(descriptor)
 
     @contextmanager
-    def validation_frame(self, *, software_guard):
+    def validation_frame(self, *, software_guard, after_verified=None):
         """Fresh request-only proof with complete CAS/root/alias/software exit checks.
 
         Each use rereads its published wire. A bounded immutable derived result
@@ -408,8 +409,14 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         if not callable(software_guard):
             raise SourceRegistryError('CANONICAL_FRAME_SOFTWARE_GUARD_REQUIRED',
                 'A request frame requires the actual imported-runtime software guard')
+        if after_verified is not None and not callable(after_verified):
+            raise SourceRegistryError('CANONICAL_FRAME_CALLBACK_INVALID',
+                'A final source frame callback must be callable')
         active = self._validation_frame.get()
         if active is not None:
+            if after_verified is not None:
+                raise SourceRegistryError('CANONICAL_FRAME_CALLBACK_INVALID',
+                    'A final source frame callback requires the outer frame')
             if active['guard'] != software_guard:
                 raise SourceRegistryError('CANONICAL_FRAME_GUARD_MISMATCH',
                     'Nested source frame must retain the same runtime guard')
@@ -425,7 +432,8 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         frame = {'files': {}, 'values': {}, 'pending': {}, 'guard': software_guard,
                  'softwareIdentity': identity, 'softwareBytes': _serialize(identity),
                  'locations': {}, 'normalLocations': {}, 'familyContext': None,
-                 'normalMembers': {}, 'indexMetadata': {}, 'corpusDigests': {}}
+                 'normalMembers': {}, 'indexMetadata': {}, 'corpusDigests': {},
+                 'leaseStack': ExitStack()}
         token = self._validation_frame.set(frame)
         try:
             with self.artifact_store.validation_session():
@@ -451,16 +459,32 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
                 raise SourceRegistryError('CANONICAL_FRAME_SOFTWARE_CHANGED',
                     'Imported runtime software identity changed during this request')
             self._derived_commit(frame['pending'])
+            for record in frame['indexMetadata'].values():
+                if 'leaseCheck' in record:
+                    record['leaseCheck']()
+            if after_verified is not None:
+                for check in frame.get('precommitChecks', ()):
+                    check()
+                after_verified()
         finally:
-            self._validation_frame.reset(token)
-            frame['values'].clear()
-            frame['pending'].clear()
-            frame['files'].clear()
-            frame['locations'].clear()
-            frame['normalLocations'].clear()
-            frame['normalMembers'].clear()
-            frame['indexMetadata'].clear()
-            frame['corpusDigests'].clear()
+            original = sys.exc_info()[1]
+            try:
+                try:
+                    frame['leaseStack'].close()
+                except BaseException as release_error:
+                    if original is not None:
+                        raise release_error from original
+                    raise
+            finally:
+                self._validation_frame.reset(token)
+                frame['values'].clear()
+                frame['pending'].clear()
+                frame['files'].clear()
+                frame['locations'].clear()
+                frame['normalLocations'].clear()
+                frame['normalMembers'].clear()
+                frame['indexMetadata'].clear()
+                frame['corpusDigests'].clear()
 
     def _revision_path(self, revision):
         path = super()._revision_path(revision)

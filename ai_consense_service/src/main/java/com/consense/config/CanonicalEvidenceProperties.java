@@ -14,6 +14,8 @@ public class CanonicalEvidenceProperties {
     private Map<String,String> retrievalBaseUrls=new LinkedHashMap<>();
     /** Reviewed sidecar identities keyed by exact canonical projection; absent remains text/model-input only. */
     private Map<String,String> sourcePageRenderEvidenceIdentities=new LinkedHashMap<>();
+    /** Optional stable replacement generation keyed by the exact original Vetting index key. */
+    private Map<String,String> vettingIndexGenerations=new LinkedHashMap<>();
     private int timeoutMs=30000;
     /** Whole normal-source publication builds and validates complete graphs before returning their sealed projection. */
     private int normalPublicationTimeoutMs=900000;

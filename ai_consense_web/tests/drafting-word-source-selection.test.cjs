@@ -64,25 +64,37 @@ console.log('PASS: Word selections require source identity, unique native paths,
 async function actualDocxConversion() {
   const window = new JSDOM('').window
   const JSZip = require('jszip')
+  const portableSha256 = loadTypeScript(path.join(__dirname, '../src/api/sha256Bytes.ts'), { globals: { crypto: {}, setTimeout }, dependencies: { '@noble/hashes/sha256': require('@noble/hashes/sha256') } })
   const converter = loadTypeScript(path.join(__dirname, '../src/drafting/document-reading.ts'), {
     globals: { crypto: webcrypto, document: window.document, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter },
-    dependencies: { jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) }, './document-reading-text': loadTypeScript(path.join(__dirname, '../src/drafting/document-reading-text.ts')), './reading-list-markers': loadTypeScript(path.join(__dirname, '../src/drafting/reading-list-markers.ts')) }
+    dependencies: { '@/api/sha256Bytes': portableSha256, jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) }, './document-reading-text': loadTypeScript(path.join(__dirname, '../src/drafting/document-reading-text.ts')), './reading-list-markers': loadTypeScript(path.join(__dirname, '../src/drafting/reading-list-markers.ts')) }
   })
   const zip = new JSZip()
   zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
   zip.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
-  zip.file('word/document.xml', `<x:document xmlns:x="${ns}"><x:body><x:p><x:r><x:t>Repeated text</x:t></x:r></x:p><x:p><x:r><x:t>Repeated text</x:t></x:r></x:p></x:body></x:document>`)
+  zip.file('word/document.xml', `<x:document xmlns:x="${ns}"><x:body><x:p><x:r><x:t>Repeated text</x:t></x:r></x:p><x:p><x:r><x:t>Repeated text</x:t></x:r></x:p><x:p><x:r><x:t>Choose Section _____*</x:t></x:r><x:r><x:br x:type="page"/></x:r></x:p><x:p><x:r><x:t>Ordinary break</x:t><x:br/></x:r></x:p><x:p><x:r><x:t>Before</x:t><x:br x:type="page"/><x:t>After</x:t></x:r></x:p></x:body></x:document>`)
   const bytes = await zip.generateAsync({ type: 'arraybuffer' })
   const actualSha = Buffer.from(await webcrypto.subtle.digest('SHA-256', bytes)).toString('hex')
   const rendered = await converter.convertDocumentReading(bytes, actualSha)
-  const reviewReading = { ...reading, sourceSha256: actualSha, paragraphs: [1, 2].map(index => ({ ...paragraph(index, 'Repeated text'), sourceSha256: actualSha, sourcePosition: { partName: 'word/document.xml', sourceSha256: actualSha, nodePath: expanded(index) } })) }
+  const texts = ['Repeated text', 'Repeated text', 'Choose Section _____*\n', 'Ordinary break\n', 'Before\nAfter']
+  const reviewReading = { ...reading, sourceSha256: actualSha, paragraphs: texts.map((value, i) => ({ ...paragraph(i + 1, value), sourceSha256: actualSha, sourcePosition: { partName: 'word/document.xml', sourceSha256: actualSha, nodePath: expanded(i + 1) } })) }
   const surface = window.document.createElement('main'); surface.innerHTML = rendered.html
-  assert.equal(bindWordReview(surface, rendered, reviewReading), 2, 'DOCX conversion markers bind duplicate text by native XML identity')
+  assert.equal(bindWordReview(surface, rendered, reviewReading), 3, 'A trailing page break retains its native offset; ordinary and embedded breaks remain unbound')
   const blocks = surface.querySelectorAll('[data-native-id]'), text = blocks[1].firstChild
   const range = window.document.createRange(); range.setStart(text, 0); range.setEnd(text, 8)
   const picked = selectWordReviewRange(surface, reviewReading, range)
   assert.equal(picked.native.paragraphId, reviewReading.paragraphs[1].id)
   assert.equal(picked.text, 'Repeated')
+  const pageBlock = blocks[2], pageText = pageBlock.firstChild, pageRange = window.document.createRange()
+  pageRange.setStart(pageText, 7); pageRange.setEnd(pageText, pageText.textContent.length - 1)
+  const pageSelection = selectWordReviewRange(surface, reviewReading, pageRange)
+  assert.equal(pageSelection.text, 'Section _____*')
+  assert.equal(pageSelection.native.end, texts[2].length - 1, 'The selected editable text ends before the page break')
+  assert.equal(pageSelection.native.sourceSha256, actualSha)
+  const highlights = wordReviewRanges(surface, reviewReading, [pageSelection.native])
+  assert.equal(highlights.unresolved, 0); assert.equal(highlights.ranges[0].toString(), pageSelection.text)
+  assert.equal(wordReviewRanges(surface, reviewReading, [{ ...pageSelection.native, expectedText: 'altered' }]).unresolved, 1)
+  assert.equal(bindWordReview(surface, { ...rendered, docxSha256: '0'.repeat(64) }, reviewReading), 0, 'Source identity remains required')
   console.log('PASS: converted Word binds repeated clauses by exact native identity and selects the intended one')
 }
 actualDocxConversion().catch(error => { console.error(error); process.exitCode = 1 })

@@ -209,12 +209,31 @@ class VettingEnglishExportTest {
             java.nio.file.NoSuchFileException missing=new java.nio.file.NoSuchFileException("authored-missing-sl.pdf");
             IllegalStateException original=new IllegalStateException("fixed_reference_original_unavailable",missing);
             com.consense.vector.VectorStore.SearchHit hit=fixedEvidence.asHit();
-            when(fixed.readOnlyHitById("authored-fixed-parent")).thenReturn(hit).thenThrow(original);when(fixed.evidence(hit)).thenReturn(fixedEvidence);
+            when(fixed.readOnlyHitsForProject(eq("p"),anyCollection())).thenReturn(Collections.singletonList(hit)).thenThrow(original);when(fixed.evidence(hit)).thenReturn(fixedEvidence);
+            when(fixed.currentReadGuardForProject(eq("p"),anyList(),isNull())).thenReturn(()->{});
             f.service.setFixedBaselineRetrievalClient(fixed);
             BizException failure=assertThrows(BizException.class,()->f.service.exportPdf("p","en"));
             assertEquals(4104,failure.getCode());assertSame(original,failure.getCause());assertSame(missing,failure.getCause().getCause());
-            verify(fixed,times(2)).readOnlyHitById("authored-fixed-parent");assertNotNull(f.rendered.get(),"The final source check must still reject loss after PDF rendering");assertEquals(1,f.saved.size());
+            verify(fixed,times(2)).readOnlyHitsForProject(eq("p"),anyCollection());assertNotNull(f.rendered.get(),"The final source check must still reject loss after PDF rendering");assertEquals(1,f.saved.size());
             assertEquals(REMARK,f.finding.getReviewRemarks());assertEquals(QUOTE,f.findingQuote());
+        }
+    }
+
+    @Test void switchingTheProjectsSlRejectsExportButPreservesTheSavedFinding()throws Exception {
+        try(Fixture f=new Fixture()){
+            ObjectNode parent=JsonUtils.mapper().createObjectNode().put("id","old-sl-parent").put("pageNo",1)
+                    .put("fixedBaselineManifestSha256",VettingCorpus.hash("manifest")).put("fixedBaselineVersion","authored")
+                    .put("originalSourceSha256",VettingCorpus.hash("old-sl"));
+            parent.putObject("sourceQuality").put("family","SL");parent.putArray("originalPageNos").add(1);
+            FixedReferenceEvidence old=new FixedReferenceEvidence("old-sl-parent",0,parent,null,null);
+            ArrayNode evidence=(ArrayNode)JsonUtils.parse(f.finding.getEvidenceJson());
+            ((ObjectNode)evidence.get(0)).set("fixedBaselineEvidence",old.pointer());
+            f.finding.setEvidenceJson(JsonUtils.write(evidence));String saved=f.finding.getEvidenceJson();
+            FixedBaselineRetrievalClient fixed=mock(FixedBaselineRetrievalClient.class);
+            when(fixed.readOnlyHitsForProject(eq("p"),anyCollection())).thenThrow(new IllegalStateException("fixed_reference_hit_outside_project_selection"));
+            f.service.setFixedBaselineRetrievalClient(fixed);
+            BizException failure=assertThrows(BizException.class,()->f.service.exportPdf("p","en"));
+            assertEquals(4104,failure.getCode());assertEquals(saved,f.finding.getEvidenceJson());assertNull(f.rendered.get());
         }
     }
 

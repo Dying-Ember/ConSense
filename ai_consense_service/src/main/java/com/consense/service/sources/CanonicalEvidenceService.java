@@ -30,6 +30,7 @@ import java.util.*;
 /** Source-bound registry adoption and asset return; does not alter either retrieval pipeline. */
 @Service
 public class CanonicalEvidenceService {
+    private static final org.slf4j.Logger LOG=org.slf4j.LoggerFactory.getLogger(CanonicalEvidenceService.class);
     private final CanonicalSourceBindingRepository bindings;
     private final CanonicalEvidenceBackend backend;
     private final CanonicalCurrentSourceReader sources;
@@ -296,7 +297,7 @@ public class CanonicalEvidenceService {
         SourceDocument document=currentDocument(projectId,documentId,review.module);
         require(review.originalSourceSha256.equals(document.getSourceSha256())&&review.javaParsedSourceHash.equals(VettingCorpus.sourceHash(document)),
                 HttpStatus.CONFLICT,"SOURCE_REVIEW_REVISION_STALE");
-        JsonNode healthRoot=parse(backend.health()),health=healthRoot.path("oer");
+        JsonNode healthRoot=parse(backend.health(review.module)),health=healthRoot.path("oer");
         require(INPUT_CONTRACT.equals(health.path("inputContract").asText())&&ASSET_CONTRACT.equals(health.path("assetReturnContract").asText())
                 &&"/project".equals(health.path("canonicalProjectionEndpoint").asText())
                 &&review.scopePolicySha256.equals(health.path("scopePolicy").path("manifestSha256").asText()),HttpStatus.BAD_GATEWAY,"OER_CANONICAL_CAPABILITY_MISMATCH");
@@ -491,19 +492,23 @@ public class CanonicalEvidenceService {
             SourceDocument captured=selected.get(i);CanonicalSourceBinding binding=candidates.get(i);
             require(captured!=null&&binding!=null&&Objects.equals(project,captured.getProjectId())&&Objects.equals(project,binding.getProjectId())&&Objects.equals(captured.getId(),binding.getDocumentId())
                     &&Objects.equals(module,binding.getDeclaredModule())&&binding.getSnapshotJson()==null&&SourceContentDigests.stamped(captured),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+            searchProgress(captured.getId(),"verify_binding");
             require(binding.getAdoptionManifestSha256()==null&&binding.getReviewReferenceSha256()==null&&binding.getFamilyCompositionSha256()==null&&binding.getFamilyComponentSetSha256()==null,HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");
             require(validDigest(binding.getSnapshotBytesSha256())&&Objects.equals(binding.getSnapshotBytesSha256(),binding.getSnapshotContentSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
             require(modules(JsonUtils.parse(binding.getEligibleModulesJson())).contains(module),HttpStatus.FORBIDDEN,"CANONICAL_MODULE_NOT_ELIGIBLE");
             List<List<Object>> capturedHistory=candidates instanceof CompactNormalCandidates?((CompactNormalCandidates)candidates).prefixes.get(captured.getId()):Collections.singletonList(bindingState(binding));
             require(capturedHistory!=null&&capturedHistory.equals(compactHistory(project,captured.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
             String[] authority=new String[2];com.fasterxml.jackson.databind.node.ObjectNode header=registeredHeaders==null?null:JsonUtils.mapper().createObjectNode();
+            searchProgress(captured.getId(),"read_registry");
             require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority,header)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
             if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1])){admission(recorder,"stored_authority_not_normal",i);return null;}
+            searchProgress(captured.getId(),"read_source");
             SourceDocument source=sources.normalDocument(project,captured.getId(),module);
             require(ProjectDocumentScope.sameScopeRevision(captured,source)&&SourceContentDigests.stamped(source)&&Objects.equals(captured.getBusinessContentSha256(),source.getBusinessContentSha256())
                     &&Objects.equals(binding.getOriginalSourceSha256(),source.getSourceSha256())&&Objects.equals(binding.getJavaParsedSourceHash(),VettingCorpus.sourceHash(source))
                     &&Objects.equals(binding.getRoutingSha256(),routingHash(source)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
-            SourceContentDigests.verifyLoaded(source);JsonNode graph=NormalObservedPreparationService.currentGraph(source);
+            searchProgress(captured.getId(),"verify_source");SourceContentDigests.verifyLoaded(source);
+            searchProgress(captured.getId(),"verify_graph");JsonNode graph=NormalObservedPreparationService.currentGraph(source);
             require(graphs.putIfAbsent(source.getId(),CanonicalJson.nodeHash(graph))==null,HttpStatus.CONFLICT,"CANONICAL_SELECTED_DOCUMENTS_INVALID");generations.put(source.getId(),graph.path("generationSha256").asText());
             SourceDocument stamp=CanonicalCurrentSourceReader.compactVerifiedSource(source);sources.requireCurrentStamp(stamp,sources.currentStamp(project,source.getId(),module));
             require(capturedHistory.equals(compactHistory(project,source.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
@@ -511,12 +516,21 @@ public class CanonicalEvidenceService {
             if(history==null){admission(recorder,"foreign_authority_not_normal",i);return null;}
             require(capturedHistory.equals(history),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
             if(header!=null){validateCompactForeignNormal(binding,header,source,graph,graphs.get(source.getId()),module);registeredHeaders.put(source.getId(),header);}
-            consumer.accept(source,graph);
+            searchProgress(captured.getId(),"consume_graph");consumer.accept(source,graph);
             retained.add(compact);histories.put(source.getId(),history);stamps.put(source.getId(),stamp);registryPins.put(source.getId(),new CompactRegistryPin(null,true,sources.observeOriginal(stamp)));
         }
         CompactBindingScope scope=new CompactBindingScope(this,project,module,retained,histories,stamps,registryPins);assertCompactCurrent(scope);
         admission(recorder,"native_proof_pending",selected.size());
         return new CompactNormalPreparation(scope,graphs,generations);
+    }
+
+    private static void searchProgress(Long documentId,String stage){
+        try {
+            String requestId=org.slf4j.MDC.get("vettingSearchRequestId");
+            if(requestId!=null&&requestId.matches("[0-9a-f-]{36}"))
+                LOG.info("Vetting search requestId={} documentId={} stage={}",requestId,documentId,stage);
+        } catch(ThreadDeath fatal) { throw fatal; }
+        catch(Throwable ignored) { /* Diagnostics must not interrupt source verification. */ }
     }
 
     /** Local selected bytes only; the caller owns linked-generation and fresh native catalog proof. */

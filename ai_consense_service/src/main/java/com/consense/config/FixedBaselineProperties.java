@@ -7,7 +7,29 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "consense.fixed-baseline")
 public class FixedBaselineProperties {
+    private String secondaryManifestPath, secondaryManifestSha256, secondaryProjectId, secondaryIndexSignature;
+    public String getSecondaryManifestPath(){return secondaryManifestPath;}
+    public void setSecondaryManifestPath(String v){secondaryManifestPath=v;}
+    public String getSecondaryManifestSha256(){return secondaryManifestSha256;}
+    public void setSecondaryManifestSha256(String v){secondaryManifestSha256=v;}
+    public String getSecondaryProjectId(){return secondaryProjectId;}
+    public void setSecondaryProjectId(String v){secondaryProjectId=v;}
+    public String getSecondaryIndexSignature(){return secondaryIndexSignature;}
+    public void setSecondaryIndexSignature(String v){secondaryIndexSignature=v;}
     private boolean enabled;
+    private boolean sharedSource;
+    public boolean isSharedSource() { return sharedSource; }
+    public void setSharedSource(boolean v) { sharedSource = v; }
+    private String legacyPathPrefix, legacyMountRoot;
+    private String secondaryLegacyPathPrefix, secondaryLegacyMountRoot;
+    public String getSecondaryLegacyPathPrefix() { return secondaryLegacyPathPrefix; }
+    public void setSecondaryLegacyPathPrefix(String v) { secondaryLegacyPathPrefix = v; }
+    public String getSecondaryLegacyMountRoot() { return secondaryLegacyMountRoot; }
+    public void setSecondaryLegacyMountRoot(String v) { secondaryLegacyMountRoot = v; }
+    public String getLegacyPathPrefix() { return legacyPathPrefix; }
+    public void setLegacyPathPrefix(String v) { legacyPathPrefix = v; }
+    public String getLegacyMountRoot() { return legacyMountRoot; }
+    public void setLegacyMountRoot(String v) { legacyMountRoot = v; }
     private String manifestPath;
     private String manifestSha256 = "deb87c356c2a724f71d8bc316d86c4272fa9ebe014fb2bedf4c18de29a425aab";
     private String baseUrl = "http://127.0.0.1:8876";

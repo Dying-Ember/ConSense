@@ -82,7 +82,7 @@ public class CanonicalCurrentSourceReader {
     }
     /** File metadata detects ordinary replacement promptly; actual SHA proof remains mandatory at entry/exit. */
     public OriginalFileState observeOriginal(SourceDocument source){
-        try{java.nio.file.Path path=java.nio.file.Paths.get(source.getStoragePath()).toRealPath();
+        try{java.nio.file.Path path=StorageService.resolveStoredPath(java.nio.file.Paths.get(properties.getStorageRoot()),source.getStoragePath());
             require(path.startsWith(java.nio.file.Paths.get(properties.getStorageRoot()).toRealPath()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");
             java.nio.file.attribute.BasicFileAttributes attributes=java.nio.file.Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes.class);
             require(attributes.isRegularFile(),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");return new OriginalFileState(path,attributes);

@@ -1,9 +1,10 @@
 """Explicit composite pins for indexing; source pages never alter sealed chunks."""
 from contextvars import ContextVar
 import copy
+import inspect
 import json
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import Field
 from oer_server import CanonicalIndexRequest
 from oer_source_registry import _identity
@@ -75,18 +76,67 @@ class SourcePageIndexRuntime:
     def retrieve(self, request):
         # The exact declared map is in the persisted signature, outside source
         # payloads. Restoring an index never guesses an available/newest sidecar.
+        import os
+        from migrated_qdrant_index import migration_candidate_for_frame
+        from migration_project_registry import runtime_route
+        from window_runtime import retrieved_metadata_scope
         key = self.s.project_key(request.projectId)
-        with self.s.LOCK:
-            stored = self.s._projects.get(key)
-            if stored is None:
-                path = self.s.metadata_path(key)
-                if path.exists():
-                    stored = json.loads(path.read_text(encoding='utf-8'))
+        with self.s.LOCK, retrieved_metadata_scope() as holder:
+            guard = getattr(self.s, 'verify_project_publication', None)
+            if guard is not None:
+                guard(key, None)
+            route = runtime_route(self.s, key, self)
+            migrated = route['mode'] != 'ordinary'
+            if migrated:
+                stored = migration_candidate_for_frame(self.s, key, self.source_registry, route)
+            else:
+                stored = self.s._projects.get(key)
+                if stored is None:
+                    path = self.s.metadata_path(key)
+                    if path.exists():
+                        preflight = getattr(self.s, 'require_project_metadata_for_load', None)
+                        if preflight is not None:
+                            preflight(key)
+                        stored = json.loads(path.read_text(encoding='utf-8'))
+                if guard is not None:
+                    guard(key, stored)
             pins = evidence_pins((stored or {}).get('signature', {}).get('sourcePageEvidence', {}))
+            if migrated:
+                from source_request_context import active as request_active
+                frame_var = getattr(self.source_registry, '_validation_frame', None)
+                frame = frame_var.get() if frame_var is not None else None
+                record = frame['indexMetadata'].get(key) if isinstance(frame, dict) else None
+                scope = stored.get('sourceScope')
+                if scope is None and isinstance(record, dict):
+                    scope = record.get('derivedLegacySourceScope')
+                fail(isinstance(scope, dict) and scope.get('projectId') == key
+                     and scope.get('module') == self.target_module and 'sourcePageEvidence' in scope
+                     and evidence_pins(scope['sourcePageEvidence']) == pins,
+                     'MIGRATED_INDEX_SOURCE_SCOPE_MISMATCH',
+                     'Migrated source scope and index source-page pins must agree')
+                if request_active():
+                    inherited = self.source_page_index_pins.get()
+                    fail(inherited is not None and evidence_pins(inherited) == pins,
+                         'MIGRATED_INDEX_SOURCE_SCOPE_MISMATCH',
+                         'Request-owned source-page pins differ from the migrated index')
+                fail(isinstance(record, dict) and record.get('stored') is stored
+                     and record.get('migrationSourceScopeVerified') is True,
+                     'MIGRATED_INDEX_SOURCE_SCOPE_MISMATCH',
+                     'Migrated source scope requires verification in the owning request frame')
             token = self.source_page_index_pins.set(pins)
             try:
+                if migrated:
+                    native_guard = getattr(self, '_validate_native_sources', None)
+                    fail(callable(native_guard), 'MIGRATED_INDEX_SOURCE_FRAME_REQUIRED',
+                         'Migrated retrieval requires native source validation')
+                    native_guard(stored['chunks'])
+                    self._validate_source_page_pins(stored['chunks'])
+                    record['leaseCheck']()
                 result = super().retrieve(request)
-                current = self.s._projects[key]
+                current = holder[0] if len(holder) == 1 else self.s._projects[key] if not migrated else None
+                if migrated:
+                    fail(current is stored, 'MIGRATED_INDEX_FRAME_CONFLICT',
+                         'Verified retrieval metadata differs from the request scope candidate')
                 self._validate_source_page_pins(current['chunks'])
                 return result
             finally:
@@ -98,23 +148,49 @@ def install_source_page_index_route(app, backend):
     endpoint = old.endpoint
     app.router.routes.remove(old)
 
+    def prepare(request):
+        pins = evidence_pins(request.sourcePageEvidence)
+        fail(set(pins).issubset(request.projectionSha256), 'SOURCE_PAGE_INDEX_PINS_OUTSIDE_SCOPE',
+             'Every composite pin must name a selected projection')
+        runtime = backend._windows_runtime
+        return pins, runtime, runtime.source_page_index_pins.set(pins)
+
     def index(request):
         try:
-            pins = evidence_pins(request.sourcePageEvidence)
-            fail(set(pins).issubset(request.projectionSha256), 'SOURCE_PAGE_INDEX_PINS_OUTSIDE_SCOPE',
-                 'Every composite pin must name a selected projection')
-            runtime = backend._windows_runtime
-            token = runtime.source_page_index_pins.set(pins)
+            pins, runtime, token = prepare(request)
             try:
                 result = endpoint(request)
                 return {**result, 'sourcePageEvidence': copy.deepcopy(pins)}
             finally:
                 runtime.source_page_index_pins.reset(token)
         except WindowError as error:
-            raise HTTPException(422, {'kind': error.kind, 'message': str(error), 'metadata': error.metadata}) from error
-        except (ValueError, KeyError, OSError) as error:
+            raise HTTPException(503 if error.kind == 'INDEX_PUBLICATION_DURABILITY_UNKNOWN' else 422,
+                                {'kind': error.kind, 'message': str(error), 'metadata': error.metadata}) from error
+        except OSError as error:
+            raise HTTPException(503, {'kind': 'SOURCE_PAGE_INDEX_IO_UNAVAILABLE', 'message': str(error)}) from error
+        except (ValueError, KeyError) as error:
             raise HTTPException(422, {'kind': getattr(error, 'code', 'SOURCE_PAGE_INDEX_PINS_REJECTED'),
                                       'message': str(error)}) from error
 
     index.__annotations__['request'] = SourcePageIndexRequest
-    app.post('/index-canonical')(index)
+    if inspect.iscoroutinefunction(endpoint):
+        async def async_index(request, http_request):
+            try:
+                pins, runtime, token = prepare(request)
+                try:
+                    result = await endpoint(request, http_request)
+                    return {**result, 'sourcePageEvidence': copy.deepcopy(pins)}
+                finally:
+                    runtime.source_page_index_pins.reset(token)
+            except WindowError as error:
+                raise HTTPException(503 if error.kind == 'INDEX_PUBLICATION_DURABILITY_UNKNOWN' else 422,
+                                    {'kind': error.kind, 'message': str(error), 'metadata': error.metadata}) from error
+            except OSError as error:
+                raise HTTPException(503, {'kind': 'SOURCE_PAGE_INDEX_IO_UNAVAILABLE', 'message': str(error)}) from error
+            except (ValueError, KeyError) as error:
+                raise HTTPException(422, {'kind': getattr(error, 'code', 'SOURCE_PAGE_INDEX_PINS_REJECTED'),
+                                          'message': str(error)}) from error
+        async_index.__annotations__ = {'request':SourcePageIndexRequest, 'http_request':Request}
+        app.post('/index-canonical')(async_index)
+    else:
+        app.post('/index-canonical')(index)

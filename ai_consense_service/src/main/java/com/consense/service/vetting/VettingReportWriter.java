@@ -490,7 +490,8 @@ public class VettingReportWriter {
         boolean failed="failed".equals(packet.getStatus());
         boolean overBudget="over_budget".equals(packet.getInputBudgetStatus());
         boolean estimated="provider_estimated_fit".equals(packet.getInputBudgetStatus());
-        boolean budgetUnknown=!overBudget&&!estimated&&!"observed_tokens".equals(packet.getInputBudgetStatus());
+        boolean direct="direct_unmeasured".equals(packet.getInputBudgetStatus());
+        boolean budgetUnknown=!overBudget&&!estimated&&!direct&&!"observed_tokens".equals(packet.getInputBudgetStatus());
         boolean unknownReason="input_budget_unknown".equals(packet.getFailureKind())||notSubmitted&&budgetUnknown;
         boolean overBudgetReason="input_context_over_budget".equals(packet.getFailureKind())||notSubmitted&&overBudget;
         boolean unknownExplained=false,overBudgetExplained=false;
@@ -508,6 +509,7 @@ public class VettingReportWriter {
         }
         if(budgetUnknown&&!unknownExplained)limitations.add(tr(lang,"完整输入预算仍未确认。","完整輸入預算仍未確認。","The complete input budget remains unconfirmed."));
         if(overBudget&&!overBudgetExplained)limitations.add(tr(lang,"已记录的完整输入超出可用上下文预算。","已記錄的完整輸入超出可用上下文預算。","The recorded complete input exceeded the available context budget."));
+        if(direct)limitations.add(tr(lang,"本次未预先计数输入词元。","本次未預先計數輸入詞元。","Input tokens were not counted before the request."));
         if(estimated)limitations.add(tr(lang,"完整输入预算仅依据提供者估计，尚无实际观测的词元数。","完整輸入預算僅依據提供者估計，尚無實際觀測的詞元數。","The complete input budget is based on a provider estimate; an observed token count is unavailable."));
         if(limitations.isEmpty())return null;
         limitations.add(tr(lang,"这些记录不证明来源审查完整或实质正确。","這些記錄不證明來源審查完整或實質正確。","These records do not establish completeness or substantive correctness of the source review."));
@@ -969,6 +971,9 @@ public class VettingReportWriter {
         result = warningPattern(result, "语义仅覆盖 (\\d+)/(\\d+) 片段，其他片段未进入成功的模型调用。",
                 "語義僅覆蓋 {1}/{2} 片段，其他片段未進入成功的模型呼叫。",
                 "Semantic review covered only {1}/{2} excerpts; other excerpts were not included in successful model calls.", lang);
+        result = warningPattern(result, "语义仅覆盖 (\\d+)/(\\d+) 片段；其他片段未计入覆盖，可能未提交或结果不足以确认。",
+                "語義僅覆蓋 {1}/{2} 片段；其他片段未計入覆蓋，可能未提交或結果不足以確認。",
+                "Semantic review covered only {1}/{2} excerpts; other excerpts were not counted as covered because they may not have been submitted or their results were insufficient to confirm coverage.", lang);
         result = warningPattern(result, "语义审查按 (\\d+) 个主题检索；已提交的是局部原文窗口，其他限定是否完整未知。未进入模型的切片不代表已经完成语义审查。",
                 "語義審查按 {1} 個主題檢索；已提交的是局部原文窗口，其他限定是否完整未知。未進入模型的切片不代表已經完成語義審查。",
                 "Semantic review retrieves by {1} topics. Submitted excerpts are local source windows; completeness of other qualifiers is unknown. Excerpts not submitted to the model have not completed semantic review.", lang);

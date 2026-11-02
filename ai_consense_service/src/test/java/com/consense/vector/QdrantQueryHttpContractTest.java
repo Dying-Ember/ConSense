@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -45,6 +46,7 @@ class QdrantQueryHttpContractTest {
             assertEquals("literal clause", hits.get(0).text());
             assertEquals("DOC-A", hits.get(0).getPayload().get("documentId"));
             assertEquals(2, server.requests.get(), "One existing collection GET, one query POST");
+            assertEquals(Arrays.asList("fixture-key", "fixture-key"), server.apiKeys);
         }
     }
 
@@ -82,10 +84,12 @@ class QdrantQueryHttpContractTest {
         final AtomicReference<String> postBody = new AtomicReference<>();
         final AtomicReference<String> response = new AtomicReference<>(
                 "{\"result\":{\"points\":[{\"id\":\"HIT-1\",\"score\":0.875,\"payload\":{\"content\":\"literal clause\",\"documentId\":\"DOC-A\"}}]},\"status\":\"ok\"}");
+        final List<String> apiKeys = Collections.synchronizedList(new ArrayList<>());
         QueryServer() throws Exception {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/", exchange -> {
                 requests.incrementAndGet();
+                apiKeys.add(exchange.getRequestHeaders().getFirst("api-key"));
                 boolean post = "POST".equals(exchange.getRequestMethod());
                 if (post) {
                     postPath.set(exchange.getRequestURI().getPath());
@@ -100,6 +104,7 @@ class QdrantQueryHttpContractTest {
             ConsenseProperties.VectorCfg config = new ConsenseProperties.VectorCfg();
             config.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
             config.setCollection("query-contract");
+            config.setApiKey("fixture-key");
             config.setTimeoutMs(2000);
             store = new QdrantVectorStore(config, new HttpSupport());
         }

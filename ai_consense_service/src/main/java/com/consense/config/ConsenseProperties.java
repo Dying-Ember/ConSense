@@ -158,7 +158,7 @@ public class ConsenseProperties {
         /** First-time corpus embedding/indexing can take much longer than one query. */
         private long retrievalIndexTimeoutMs = 1_800_000;
         private int semanticTopics = 17;
-        /** Scheduling window only; consumption is bounded to 1-120 minutes. */
+        /** Scheduling window only; consumption is bounded to 1-1440 minutes. */
         private int semanticRunMinutes = 55;
         private int semanticContextChars = 10000;
         /** Optional bounded literal-reference expansion; does not imply full contract coverage. */

@@ -1,0 +1,5 @@
+ARG EXTERNAL_RUNTIME_BASE
+FROM ${EXTERNAL_RUNTIME_BASE}
+USER consense:consense
+ENTRYPOINT ["/runtime/bin/qdrant"]
+CMD ["--config-path", "/runtime/config/qdrant-server.yaml"]

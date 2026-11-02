@@ -75,7 +75,7 @@ final class VettingServiceProbe {
     }
     private synchronized void observationFailure(String phase,Throwable e){
         IllegalStateException failure=new IllegalStateException("Service lifecycle observation failed at "+phase,e);
-        observerFailures.add(failure);try{log.warn("Lifecycle observer {} for run {} failed at {}; original business operation continues",operationId,runId,phase,e);}catch(Throwable ignored){/* Logging must not replace the original operation. */}
+        observerFailures.add(failure);try{log.warn("Lifecycle observer {} for run {} failed at {}: {}; original business operation continues",operationId,runId,phase,com.consense.common.DiagnosticSummary.of(e));}catch(Throwable ignored){/* Logging must not replace the original operation. */}
     }
     void elapsed(String phase,long started,long overheadBefore,String boundary,boolean completed){
         long inclusive=System.nanoTime()-started,overhead=overheadNanos()-overheadBefore;

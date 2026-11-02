@@ -8,6 +8,8 @@
 
 **重要状态：**仓库位置和“当前”挂载位置来自冻结基线代码；下文“建议”硬盘位置只是统一摆放方案，尚未创建、接线或在比赛平台验证，不能直接照抄后宣称已可运行。真实运行依赖、各文件读取位置和数据身份须在实施时逐项核对。比赛硬盘可来自多个挂载卷，树形示例只表示逻辑相对路径，并不要求赛方提供同一个物理目录。
 
+**本机 App 字体运行目录（2026-11-01）：**五角色预演中的 App 从硬盘将独立字体运行目录只读挂载到 `/runtime/font-runtime`；目录包括 `fonts.conf`、`manifest.json`、`lib/`、`fonts/` 和 `licenses/`。七库组合包括 `libfontconfig.so.1`、`libfreetype.so.6`、`libharfbuzz.so.0`、`libgraphite2.so.3`、`libpng16.so.16`、`libjpeg.so.8` 和 `liblcms2.so.2`；字体是 DejaVu Sans、Sans Bold、Serif、Sans Mono 和文泉驿正黑，随目录保留全部库及字体的相应版权和许可证。App 设置 `FONTCONFIG_FILE=/runtime/font-runtime/fonts.conf`，并将 `/runtime/font-runtime/lib` 加入 `LD_LIBRARY_PATH`，保留其他必要搜索路径；配置里的 `/runtime/tmp/app/fontconfig` 缓存或其父目录须对非 root App 用户可写。该目录独立于只读 App 发布目录，随实际硬盘文件及部署挂载一并准备，不增加容器。本机原五库版本通过中英文绘制，但 PDFBox 渲染实际原页时发现缺少 JPEG 和 lcms2；补齐后的七库版本通过独立原页渲染探针，现已挂入本机预演 App，容器内使用同一 JRE 和 PDFBox 成功渲染文档 50 的第一页。页面业务重试已开始，双路 OCR 结果尚未验证。库源自 Ubuntu 24.04，赛方镜像的 ABI、依赖和字体呈现尚未验证。实际启动说明见[离线交付入口](../../tools/offline_delivery/README.md)。
+
 **本机先完成真实装箱和试运行（用户最新要求，2026-10-29）：**建议布局须在本机落实为 Docker 镜像、挂载、具名非 root 运行账户和文件清单，以实际持久数据库与 OCR／检索真实权重运行并经业务链验证。本机 Qwen 仅以明确标记的假文件和协议替身检查接线；赛方真实 Qwen／vLLM 推理另记未验。目录示意、文件存在、镜像构建或健康检查都不能代替完成。每条镜像内外接缝须登记生产者、读取者、宿主与各容器路径、读写权限、临时目录、版本及输入输出身份，并验证重启和换版后仍正确。完成条件见[实施说明](competition-container-external-runtime-20261029.md)，依赖见[本地票据](../../../.scratch/competition-external-runtime/README.md)。
 
 ## 冻结基线中，现在的镜像是怎么分的

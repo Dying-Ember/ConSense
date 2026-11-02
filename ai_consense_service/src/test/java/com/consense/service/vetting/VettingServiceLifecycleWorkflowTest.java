@@ -249,7 +249,17 @@ class VettingServiceLifecycleWorkflowTest {
         String project=project();source(project,"NTT","NTT.txt","NTT 1.1 Original text remains available after a failed review.");
         RuntimeException cause=new RuntimeException("fixture semantic failure",new java.io.IOException("underlying fixture cause"));cause.addSuppressed(new IllegalStateException("original suppressed marker"));
         when(semantic.reviewWithProgress(anyString(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenThrow(cause);
-        Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());BizException outward=assertThrows(BizException.class,()->service.run(project,"en"));
+        Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(VettingService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> captured=new ch.qos.logback.core.read.ListAppender<>();captured.start();logger.addAppender(captured);
+        BizException outward;
+        try {
+            outward=assertThrows(BizException.class,()->service.run(project,"en"));
+            ch.qos.logback.classic.spi.ILoggingEvent error=captured.list.stream().filter(event->event.getFormattedMessage().contains("审查任务")&&event.getFormattedMessage().contains("失败"))
+                    .findFirst().orElseThrow(AssertionError::new);
+            assertNull(error.getThrowableProxy());assertFalse(error.getFormattedMessage().contains("fixture semantic failure"));
+            assertFalse(error.getFormattedMessage().contains("underlying fixture cause"));assertFalse(error.getFormattedMessage().contains("original suppressed marker"));
+        } finally {logger.detachAppender(captured);captured.stop();}
         assertEquals("fixture semantic failure",outward.getMessage());VettingJobVO run=service.latestRun(project);assertEquals("FAILED",run.getStatus());
         List<JsonNode> events=events(root,run.getId());JsonNode tree=one(events,"service_run_failure").path("observations").path("originalFailure");
         assertEquals("fixture semantic failure",tree.path("message").asText());assertEquals("underlying fixture cause",tree.path("cause").path("message").asText());assertEquals("original suppressed marker",tree.path("suppressed").get(0).path("message").asText());

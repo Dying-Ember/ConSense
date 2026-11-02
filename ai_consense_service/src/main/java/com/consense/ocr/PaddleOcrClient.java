@@ -66,7 +66,7 @@ public class PaddleOcrClient implements OcrClient {
         List<OcrLine> lines = new ArrayList<>();
         collect(raw, lines);
         if (lines.isEmpty()) {
-            log.warn("OCR 未解析出文本，原始响应片段: {}", abbreviate(raw));
+            log.warn("OCR 未解析出文本");
             return new OcrResult("", 0.0, Collections.emptyList());
         }
         double sum = 0;
@@ -384,7 +384,7 @@ public class PaddleOcrClient implements OcrClient {
                     + ("local".equalsIgnoreCase(cfg.getMode()) ? "/health" : "/"), 3000);
             return ping != null;
         } catch (Exception e) {
-            log.debug("OCR 服务不可达: {}", e.getMessage());
+            log.debug("OCR 服务不可达: {}", e.getClass().getSimpleName());
             return false;
         }
     }

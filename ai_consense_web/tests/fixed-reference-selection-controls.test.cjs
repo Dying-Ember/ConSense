@@ -16,7 +16,7 @@ const hit = (extra = {}) => ({ id: 'authored-fixed-parent', fileLabel: 'SL2024',
 const modal = { props: ['open', 'title'], emits: ['close'], setup: (props, { slots, emit }) => () => vue.h('section', { 'data-test-modal': true }, [vue.h('button', { 'data-test-close': true, onClick: () => emit('close') }, 'Close'), slots.default?.()]) }
 
 async function mount(options = {}) {
-  const writes = [], queries = [], panelMounts = [], timers = new Map(), project = vue.ref(options.projectId || 'B'), moduleName = vue.ref(options.module || 'vetting')
+  const writes = [], queries = [], panelMounts = [], scopeChanges = [], selectionStates = [], timers = new Map(), project = vue.ref(options.projectId || 'B'), moduleName = vue.ref(options.module || 'vetting')
   let nextTimer = 0
   const fixedReferenceApi = {
     status: options.health || (async () => ({ configured: true })),
@@ -28,11 +28,11 @@ async function mount(options = {}) {
   const globals = { setTimeout: callback => { const id = ++nextTimer; timers.set(id, callback); return id }, clearTimeout: id => timers.delete(id) }
   const loaded = loadVue(path.join(__dirname, '../src/components/FixedReferenceSelection.vue'), { boundaries: { '@/api': { fixedReferenceApi, slLibraryApi }, './AppModal.vue': { default: modal },
     './FixedBaselineEvidencePanel.vue': { __esModule: true, default: { props: ['pointer', 'locale'], setup: props => { vue.onMounted(() => panelMounts.push(JSON.parse(JSON.stringify(props.pointer)))); return () => vue.h('div', { 'data-fixed-source-panel': true }, 'Existing fixed-source evidence boundary') } } } }, globals })
-  const host = renderer(), app = host.createApp({ setup: () => () => vue.h(loaded.default, { projectId: project.value, module: moduleName.value, locale: options.locale || 'en' }) })
+  const host = renderer(), app = host.createApp({ setup: () => () => vue.h(loaded.default, { projectId: project.value, module: moduleName.value, locale: options.locale || 'en', onScopeChange: scope => scopeChanges.push(scope), onSelectionState: state => selectionStates.push(JSON.parse(JSON.stringify(state))) }) })
   app.mount(host.root); await settle()
   const control = attribute => find(host.root, node => node.tag === 'button' && Object.hasOwn(node.props, attribute))
   const click = async attribute => { await control(attribute).props.onClick(); await settle() }
-  return { ...host, writes, queries, panelMounts, project, module: moduleName, timers, control, click, open: () => click('data-sl-library-open'),
+  return { ...host, writes, queries, panelMounts, scopeChanges, selectionStates, project, module: moduleName, timers, control, click, open: () => click('data-sl-library-open'),
     query: async value => { find(host.root, node => node.tag === 'input' && Object.hasOwn(node.props, 'data-fixed-search-query')).props['onUpdate:modelValue'](value); await settle() },
     search: async () => { await find(host.root, node => node.tag === 'form').props.onSubmit({ preventDefault() {} }); await settle() },
     dispose: () => app.unmount(), poll: async () => { const [id, callback] = timers.entries().next().value; timers.delete(id); callback(); await settle() } }
@@ -43,13 +43,59 @@ test('edition selection saves exact manifest, SHA and project and ignores an old
   try {
     h.project.value = 'B'; await settle(); pending.resolve(selectionStatus({ manifestSha256: manifest, slSources: [{ editionId: 'official-2024', sha256: a }] })); await settle()
     await h.open()
-    find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue']([b]); await settle()
+    find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle()
     assert.match(text(h.root), /changes are not saved/)
     assert.match(text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-saved-scope'))), /No SL edition selected/)
     await h.click('data-sl-editions-save')
     assert.deepEqual(h.writes, [{ id: 'B', body: { manifestSha256: manifest, slSources: [{ editionId: 'official-2025', sha256: b }] } }])
     assert.match(text(h.root), /does not establish project adoption/)
     assert.match(text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-saved-scope'))), /SL 2025 official/)
+  } finally { h.dispose() }
+})
+
+test('each project chooses exactly one radio option and saves only that edition', async () => {
+  const h = await mount({ selection: async () => selectionStatus(saved2024) })
+  try {
+    await h.open()
+    const radios = all(h.root, node => node.tag === 'input' && node.props.type === 'radio')
+    assert.equal(radios.length, 2)
+    assert.equal(radios[0].props.name, radios[1].props.name)
+    radios[0].props['onUpdate:modelValue'](a); await settle()
+    radios[1].props['onUpdate:modelValue'](b); await settle()
+    assert.match(text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-saved-scope'))), /SL 2024 official/)
+    await h.click('data-sl-editions-save')
+    assert.deepEqual(h.writes, [{ id: 'B', body: { manifestSha256: manifest, slSources: [{ editionId: 'official-2025', sha256: b }] } }])
+  } finally { h.dispose() }
+})
+
+test('historical multiple selections are visible but require an explicit single choice', async () => {
+  for (const module of ['vetting', 'advisory']) {
+    const previous = { manifestSha256: manifest, slSources: [{ editionId: 'official-2024', sha256: a }, { editionId: 'official-2025', sha256: b }] }
+    const h = await mount({ module, selection: async () => selectionStatus(previous), library: async () => libraryStatus({ retrievalAvailable: true }) })
+    try {
+      await h.open()
+      const summary = text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-saved-scope')))
+      assert.match(summary, /Needs reconfirmation: SL 2024 official · SL 2025 official/)
+      assert.match(text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-selection-multiple'))), /previously saved multiple SL editions/)
+      assert.equal(h.control('data-sl-editions-save').props.disabled, true)
+      assert.equal(h.control('data-fixed-search-submit').props.disabled, true)
+      assert.equal(h.scopeChanges.at(-1), null)
+      assert.deepEqual(h.writes, [])
+      find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle()
+      await h.click('data-sl-editions-save')
+      assert.deepEqual(h.writes, [{ id: 'B', body: { manifestSha256: manifest, slSources: [{ editionId: 'official-2025', sha256: b }] } }])
+    } finally { h.dispose() }
+  }
+})
+
+test('a historical multi-selection never preselects the only edition still available', async () => {
+  const previous = { manifestSha256: manifest, slSources: [{ editionId: 'official-2024', sha256: a }, { editionId: 'removed', sha256: 'c'.repeat(64) }] }
+  const h = await mount({ selection: async () => selectionStatus(previous) })
+  try {
+    await h.open()
+    assert.match(text(find(h.root, node => Object.hasOwn(node.props || {}, 'data-sl-selection-multiple'))), /Choose and save exactly one/)
+    assert.equal(h.control('data-sl-editions-save').props.disabled, true)
+    assert.deepEqual(h.writes, [])
   } finally { h.dispose() }
 })
 
@@ -187,7 +233,7 @@ test('unknown totals do not become zero and malformed status does not claim read
 test('a stale save cannot overwrite the displayed scope after a project ABA switch', async () => {
   const pending = deferred(), h = await mount({ save: async () => pending.promise })
   try {
-    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === a).props['onUpdate:modelValue']([a]); await settle()
+    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === a).props['onUpdate:modelValue'](a); await settle()
     const save = h.control('data-sl-editions-save').props.onClick(); await settle()
     h.project.value = 'C'; await settle(); h.project.value = 'B'; await settle()
     pending.resolve(selectionStatus({ manifestSha256: manifest, slSources: [{ editionId: 'official-2024', sha256: a }] })); await save; await settle()
@@ -213,7 +259,7 @@ test('closing and reopening during a save cannot read back an old saved scope', 
   let reads = 0, saved = oldSelection
   const h = await mount({ selection: async () => { ++reads; return selectionStatus(saved) }, save: async () => { await pending.promise; saved = newSelection; return selectionStatus(saved) } })
   try {
-    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue']([b]); await settle()
+    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle()
     const saving = h.control('data-sl-editions-save').props.onClick(); await settle(); const beforeReopen = reads
     await h.click('data-test-close'); await h.open(); assert.equal(reads, beforeReopen, 'No project selection GET may overlap a pending write')
     pending.resolve(); await saving; await settle()
@@ -227,7 +273,7 @@ test('refreshing library progress and reopening preserves unsaved edition choice
   let reads = 0, statusReads = 0
   const h = await mount({ selection: async () => { ++reads; return selectionStatus({ manifestSha256: manifest, slSources: [{ editionId: 'official-2024', sha256: a }] }) }, library: async () => { ++statusReads; return libraryStatus() } })
   try {
-    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue']([b]); await settle()
+    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle()
     const selectionReads = reads, progressReads = statusReads
     await h.click('data-sl-library-refresh'); await h.click('data-test-close'); await h.open()
     assert.ok(reads > selectionReads); assert.ok(statusReads > progressReads)
@@ -274,7 +320,7 @@ test('the reference control exposes and searches the saved editions for both Vet
 test('search uses saved scope despite unsaved choices and opens only a strictly pinned source on request', async () => {
   const h = await mount({ selection: async () => selectionStatus(saved2024), library: async () => libraryStatus({ retrievalAvailable: true }), search: async () => [hit()] })
   try {
-    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue']([b]); await settle()
+    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle()
     await h.query('  contractor requirement  '); await h.search()
     assert.deepEqual(h.queries, [{ id: 'B', module: 'vetting', query: 'contractor requirement' }])
     const row = find(h.root, node => Object.hasOwn(node.props || {}, 'data-fixed-search-hit'))
@@ -290,17 +336,43 @@ test('search uses saved scope despite unsaved choices and opens only a strictly 
 })
 
 test('search remains disabled without a configured saved available scope and during a save', async () => {
-  for (const option of [{ health: async () => ({ configured: false }) }, { selection: async () => selectionStatus() }, { library: async () => libraryStatus() }]) {
+  for (const option of [{ health: async () => ({ configured: false }) }, { selection: async () => selectionStatus() }]) {
     const h = await mount({ selection: async () => selectionStatus(saved2024), library: async () => libraryStatus({ retrievalAvailable: true }), ...option })
     try { await h.open(); await h.query('question'); assert.equal(h.control('data-fixed-search-submit').props.disabled, true); await h.search(); assert.equal(h.queries.length, 0) }
     finally { h.dispose() }
   }
   const pending = deferred(), h = await mount({ selection: async () => selectionStatus(saved2024), library: async () => libraryStatus({ retrievalAvailable: true }), save: async () => pending.promise })
   try {
-    await h.open(); await h.query('question'); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue']([b]); await settle()
+    await h.open(); await h.query('question'); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle()
     const saving = h.control('data-sl-editions-save').props.onClick(); await settle(); assert.equal(h.control('data-fixed-search-submit').props.disabled, true)
     await h.search(); assert.equal(h.queries.length, 0); pending.resolve(selectionStatus(saved2024)); await saving
   } finally { h.dispose() }
+})
+
+test('fixed reference search remains available when the independent build service is unconfigured or fails', async () => {
+  for (const library of [
+    async () => libraryStatus({ versions: [], job: { status: 'unconfigured' }, retrievalAvailable: false }),
+    async () => { throw new Error('Build service unavailable') }
+  ]) {
+    const h = await mount({ selection: async () => selectionStatus(saved2024), library, search: async () => [hit()] })
+    try {
+      await h.open(); await h.query('SL clause')
+      const buildDetails = find(h.root, node => node.tag === 'details' && Object.hasOwn(node.props || {}, 'data-sl-library-build-details'))
+      assert.equal(buildDetails.props.open, false, 'The independent build status is collapsed when the packaged catalog is configured')
+      assert.match(text(buildDetails), /Independent SL library build/)
+      assert.match(text(buildDetails), /separate from the packaged reference editions/)
+      assert.equal(h.control('data-fixed-search-submit').props.disabled, false)
+      await h.search()
+      assert.deepEqual(h.queries, [{ id: 'B', module: 'vetting', query: 'SL clause' }])
+      assert.ok(find(h.root, node => Object.hasOwn(node.props || {}, 'data-fixed-search-hit')))
+    } finally { h.dispose() }
+  }
+})
+
+test('the independent build status is visible when there is no packaged catalog', async () => {
+  const h = await mount({ health: async () => ({ configured: false }), library: async () => libraryStatus({ versions: [], job: { status: 'unconfigured' }, retrievalAvailable: false }) })
+  try { await h.open(); assert.equal(find(h.root, node => node.tag === 'details' && Object.hasOwn(node.props || {}, 'data-sl-library-build-details')).props.open, true) }
+  finally { h.dispose() }
 })
 
 test('late search results cannot cross project ABA, module changes, edits or a saved scope change', async () => {
@@ -311,7 +383,7 @@ test('late search results cannot cross project ABA, module changes, edits or a s
       if (change === 'project') { h.project.value = 'C'; await settle(); h.project.value = 'B'; await settle() }
       if (change === 'module') { h.module.value = 'advisory'; await settle() }
       if (change === 'query') await h.query('different question')
-      if (change === 'save') { find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue']([b]); await settle(); await h.click('data-sl-editions-save') }
+      if (change === 'save') { find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle(); await h.click('data-sl-editions-save') }
       pending.resolve([hit()]); await searching; await settle()
       assert.equal(find(h.root, node => Object.hasOwn(node.props || {}, 'data-fixed-search-hit')), undefined, change); assert.equal(h.panelMounts.length, 0)
     } finally { h.dispose() }
@@ -331,4 +403,61 @@ test('search rejects mismatched source pins and keeps GCC/GCT references with at
   }) })
   try { await h.open(); await h.query('question'); await h.search(); assert.equal(all(h.root, node => Object.hasOwn(node.props || {}, 'data-fixed-search-hit')).length, 10); assert.match(text(h.root), /General Conditions of Contract/) }
   finally { h.dispose() }
+})
+
+
+test('single selection readiness is project-bound, explicit, and disabled service permits ordinary business', async () => {
+  const health = deferred(), h = await mount({ health: () => health.promise })
+  try {
+    assert.equal(h.selectionStates.at(-1).status, 'checking')
+    health.resolve({ configured: false }); await settle()
+    assert.deepEqual(h.selectionStates.at(-1), { projectId: 'B', status: 'disabled' })
+  } finally { h.dispose() }
+  const mult = { manifestSha256: manifest, slSources: [{ editionId: 'official-2024', sha256: a }, { editionId: 'official-2025', sha256: b }] }
+  const x = await mount({ selection: async () => selectionStatus(mult) })
+  try { assert.deepEqual(x.selectionStates.at(-1), { projectId: 'B', status: 'needs-selection' }) } finally { x.dispose() }
+  const gone = await mount({ selection: async () => selectionStatus({ manifestSha256: manifest, slSources: [{ editionId: 'gone', sha256: 'c'.repeat(64) }] }) })
+  try { assert.equal(gone.selectionStates.at(-1).status, 'needs-selection'); await gone.open(); assert.equal(gone.control('data-fixed-search-submit').props.disabled, true) } finally { gone.dispose() }
+  const bad = await mount({ selection: async () => { throw new Error('unavailable') } })
+  try { assert.equal(bad.selectionStates.at(-1).status, 'unavailable') } finally { bad.dispose() }
+  const invalid = await mount({ health: async () => ({}) })
+  try { assert.equal(invalid.selectionStates.at(-1).status, 'unavailable') } finally { invalid.dispose() }
+})
+
+test('changing projects never emits the previous project ready state for the new project', async () => {
+  const pending = deferred(), h = await mount({ projectId: 'A', selection: id => id === 'A' ? Promise.resolve(selectionStatus(saved2024)) : pending.promise })
+  try {
+    assert.deepEqual(h.selectionStates.at(-1), { projectId: 'A', status: 'ready' })
+    const before = h.selectionStates.length; h.project.value = 'B'; await settle()
+    assert.ok(h.selectionStates.slice(before).every(s => s.projectId !== 'B' || s.status !== 'ready'))
+    pending.resolve(selectionStatus()); await settle()
+    assert.deepEqual(h.selectionStates.at(-1), { projectId: 'B', status: 'needs-selection' })
+  } finally { h.dispose() }
+})
+
+test('cross-library selection saves its own child manifest rather than the previous library manifest', async () => {
+  const first = '1'.repeat(64), second = '2'.repeat(64)
+  const choices = [{ editionId: 'official-2024', sha256: a, manifestSha256: first }, { editionId: 'official-2025', sha256: b, manifestSha256: second }]
+  const saved = { manifestSha256: first, slSources: [{ editionId: 'official-2024', sha256: a }] }
+  const h = await mount({ selection: async () => ({ manifestSha256: first, availableSlSources: choices, selection: saved }), save: async (id, body) => { h.writes.push({ id, body }); return { manifestSha256: second, availableSlSources: choices, selection: body } } })
+  try {
+    await h.open(); find(h.root, node => node.tag === 'input' && node.props.value === b).props['onUpdate:modelValue'](b); await settle(); await h.click('data-sl-editions-save')
+    assert.deepEqual(JSON.parse(JSON.stringify(h.writes)), [{ id: 'B', body: { manifestSha256: second, slSources: [{ editionId: 'official-2025', sha256: b }] } }])
+    assert.deepEqual(h.selectionStates.at(-1), { projectId: 'B', status: 'ready' })
+  } finally { h.dispose() }
+})
+
+test('cross-library hits bind to the selected child manifest and reject another child', async () => {
+  const first='1'.repeat(64),second='2'.repeat(64)
+  const choices=[{editionId:'official-2024',sha256:a,manifestSha256:first},{editionId:'official-2025',sha256:b,manifestSha256:second}]
+  const selection={manifestSha256:second,slSources:[{editionId:'official-2025',sha256:b}]}
+  for(const wrong of [false,true]) {
+    const result=hit();result.payload.fixedBaselineManifestSha256=wrong?first:second;result.payload.originalSourceSha256=b;result.payload.fixedBaselineEditionId='official-2025'
+    const h=await mount({selection:async()=>({manifestSha256:second,availableSlSources:choices,selection}),library:async()=>libraryStatus({retrievalAvailable:true}),search:async()=>[result]})
+    try {
+      await h.open();await h.query('clause');await h.search()
+      if(wrong)assert.match(text(h.root),/do not match the saved source scope/)
+      else {await h.click('data-fixed-search-view');assert.equal(h.panelMounts[0].manifestSha256,second);assert.equal(h.panelMounts[0].originalSourceSha256,b)}
+    } finally {h.dispose()}
+  }
 })

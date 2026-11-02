@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -22,6 +24,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
@@ -152,7 +155,7 @@ public class DraftReviewSources {
             return pending("unsafe",loaded.sha,"SOURCE_EDITION_MISMATCH");
         if(passage.has("sourceDocumentId")&&!String.valueOf(source.getId()).equals(passage.path("sourceDocumentId").asText()))
             return pending("unsafe",loaded.sha,"SOURCE_DOCUMENT_MISMATCH");
-        return bindTarget(loaded.bytes,loaded.prepared,JsonUtils.mapper().convertValue(passage,Map.class));
+        return bindTarget(loaded.bytes,loaded.sha,loaded.prepared,JsonUtils.mapper().convertValue(passage,Map.class));
     }
 
     /** A named, saved source observation can support review without acquiring editable coordinates. */
@@ -238,11 +241,11 @@ public class DraftReviewSources {
 
     /** Exact editableText spans only. Unbound legacy page selections remain reviewable. */
     public static ObjectNode bindTarget(byte[] original,Map<String,Object> target) {
-        return bindTarget(original,null,target);
+        return bindTarget(original,DraftTemplateRouting.sha(original),null,target);
     }
 
-    private static ObjectNode bindTarget(byte[] original,DocxTemplateEditor.PreparedTemplate prepared,Map<String,Object> target) {
-        String sha=DraftTemplateRouting.sha(original);JsonNode passage=JsonUtils.mapper().valueToTree(target);
+    private static ObjectNode bindTarget(byte[] original,String sha,DocxTemplateEditor.PreparedTemplate prepared,Map<String,Object> target) {
+        JsonNode passage=JsonUtils.mapper().valueToTree(target);
         if(passage.has("sourceSha256")&&!sha.equals(passage.path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
         if(!"docx".equals(DraftTemplateRouting.format(original)))return pending("missing",sha,"EDITABLE_DOCX_REQUIRED");
         DocxTemplateEditor.TemplateIndex index;
@@ -324,18 +327,39 @@ public class DraftReviewSources {
     private Loaded load(SourceDocument source) {
         if(!eligible(source)||source.getId()==null)throw new BizException(4012,"REVIEW_SOURCE_OUTSIDE_DRAFTING");
         try {
-            Path path=Paths.get(source.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            Path path=storage.resolveStoredPath(source.getStoragePath());
             if(!path.startsWith(root.toRealPath())||!Files.isRegularFile(path))throw new IOException("Original is outside storage");
             byte[] bytes;
-            try { bytes=storage.read(path.toString()); }
+            try { bytes=storage.readWithinStorage(source.getStoragePath(),path); }
             catch(BizException unavailable){throw new BizException(4012,"REVIEW_SOURCE_UNAVAILABLE");}
             String sha=DraftTemplateRouting.sha(bytes);
             if(source.getSourceSha256()!=null&&!sha.equals(source.getSourceSha256()))throw new BizException(4012,"REVIEW_SOURCE_BYTES_CHANGED");
             String format=DraftTemplateRouting.format(bytes);DocxTemplateEditor.PreparedTemplate prepared=null;
-            if("docx".equals(format))try{prepared=new DocxTemplateEditor().prepare(bytes);}catch(DocxTemplateEditor.EditException invalid){format="unsupported";}
+            if("docx".equals(format))try{prepared=prepared(source,sha,bytes);}catch(DocxTemplateEditor.EditException invalid){format="unsupported";}
             if("unknown".equals(format))format="unsupported";
             return new Loaded(bytes,sha,format,prepared);
         }catch(IOException|java.nio.file.InvalidPathException|NullPointerException failure){throw new BizException(4012,"REVIEW_SOURCE_UNAVAILABLE");}
+    }
+
+    private DocxTemplateEditor.PreparedTemplate prepared(SourceDocument source,String sha,byte[] bytes) {
+        String transaction=TransactionSynchronizationManager.getCurrentTransactionName();
+        if(!TransactionSynchronizationManager.isActualTransactionActive()||!TransactionSynchronizationManager.isSynchronizationActive()
+                ||!("com.consense.service.drafting.DraftTemplateGraphService.save".equals(transaction)
+                     ||"com.consense.service.drafting.DraftTemplateGraphService.saveDelta".equals(transaction)))
+            return new DocxTemplateEditor().prepare(bytes);
+        @SuppressWarnings("unchecked") Map<List<Object>,DocxTemplateEditor.PreparedTemplate> cached=
+            (Map<List<Object>,DocxTemplateEditor.PreparedTemplate>)TransactionSynchronizationManager.getResource(this);
+        if(cached==null) {
+            cached=new HashMap<>();final Map<List<Object>,DocxTemplateEditor.PreparedTemplate> resource=cached;
+            TransactionSynchronizationManager.bindResource(this,resource);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void suspend(){TransactionSynchronizationManager.unbindResource(DraftReviewSources.this);}
+                @Override public void resume(){TransactionSynchronizationManager.bindResource(DraftReviewSources.this,resource);}
+                @Override public void afterCompletion(int status){TransactionSynchronizationManager.unbindResource(DraftReviewSources.this);}
+            });
+        }
+        List<Object> key=Arrays.asList(source.getProjectId(),source.getId(),sha);
+        return cached.computeIfAbsent(key,ignored->new DocxTemplateEditor().prepare(bytes));
     }
 
     private ObjectNode metadata(SourceDocument source,Loaded loaded) {

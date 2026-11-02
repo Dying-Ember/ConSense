@@ -95,12 +95,18 @@ class EnglishFileOutputTest {
             EnglishFileOutput exporter=output();String known="APP SENTINEL trusted sentence",dynamic="SOURCE SENTINEL private sentence";
             JsonNode input=JsonUtils.mapper().createObjectNode().set("notes",JsonUtils.mapper().createArrayNode().add(known).add(dynamic));
             assertEquals(input,exporter.json(input,"SECRET REFERENCE",()->{},Set.of(known)));assertEquals(input,exporter.json(input,"SECRET REFERENCE",()->{},Set.of(known)));
-            ArrayNode notes=JsonUtils.mapper().createArrayNode();for(int i=0;i<769;i++)notes.add("Private unrelated sentence "+i);
+            ArrayNode notes=JsonUtils.mapper().createArrayNode();for(int i=0;i<2049;i++)notes.add("Private unrelated sentence "+i);
             assertThrows(BizException.class,()->exporter.json(JsonUtils.mapper().createObjectNode().set("notes",notes),"PRIVATE SNAPSHOT",()->{}));
             String logs=trace.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).collect(java.util.stream.Collectors.joining("\n"));
-            assertTrue(logs.contains("trustedSegments=1"));assertTrue(logs.contains("outcome=whole_hit"));assertTrue(logs.contains("outcome=batch_limit_exceeded"));assertTrue(logs.contains("batchCount=25"));assertTrue(logs.contains("batchLimit=24"));assertEquals(1,calls.get());
+            assertTrue(logs.contains("trustedSegments=1"));assertTrue(logs.contains("outcome=whole_hit"));assertTrue(logs.contains("outcome=batch_limit_exceeded"));assertTrue(logs.contains("batchCount=65"));assertTrue(logs.contains("batchLimit=64"));assertEquals(1,calls.get());
             for(String forbidden:List.of(known,dynamic,"SECRET REFERENCE","PRIVATE SNAPSHOT","Private unrelated sentence"))assertFalse(logs.contains(forbidden));
         }finally{logger.detachAppender(trace);}
+    }
+    @Test void englishDeliveryCanProcessTheThirtyFiveBatchesObservedForScc(){
+        ArrayNode notes=JsonUtils.mapper().createArrayNode();for(int i=0;i<1095;i++)notes.add("English paragraph "+i);
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);
+        assertEquals(source,output().json(source,"snapshot:scc-batch-count",()->{}));
+        assertEquals(35,calls.get());assertEquals(32,batchSizes.get(0));assertEquals(7,batchSizes.get(34));
     }
     EnglishFileOutput output(){
         ConsenseProperties props=new ConsenseProperties();props.setStorageRoot(root.toString());when(client.available()).thenReturn(true);
@@ -457,6 +463,26 @@ class EnglishFileOutputTest {
             byte[] source=docx(body,false),before=source.clone();assertThrows(BizException.class,()->output().docx(source,"snapshot:unsupported",()->{}));assertArrayEquals(before,source);
         }
         assertEquals(0,calls.get());
+    }
+    @Test void tocStyleReferencesMayBeSplitAcrossRunsButVisibleTextStillNeedsTranslation()throws Exception{
+        String begin="<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/><w:instrText> TOC \\f \\h \\z \\t &quot;</w:instrText></w:r>"
+                +"<w:r><w:instrText>標題</w:instrText></w:r><w:r><w:instrText> 1,1,</w:instrText></w:r>"
+                +"<w:r><w:instrText>標題</w:instrText></w:r><w:r><w:instrText> 2,2,Title1,1&quot; </w:instrText>"
+                +"<w:fldChar w:fldCharType=\"separate\"/>";
+        String end="<w:fldChar w:fldCharType=\"end\"/></w:r></w:p>";
+        byte[] english=docx(begin+"<w:t>Contents</w:t>"+end,false);
+        assertFalse(EnglishFileOutput.docxNeedsTranslation(english));
+        byte[] chinese=docx(begin+"<w:t>目錄</w:t>"+end,false),before=chinese.clone();
+        assertTrue(EnglishFileOutput.docxNeedsTranslation(chinese));
+        translated.put("目錄","Contents");
+        org.w3c.dom.Document output=wordDocument(output().docx(chinese,"snapshot:toc-style",()->{}));
+        org.w3c.dom.NodeList instructions=output.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","instrText");
+        assertEquals(List.of(" TOC \\f \\h \\z \\t \"","標題"," 1,1,","標題"," 2,2,Title1,1\" "),
+                java.util.stream.IntStream.range(0,instructions.getLength()).mapToObj(i->instructions.item(i).getTextContent()).collect(java.util.stream.Collectors.toList()));
+        assertEquals("English translation: Contents",output.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","t").item(0).getTextContent());
+        assertEquals(List.of("目錄"),submittedTexts);assertArrayEquals(before,chinese);
+        assertThrows(BizException.class,()->EnglishFileOutput.docxNeedsTranslation(docx(begin+"<w:t>Contents</w:t></w:r></w:p>",false)));
+        assertThrows(BizException.class,()->EnglishFileOutput.docxNeedsTranslation(docx(begin.replace("TOC \\f","OTHER \\f")+"<w:t>Contents</w:t>"+end,false)));
     }
     @Test void visibleWordAndDrawingAttributesAreTranslatedWithoutChangingListValuesOrLinkReferences()throws Exception{
         translated.put("付款说明","Payment guidance");translated.put("项目名称","Project name");translated.put("选项甲","Option A");translated.put("字段帮助","Field help");translated.put("状态说明","Status guidance");translated.put("默认文字","Default wording");translated.put("绘图链接提示","Drawing link tooltip");

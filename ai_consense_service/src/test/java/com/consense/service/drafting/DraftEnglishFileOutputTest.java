@@ -24,11 +24,22 @@ import static org.mockito.Mockito.*;
 class DraftEnglishFileOutputTest {
     private static final String PROJECT=DraftingPlanGenerationStateTest.PROJECT;
 
+    @Test void exportTrustsOnlyKnownApplicationNoticeText()throws Exception {
+        DraftingPlanGenerationStateTest.Fixture f=fixture("Bonjour, paiement dans 14 jours.");
+        DraftArtifact artifact=f.artifacts.get("fixture-NTT");
+        String known="1. Contract number and title: Review the sources and adopt the required answer.";
+        String foreign="2. Contrat de paiement: Review the sources and adopt the required answer.";
+        artifact.setBindingsJson(JsonUtils.write(Arrays.asList(DraftBusinessRules.map("applicationStatus","delivery_notice","text",known),DraftBusinessRules.map("applicationStatus","delivery_notice","text",foreign))));
+        EnglishFileOutput output=mock(EnglishFileOutput.class);
+        when(output.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{Set<String> trusted=call.getArgument(3);assertTrue(trusted.contains(known));assertFalse(trusted.contains(foreign));return artifact.getDocxBytes().clone();});
+        f.service.setEnglishFileOutput(output);assertArrayEquals(artifact.getDocxBytes(),f.service.exportWord(PROJECT,"NTT","fixture-NTT"));verifyNoInteractions(f.model);
+    }
+
     @Test void derivedWordAndPdfUseTheSameEnglishCopyWithoutChangingAnySavedInputOrArtifact()throws Exception{
         DraftingPlanGenerationStateTest.Fixture f=fixture("人工核对后的改文");
         DraftArtifact artifact=f.artifacts.get("fixture-NTT");byte[] original=artifact.getDocxBytes().clone(),english=word("English translation: Human-reviewed amendment.");
         String before=saved(f);EnglishFileOutput output=mock(EnglishFileOutput.class);
-        when(output.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{
+        when(output.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{
             assertArrayEquals(original,call.getArgument(0));assertTrue(((String)call.getArgument(1)).contains(artifact.getDocxSha256()));
             ((Runnable)call.getArgument(2)).run();return english.clone();
         });
@@ -66,7 +77,7 @@ class DraftEnglishFileOutputTest {
     @Test void changedRevisionDuringTranslationOrRenderingCannotPublishAnOldDerivedFile()throws Exception{
         for(String phase:Arrays.asList("translation","rendering")){
             DraftingPlanGenerationStateTest.Fixture f=fixture("需要翻译的文稿");EnglishFileOutput output=mock(EnglishFileOutput.class);byte[] translated=word("English translation: Draft text.");
-            when(output.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{if("translation".equals(phase))f.documents.get("NTT").setRevisionId("new-revision");return translated;});
+            when(output.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{if("translation".equals(phase))f.documents.get("NTT").setRevisionId("new-revision");return translated;});
             f.service.setEnglishFileOutput(output);DraftingService service=spy(f.service);
             doAnswer(call->{f.documents.get("NTT").setRevisionId("new-revision");return "%PDF-authored".getBytes(StandardCharsets.US_ASCII);}).when(service).renderPdf(any(byte[].class));
             BizException failure=assertThrows(BizException.class,()->service.exportPdf(PROJECT,"NTT","fixture-NTT"),phase);assertEquals(4090,failure.getCode());
@@ -77,7 +88,7 @@ class DraftEnglishFileOutputTest {
     @Test void translationFailureReturnsNoFileAndTheHelperCannotMutateThePersistedByteArray()throws Exception{
         DraftingPlanGenerationStateTest.Fixture f=fixture("需要翻译的人工改文");EnglishFileOutput output=mock(EnglishFileOutput.class);f.service.setEnglishFileOutput(output);
         byte[] original=f.artifacts.get("fixture-NTT").getDocxBytes().clone();String before=saved(f);
-        when(output.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{((byte[])call.getArgument(0))[0]^=1;throw new BizException(4012,"ENGLISH_TRANSLATION_FAILED");});
+        when(output.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{((byte[])call.getArgument(0))[0]^=1;throw new BizException(4012,"ENGLISH_TRANSLATION_FAILED");});
         DraftingService service=spy(f.service);assertThrows(BizException.class,()->service.exportPdf(PROJECT,"NTT","fixture-NTT"));
         verify(service,never()).renderPdf(any(byte[].class));assertArrayEquals(original,f.artifacts.get("fixture-NTT").getDocxBytes());assertEquals(before,saved(f));
     }
@@ -103,6 +114,39 @@ class DraftEnglishFileOutputTest {
             DraftingPlanGenerationStateTest.Fixture f=fixture("人工原文");EnglishFileOutput output=mock(EnglishFileOutput.class);f.service.setEnglishFileOutput(output);
             if(changedDuringRead){AtomicInteger reads=new AtomicInteger();when(f.docs.findByProjectIdAndFileKey(PROJECT,"NTT")).thenAnswer(call->{if(reads.incrementAndGet()>1)f.documents.get("NTT").setRevisionId("replacement-revision");return Optional.of(f.documents.get("NTT"));});}
             BizException failure=assertThrows(BizException.class,()->f.service.documentSource(PROJECT,"NTT",changedDuringRead?"fixture-NTT":"old-revision"));assertEquals(4090,failure.getCode());verifyNoInteractions(output);verifyNoInteractions(f.model);
+        }
+    }
+
+    @Test void currentNativeSourceReadsOnlyOwnedIntactBytesWithoutRenderingOrWriting()throws Exception {
+        DraftingPlanGenerationStateTest.Fixture f=fixture("historical byte fixture");
+        EnglishFileOutput output=mock(EnglishFileOutput.class);f.service.setEnglishFileOutput(output);
+        DraftingService service=spy(f.service);DraftArtifact artifact=f.artifacts.get("fixture-NTT");
+        byte[] expected=artifact.getDocxBytes();String before=saved(f);
+        clearInvocations(f.docs,f.revisions,f.pdfs);
+        byte[] actual=service.documentSource(PROJECT,"NTT","fixture-NTT");
+        assertArrayEquals(expected,actual);assertEquals(artifact.getDocxSha256(),DraftPdfConverter.sha256(actual));
+        actual[0]^=1;assertArrayEquals(expected,artifact.getDocxBytes());assertEquals(before,saved(f));
+        verify(service,never()).renderPdf(any(byte[].class));verifyNoInteractions(output,f.model,f.pdfs);
+        verify(f.docs,never()).save(any());verify(f.revisions,never()).save(any());
+    }
+
+    @Test void currentNativeSourceRejectsForeignOrMissingOrCorruptArtifactsAndStaleSnapshot()throws Exception {
+        for(String defect:List.of("foreign-project","wrong-file","corrupt-bytes","missing","stale")) {
+            DraftingPlanGenerationStateTest.Fixture f=fixture("isolated "+defect);
+            EnglishFileOutput output=mock(EnglishFileOutput.class);f.service.setEnglishFileOutput(output);
+            DraftingService service=spy(f.service);DraftArtifact artifact=f.artifacts.get("fixture-NTT");
+            switch(defect) {
+                case "foreign-project": artifact.setProjectId("other-project");break;
+                case "wrong-file": artifact.setFileKey("SCT");break;
+                case "corrupt-bytes": artifact.setDocxBytes(new byte[]{1,2,3});break;
+                case "missing": f.artifacts.remove("fixture-NTT");break;
+                case "stale": f.documents.get("NTT").setSnapshotId("other-snapshot");break;
+                default: fail("unexpected defect");
+            }
+            clearInvocations(f.docs,f.revisions,f.pdfs);
+            assertThrows(BizException.class,()->service.documentSource(PROJECT,"NTT","fixture-NTT"),defect);
+            verify(service,never()).renderPdf(any(byte[].class));verifyNoInteractions(output,f.model,f.pdfs);
+            verify(f.docs,never()).save(any());verify(f.revisions,never()).save(any());
         }
     }
 

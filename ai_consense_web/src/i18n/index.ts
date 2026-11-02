@@ -234,7 +234,7 @@ const zhHans = {
       globalCall: "全局调用",
       unknownCount: "未知",
       aggregateStates: {"failed": "审查执行失败", "not_submitted": "尚未提交审查", "partial": "部分来源未审查", "incomplete": "审查未完成：部分来源未读取", "observed_requests_decoded_scope_unknown": "观察范围已处理，完整性未知", "unknown": "覆盖未知（无分包记录）"},
-      budgetStates: {"budget_unknown": "完整输入 token 预算未知", "over_budget": "完整输入超过 token 预算", "observed_tokens": "完整输入 token 已计数", "provider_estimated_fit": "供应商估算：完整输入预算可用"},
+      budgetStates: {"direct_unmeasured": "本次未预先计数输入 token", "budget_unknown": "完整输入 token 预算未知", "over_budget": "完整输入超过 token 预算", "observed_tokens": "完整输入 token 已计数", "provider_estimated_fit": "供应商估算：完整输入预算可用"},
       explanation: '覆盖信息对应最近一次任务的源文件快照。片段已处理表示已完成审查步骤，不代表不存在问题；扫描件、未解析文件和缺少材料会限制结论。'
     },
     verification: { verified: '证据已定位', partial: '证据部分已定位', unverified: '证据待定位' },
@@ -530,7 +530,7 @@ const zhHant: typeof zhHans = {
       globalCall: "全局調用",
       unknownCount: "未知",
       aggregateStates: {"failed": "審查執行失敗", "not_submitted": "尚未提交審查", "partial": "部分來源未審查", "incomplete": "審查未完成：部分來源未讀取", "observed_requests_decoded_scope_unknown": "觀察範圍已處理，完整性未知", "unknown": "覆蓋未知（無分包記錄）"},
-      budgetStates: {"budget_unknown": "完整輸入 token 預算未知", "over_budget": "完整輸入超過 token 預算", "observed_tokens": "完整輸入 token 已計數", "provider_estimated_fit": "供應商估算：完整輸入預算可用"},
+      budgetStates: {"direct_unmeasured": "本次未預先計數輸入 token", "budget_unknown": "完整輸入 token 預算未知", "over_budget": "完整輸入超過 token 預算", "observed_tokens": "完整輸入 token 已計數", "provider_estimated_fit": "供應商估算：完整輸入預算可用"},
       explanation: '覆蓋資訊對應最近一次任務的源文件快照。片段已處理表示已完成審查步驟，不代表不存在問題；掃描件、未解析文件和缺少材料會限制結論。'
     },
     verification: { verified: '證據已定位', partial: '證據部分已定位', unverified: '證據待定位' },
@@ -826,7 +826,7 @@ const en: typeof zhHans = {
       globalCall: "Global call",
       unknownCount: "Unknown",
       aggregateStates: {"failed": "Review execution failed", "not_submitted": "Not submitted for review", "partial": "Some source requests unreviewed", "incomplete": "Review incomplete: some sources unread", "observed_requests_decoded_scope_unknown": "Observed requests processed; completeness unknown", "unknown": "Coverage unknown (no packet record)"},
-      budgetStates: {"budget_unknown": "Full input token budget unknown", "over_budget": "Full input exceeds token budget", "observed_tokens": "Full input tokens counted", "provider_estimated_fit": "Provider estimate: complete input within budget"},
+      budgetStates: {"direct_unmeasured": "Input tokens not counted before request", "budget_unknown": "Full input token budget unknown", "over_budget": "Full input exceeds token budget", "observed_tokens": "Full input tokens counted", "provider_estimated_fit": "Provider estimate: complete input within budget"},
       explanation: 'Coverage describes the source snapshot for the latest task. A processed segment has completed the review steps; it is not assurance of no issues. Scans, unparsed files and missing materials limit the findings.'
     },
     verification: { verified: 'Evidence located', partial: 'Evidence partly located', unverified: 'Evidence awaiting location' },

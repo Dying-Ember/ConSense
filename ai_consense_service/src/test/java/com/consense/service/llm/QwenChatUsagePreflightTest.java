@@ -74,7 +74,31 @@ class QwenChatUsagePreflightTest {
         try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("file-export:authored",()->{})) { }
         org.mockito.ArgumentCaptor<QwenGenerationLedger.Limits> limits=org.mockito.ArgumentCaptor.forClass(QwenGenerationLedger.Limits.class);
         verify(ledger).open(eq("file-export:authored"),anyString(),limits.capture());
-        assertEquals(24,limits.getValue().preflights);assertEquals(24,limits.getValue().answers);assertEquals(48,limits.getValue().total);
+        assertEquals(64,limits.getValue().preflights);assertEquals(64,limits.getValue().answers);assertEquals(128,limits.getValue().total);
+    }
+    @Test void fileExportLedgerAdmitsThirtyFivePairsAndStopsAfterSixtyFour() {
+        com.consense.repository.QwenGenerationActionRepository actions=mock(com.consense.repository.QwenGenerationActionRepository.class);
+        org.springframework.transaction.PlatformTransactionManager manager=mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(manager.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+        java.util.concurrent.atomic.AtomicReference<com.consense.domain.QwenGenerationAction> saved=new java.util.concurrent.atomic.AtomicReference<>();
+        when(actions.lockAction("file-export:batch-test")).thenAnswer(call->Optional.ofNullable(saved.get()));
+        when(actions.saveAndFlush(any())).thenAnswer(call->{saved.set(call.getArgument(0));return saved.get();});
+        QwenGenerationLedger actualLedger=new QwenGenerationLedger(actions,manager);
+        QwenChatUsagePreflight.Operation op=new QwenChatUsagePreflight(props,actualLedger).capture(chat("qwen"),"file-export");
+        try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("file-export:batch-test",()->{})) {
+            String identity=op.getIdentity().getConfigurationSha256();
+            for(int i=1;i<=64;i++){
+                String input=VettingCorpus.hash("AUTHORED export batch "+i);
+                actualLedger.reserve("file-export:batch-test",identity,"language-"+i,input,false);
+                actualLedger.reserve("file-export:batch-test",identity,"answer",input,true);
+                if(i==35){assertEquals(35,saved.get().getPreflights());assertEquals(35,saved.get().getAnswers());assertEquals(70,saved.get().getTotal());}
+            }
+            assertEquals(64,saved.get().getPreflights());assertEquals(64,saved.get().getAnswers());assertEquals(128,saved.get().getTotal());
+            String before=saved.get().getReservationsJson();
+            assertThrows(QwenGenerationLedger.ActionBudgetExhaustedException.class,()->actualLedger.reserve("file-export:batch-test",identity,"language-65",VettingCorpus.hash("AUTHORED extra"),false));
+            assertEquals(before,saved.get().getReservationsJson());
+        }
+        verifyNoInteractions(http);
     }
     private final ConsenseProperties props=new ConsenseProperties();
     @TempDir Path files;
@@ -95,6 +119,21 @@ class QwenChatUsagePreflightTest {
     private void answer() {
         doAnswer(call->{JsonNode body=JsonUtils.parse(call.getArgument(1));return envelope(body.path("model").asText(),body.path("max_tokens").asInt(),42,body.path("max_tokens").asInt()==1?"{":body.has("response_format")?"{\"records\":[]}":"[]");})
                 .when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+    }
+    @Test void missingPreflightStillRejectsVettingAndAllowsAdvice() {
+        JsonNode schema=JsonUtils.parse("{\"type\":\"array\",\"items\":{\"type\":\"object\"}}");
+        QwenChatUsagePreflight.Operation vetting=usage.capture(chat("qwen"),"vetting");
+        try(QwenChatUsagePreflight.Operation.ActionScope action=vetting.openAction("test:no-probe-vetting",()->{})) {
+            VettingInputBudget.Input in=vetting.input("SYS","WHOLE",schema,SOURCE);
+            assertThrows(IllegalArgumentException.class,()->vetting.complete(in,null,"SYS","WHOLE",schema,Map.class,new ArrayList<>(),new LinkedHashMap<>(),null));
+        }
+        answer();QwenChatUsagePreflight.Operation advice=usage.capture(chat("qwen"),"advice",0);
+        try(QwenChatUsagePreflight.Operation.ActionScope action=advice.openAction("test:no-probe-advice",()->{})) {
+            QwenChatUsagePreflight.PreparedRequest in=advice.prepareChat(Arrays.asList(LlmClient.ChatTurn.system("SYS"),LlmClient.ChatTurn.user("WHOLE")),schema,SOURCE,false);
+            assertNotNull(advice.generate(in,null,"answer",()->{},null,null));
+        }
+        verify(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+        verify(ledger,never()).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
     }
     @Test void bothProfilesSealOnlyCapAndStreamDifferencesAndReserveBeforeDispatch() {
         answer();for(String profile:Arrays.asList("qwen","qwen-flash")) {
@@ -192,15 +231,19 @@ class QwenChatUsagePreflightTest {
         org.mockito.ArgumentCaptor<String> body=org.mockito.ArgumentCaptor.forClass(String.class);verify(http).postJsonBoundedWithoutReplay(anyString(),body.capture(),anyLong(),anyString(),anyInt(),any());
         assertEquals(body.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,receipts.getValue().get("probeRequestBytes"));
     }
-    @Test void englishExportReportsPreflightFailureWithoutClaimingAnObservedBudgetOverrun() {
+    @Test void englishExportReportsGenerationHttpFailureWithoutClaimingAnObservedBudgetOverrun() {
         LlmOperation selected=chat("qwen");props.setStorageRoot(files.toString());
         LlmClient local=mock(LlmClient.class);LlmProfiles profiles=new LlmProfiles(props,local,local,selected.getClient(),local);
         com.consense.service.export.EnglishFileOutput output=new com.consense.service.export.EnglishFileOutput(new AiGateway(local,profiles),usage,props);
         when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenThrow(new com.consense.common.BizException("Qwen chat HTTP 400"));
         try(LlmProfiles.Scope ignored=profiles.bind(profiles.resolve("qwen"))) {
             com.consense.common.BizException error=assertThrows(com.consense.common.BizException.class,()->output.text("中文","snapshot:test",()->{}));
-            assertEquals("The English translation model usage check failed (HTTP 400). No file was returned.",error.getMessage());
+            assertEquals("Qwen chat HTTP400",error.getMessage());
         }
+        verify(ledger,never()).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
+        verify(ledger).reserve(anyString(),anyString(),eq("answer"),anyString(),eq(true));
+        verify(ledger).unknown(any(),anyMap());
+        verify(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
     }
     @Test void aCompletedReceiptWithAFailedExitGuardIsNotReused() {
         answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();Runnable guard=()->{if(calls.incrementAndGet()==4)throw new IllegalStateException("AUTHORED source changed after receipt");};

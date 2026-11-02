@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
-import { fixedReferenceApi, slLibraryApi, type FixedReferenceSelectionStatus, type SlLibraryStatus } from '@/api'
+import { fixedReferenceApi, slLibraryApi, type FixedReferenceSelectionStatus, type SlLibraryStatus, type FixedSelectionState } from '@/api'
 import { slEditionLabel } from '@/api/slEditionLabel'
 import type { FixedBaselineEvidence, FixedBaselineEvidenceAddress, FixedBaselineSourceUnit } from '@/api/fixedBaselineEvidence'
 import AppModal from './AppModal.vue'
 const FixedEvidencePanel = defineAsyncComponent(() => import('./FixedBaselineEvidencePanel.vue'))
 
 const props = withDefaults(defineProps<{ projectId: string; locale?: string; module?: 'vetting' | 'advisory' }>(), { locale: 'zh-Hans', module: 'vetting' })
-const emit = defineEmits<{ scopeChange: [scope: { projectId: string; key: string } | null] }>()
+const emit = defineEmits<{ scopeChange: [scope: { projectId: string; key: string } | null]; selectionState: [state: FixedSelectionState] }>()
 const status = ref<FixedReferenceSelectionStatus | null>(null), library = ref<SlLibraryStatus | null>(null)
 const configured = ref(false), loading = ref(false), saving = ref(false), building = ref(false), open = ref(false)
-const error = ref(''), libraryError = ref(''), buildError = ref(''), selected = ref<string[]>([])
+const selectionProject = ref('')
+const error = ref(''), libraryError = ref(''), buildError = ref(''), selected = ref('')
 const query = ref(''), searching = ref(false), searchError = ref(''), searched = ref(false), hits = ref<FixedBaselineEvidence[]>([])
 const selectedHit = ref<FixedBaselineEvidence | null>(null), resultScope = ref('')
 let searchSequence = 0
@@ -18,11 +19,19 @@ let generation = 0, selectionSequence = 0, disposed = false, timer: ReturnType<t
 const label = (en: string, hans: string, hant: string) => props.locale === 'en' ? en : props.locale === 'zh-Hant' ? hant : hans
 const title = computed(() => label('SL editions and library', 'SL 版本与资料库', 'SL 版本與資料庫'))
 const active = computed(() => ['queued', 'running', 'building', 'parsing', 'indexing'].includes(library.value?.job.status.toLowerCase() ?? ''))
-const staleSelection = computed(() => !!status.value?.selection && status.value.selection.manifestSha256 !== status.value.manifestSha256)
-const saved = computed(() => status.value?.selection?.manifestSha256 === status.value?.manifestSha256 ? status.value?.selection?.slSources ?? [] : [])
-const dirty = computed(() => selected.value.length !== saved.value.length || saved.value.some(source => !selected.value.includes(source.sha256)))
+const multipleSaved = computed(() => (status.value?.selection?.slSources.length ?? 0) > 1)
+const staleSelection = computed(() => {
+  const current = status.value, selection = current?.selection
+  if (!current || !selection) return false
+  if (selection.slSources.length !== 1 || selection.manifestSha256 !== current.manifestSha256) return true
+  const savedSource = selection.slSources[0]!
+  return !current.availableSlSources.some(source => source.editionId === savedSource.editionId && source.sha256 === savedSource.sha256
+    && (!source.manifestSha256 || source.manifestSha256 === selection.manifestSha256))
+})
+const saved = computed(() => !staleSelection.value && status.value?.selection?.slSources.length === 1 ? status.value.selection.slSources : [])
+const dirty = computed(() => selected.value !== (saved.value[0]?.sha256 ?? ''))
 const scopeKey = computed(() => JSON.stringify([props.projectId, props.module, status.value?.manifestSha256, saved.value]))
-const searchReady = computed(() => !!props.projectId && configured.value && !!status.value && !!saved.value.length && library.value?.retrievalAvailable === true && !loading.value && !saving.value && !error.value && !libraryError.value)
+const searchReady = computed(() => !!props.projectId && configured.value && !!status.value && saved.value.length === 1 && !loading.value && !saving.value && !error.value)
 const selectedPointer = computed(() => selectedHit.value && resultScope.value === scopeKey.value ? evidencePointer(selectedHit.value) : null)
 const panelLocale = computed(() => props.locale === 'en' || props.locale === 'zh-Hant' ? props.locale : 'zh-Hans')
 const editionLabel = (source: { editionId: string; label?: string }) => slEditionLabel(source.editionId) || source.label || library.value?.versions.find(version => version.editionId === source.editionId)?.label
@@ -54,9 +63,14 @@ function stateLabel(value?: string) {
 function clearPoll() { if (timer !== undefined) clearTimeout(timer); timer = undefined }
 function selectionChangedMessage() { return label('The SL library changed. Review and save the project editions shown below, then search again.', 'SL 资料库已更新。请核对并保存下方本项目版本，然后重新检索。', 'SL 資料庫已更新。請核對並儲存下方本項目版本，然後重新檢索。') }
 function setSelection(result: FixedReferenceSelectionStatus, keepChoices = false) {
-  const choices = keepChoices ? selected.value : result.selection?.slSources.filter(source => result.availableSlSources.some(available => available.editionId === source.editionId && available.sha256 === source.sha256)).map(source => source.sha256) ?? []
+  const sha = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+  const sourceValid = (source: { editionId?: unknown; sha256?: unknown; manifestSha256?: unknown }) => !!source && typeof source.editionId === 'string' && !!source.editionId && sha(source.sha256) && (source.manifestSha256 === undefined || sha(source.manifestSha256))
+  if (!result || !sha(result.manifestSha256) || !Array.isArray(result.availableSlSources) || !result.availableSlSources.every(sourceValid)
+    || result.selection && (!sha(result.selection.manifestSha256) || !Array.isArray(result.selection.slSources) || !result.selection.slSources.every(sourceValid))) throw new Error(label('Invalid SL edition catalog', 'SL 版本目录无效', 'SL 版本目錄無效'))
+  const prior = result.selection?.slSources ?? []
+  const choice = keepChoices ? selected.value : prior.length === 1 && result.availableSlSources.some(source => source.editionId === prior[0]?.editionId && source.sha256 === prior[0]?.sha256) ? prior[0]!.sha256 : ''
   status.value = result
-  selected.value = choices.filter(sha => result.availableSlSources.some(source => source.sha256 === sha))
+  selected.value = result.availableSlSources.some(source => source.sha256 === choice) ? choice : ''
 }
 function staleFailure(failure: unknown) { return failure instanceof Error && failure.message === 'fixed_sl_selection_required_or_stale' }
 function schedulePoll() {
@@ -71,11 +85,12 @@ async function loadSelection(token = generation, id = props.projectId, keepChoic
   try {
     const health = await fixedReferenceApi.status()
     if (!current()) return
-    configured.value = health.configured === true
-    if (!configured.value || !id) { status.value = null; selected.value = []; return }
+    if (!health || typeof health.configured !== 'boolean') throw new Error(label('Invalid fixed-reference status', '固定资料库状态无效', '固定資料庫狀態無效'))
+    configured.value = health.configured
+    if (!configured.value || !id) { status.value = null; selected.value = ''; selectionProject.value = id; return }
     const result = await fixedReferenceApi.selection(id)
     if (!current()) return
-    setSelection(result, keepChoices)
+    setSelection(result, keepChoices); selectionProject.value = id
   } catch (failure) { if (current()) error.value = failure instanceof Error ? failure.message : String(failure) }
   finally { if (current()) loading.value = false }
 }
@@ -95,7 +110,7 @@ async function loadLibrary() {
   finally { libraryLoading = false; schedulePoll() }
 }
 watch(() => props.projectId, () => {
-  ++generation; status.value = null; selected.value = []; error.value = ''; configured.value = false; saving.value = false
+  ++generation; selectionProject.value = ''; status.value = null; selected.value = ''; error.value = ''; configured.value = false; saving.value = false
   void loadSelection(); void loadLibrary()
 }, { immediate: true })
 function showLibrary() { open.value = true; void refresh() }
@@ -109,16 +124,18 @@ async function build() {
   finally { if (!disposed) building.value = false }
 }
 async function save() {
-  if (!status.value || saving.value || loading.value || !selected.value.length) return
-  const id = props.projectId, token = generation, choices = [...selected.value]
+  if (!status.value || saving.value || loading.value || !selected.value) return
+  const id = props.projectId, token = generation, choice = selected.value
   clearSearch(); saving.value = true; error.value = ''
   try {
     const current = await fixedReferenceApi.selection(id)
     if (disposed || token !== generation) return
     setSelection(current, true)
-    const slSources = current.availableSlSources.filter(source => choices.includes(source.sha256)).map(({ editionId, sha256 }) => ({ editionId, sha256 }))
-    if (slSources.length !== choices.length) throw new Error(label('A selected SL edition is no longer available. Review the current choices and save again.', '所选 SL 版本已不在当前目录中。请核对现有版本并重新保存。', '所選 SL 版本已不在目前目錄中。請核對現有版本並重新儲存。'))
-    const result = await fixedReferenceApi.save(id, { manifestSha256: current.manifestSha256, slSources })
+    const matches = current.availableSlSources.filter(source => source.sha256 === choice)
+    if (matches.length !== 1) throw new Error(label('A selected SL edition is no longer available. Review the current choices and save again.', '所选 SL 版本已不在当前目录中。请核对现有版本并重新保存。', '所選 SL 版本已不在目前目錄中。請核對現有版本並重新儲存。'))
+    const source = matches[0]!, manifestSha256 = source.manifestSha256 ?? current.manifestSha256
+    if (!/^[a-f0-9]{64}$/.test(manifestSha256)) throw new Error(label('The selected edition identity is invalid.', '所选版本身份无效。', '所選版本身分無效。'))
+    const result = await fixedReferenceApi.save(id, { manifestSha256, slSources: [{ editionId: source.editionId, sha256: source.sha256 }] })
     if (!disposed && token === generation) {
       setSelection(result)
     }
@@ -137,9 +154,15 @@ async function save() {
 }
 function clearSearch() { ++searchSequence; hits.value = []; selectedHit.value = null; searched.value = false; searching.value = false; searchError.value = ''; resultScope.value = '' }
 watch(scopeKey, clearSearch)
-watch(() => [scopeKey.value, loading.value, saving.value, configured.value, error.value], () => {
+watch(() => [props.projectId, selectionProject.value, configured.value, loading.value, saving.value, error.value, status.value, staleSelection.value], () => {
+  const state: FixedSelectionState['status'] = !props.projectId || loading.value || saving.value ? 'checking'
+    : error.value ? 'unavailable' : selectionProject.value !== props.projectId ? 'checking' : !configured.value ? 'disabled' : !status.value ? 'unavailable'
+      : staleSelection.value || saved.value.length !== 1 ? 'needs-selection' : 'ready'
+  emit('selectionState', { projectId: props.projectId, status: state })
+}, { immediate: true, flush: 'sync' })
+watch(() => [scopeKey.value, multipleSaved.value, loading.value, saving.value, configured.value, error.value], () => {
   if (loading.value || saving.value) return
-  emit('scopeChange', !error.value && (status.value || !configured.value) ? {
+  emit('scopeChange', !error.value && !multipleSaved.value && (status.value || !configured.value) ? {
     projectId: props.projectId,
     key: JSON.stringify([status.value?.manifestSha256, saved.value.map(source => [source.editionId, source.sha256]).sort()])
   } : null)
@@ -228,22 +251,23 @@ onBeforeUnmount(() => { disposed = true; ++generation; clearPoll(); clearSearch(
     </div>
     <button type="button" class="btn soft" data-sl-library-open @click="showLibrary">{{ label('Choose editions and search', '选择版本与检索', '選擇版本與檢索') }}</button>
     <AppModal v-if="open" :open="open" :title="title" wide @close="closeLibrary">
-      <p>{{ label('Saved editions define the SL retrieval scope for new Vetting reviews and Advice questions in this project. This does not establish project adoption.', '已保存版本定义本项目新审查与咨询的 SL 检索范围；这不证明项目已采用。', '已儲存版本定義本項目新審查與諮詢的 SL 檢索範圍；這不證明項目已採用。') }}</p>
+      <p>{{ label('One saved edition defines the SL retrieval scope for new Vetting reviews and Advice questions in this project. This does not establish project adoption.', '本项目只能保存一个 SL 版本，用于新审查与咨询；这不证明项目已采用。', '本項目只能儲存一個 SL 版本，用於新審查與諮詢；這不證明項目已採用。') }}</p>
       <h4>{{ label('Project retrieval editions', '本项目检索版本', '本項目檢索版本') }}</h4>
       <p v-if="loading" role="status">{{ label('Loading…', '读取中…', '讀取中…') }}</p>
       <template v-if="status">
-        <label v-for="source in status.availableSlSources" :key="source.sha256" class="edition-choice"><input v-model="selected" type="checkbox" :value="source.sha256" :disabled="saving || loading" /><span>{{ editionLabel(source) }}</span></label>
-        <p v-if="staleSelection" role="alert" data-sl-selection-stale>{{ selectionChangedMessage() }}</p>
-        <p v-else-if="!saved.length">{{ label('Select and save editions before starting a query or review.', '请先选择并保存版本，再启动查询或审查。', '請先選擇並儲存版本，再啟動查詢或審查。') }}</p>
+        <fieldset class="edition-options"><legend>{{ label('Choose one SL edition', '选择一个 SL 版本', '選擇一個 SL 版本') }}</legend><label v-for="source in status.availableSlSources" :key="source.sha256" class="edition-choice"><input v-model="selected" type="radio" :name="`project-sl-${projectId}`" :value="source.sha256" :disabled="saving || loading" /><span>{{ editionLabel(source) }}</span></label></fieldset>
+        <p v-if="multipleSaved" role="alert" data-sl-selection-multiple>{{ label('This project previously saved multiple SL editions. Choose and save exactly one before searching or reviewing.', '此项目曾保存多个 SL 版本。请重新选择并保存一个版本，再检索或审查。', '此項目曾儲存多個 SL 版本。請重新選擇並儲存一個版本，再檢索或審查。') }}</p>
+        <p v-else-if="staleSelection" role="alert" data-sl-selection-stale>{{ selectionChangedMessage() }}</p>
+        <p v-else-if="!saved.length">{{ label('Select and save one edition before starting a query or review.', '请先选择并保存版本，再启动查询或审查。', '請先選擇並儲存版本，再啟動查詢或審查。') }}</p>
         <p v-if="dirty && !staleSelection" role="status">{{ label('Edition changes are not saved. Queries still use the saved scope.', '版本更改尚未保存；查询仍使用已保存范围。', '版本變更尚未儲存；查詢仍使用已儲存範圍。') }}</p>
-        <button type="button" class="btn primary" data-sl-editions-save :disabled="saving || loading || !selected.length" @click="save">{{ label('Save editions', '保存版本', '儲存版本') }}</button>
+        <button type="button" class="btn primary" data-sl-editions-save :disabled="saving || loading || !selected" @click="save">{{ label('Save editions', '保存版本', '儲存版本') }}</button>
         <details><summary>{{ label('Source identity details', '来源身份详情', '來源身份詳情') }}</summary><p v-for="source in status.availableSlSources" :key="source.sha256" class="small source-identity">{{ source.editionId }} · SHA-256 {{ source.sha256 }}</p></details>
       </template>
       <p v-else-if="!loading">{{ label('The application edition catalog is not ready. Build progress remains available; refresh after the catalog is configured.', '应用版本目录尚未就绪；仍可查看建库进度。目录配置后请刷新。', '應用版本目錄尚未就緒；仍可查看建庫進度。目錄設定後請重新整理。') }}</p>
       <p v-if="error" role="alert">{{ error }}</p>
       <section class="reference-search" data-fixed-reference-search>
         <h4>{{ label('Search saved reference scope', '检索已保存参考范围', '檢索已儲存參考範圍') }}</h4>
-        <p>{{ label('Searches the saved SL editions and existing GCC/GCT references for this project. Unsaved checkboxes do not change this scope. Reading quality and project adoption remain unconfirmed.', '检索本项目已保存的 SL 版本及现有 GCC／GCT 参考；未保存的勾选不会改变本次范围。读取质量与项目采用状态仍待确认。', '檢索本項目已儲存的 SL 版本及現有 GCC／GCT 參考；未儲存的勾選不會改變本次範圍。讀取品質與項目採用狀態仍待確認。') }}</p>
+        <p>{{ label('Searches the saved SL edition for this project. Unsaved changes do not change the saved scope. Reading quality and project adoption remain unconfirmed.', '检索本项目已保存的 SL 版本；未保存的选择不会改变本次范围。读取质量与项目采用状态仍待确认。', '檢索本項目已儲存的 SL 版本；未儲存的選擇不會改變本次範圍。讀取品質與項目採用狀態仍待確認。') }}</p>
         <form class="row" @submit.prevent="search">
           <label class="search-query">{{ label('Question or clause text', '问题或条款文字', '問題或條款文字') }}<input v-model="query" maxlength="4000" :disabled="!searchReady" data-fixed-search-query /></label>
           <button type="submit" class="btn" data-fixed-search-submit :disabled="!searchReady || searching || !query.trim()">{{ searching ? label('Searching…', '检索中…', '檢索中…') : label('Search', '检索', '檢索') }}</button>
@@ -259,8 +283,11 @@ onBeforeUnmount(() => { disposed = true; ++generation; clearPoll(); clearSearch(
         </article>
         <FixedEvidencePanel v-if="selectedPointer" :key="selectedPointer.parentId" :pointer="selectedPointer" :locale="panelLocale" />
       </section>
+      <button type="button" class="btn" data-sl-library-refresh :disabled="loading || saving || building" @click="refresh">{{ label('Refresh status', '刷新状态', '重新整理狀態') }}</button>
+      <details :open="!configured" data-sl-library-build-details>
+        <summary>{{ label('Independent SL library build', '独立 SL 建库与进度', '獨立 SL 建庫與進度') }}</summary>
+        <p class="small">{{ label('This build service is separate from the packaged reference editions above.', '此建库服务与上方预置参考版本相互独立。', '此建庫服務與上方預置參考版本相互獨立。') }}</p>
       <div class="row">
-        <button type="button" class="btn" data-sl-library-refresh :disabled="loading || saving || building" @click="refresh">{{ label('Refresh status', '刷新状态', '重新整理狀態') }}</button>
         <button type="button" class="btn" data-sl-library-build :disabled="building || active || !library || library.job.status === 'unconfigured'" @click="build">{{ label('Build all official SL technical sources', '建立全部官方 SL 技术资料库', '建立全部官方 SL 技術資料庫') }}</button>
       </div>
       <div v-if="library" class="library-progress" role="status" data-sl-library-progress>
@@ -269,7 +296,7 @@ onBeforeUnmount(() => { disposed = true; ++generation; clearPoll(); clearSearch(
         <p v-if="active || progressKnown">{{ label('Processed pages', '已处理页数', '已處理頁數') }}: {{ count(library.job.processedPages) }} / {{ count(library.job.totalPages) }}</p>
         <progress v-if="progressKnown" :value="library.job.processedPages!" :max="library.job.totalPages!" />
         <p v-if="library.job.message">{{ library.job.message }}</p>
-        <p>{{ library.retrievalAvailable ? label('Library retrieval available', '资料库检索已可用', '資料庫檢索已可用') : label('Library retrieval is not ready', '资料库检索尚未就绪', '資料庫檢索尚未就緒') }}</p>
+        <p>{{ library.retrievalAvailable ? label('Independent library retrieval available', '独立建库检索已可用', '獨立建庫檢索已可用') : label('Independent library retrieval is not ready', '独立建库检索尚未就绪', '獨立建庫檢索尚未就緒') }}</p>
       </div>
       <p v-if="libraryError" role="alert">{{ libraryError }}</p>
       <p v-if="buildError" role="alert">{{ buildError }}</p>
@@ -279,11 +306,13 @@ onBeforeUnmount(() => { disposed = true; ++generation; clearPoll(); clearSearch(
           <tbody><tr v-for="version in library.versions" :key="version.editionId"><td>{{ editionLabel(version) }}</td><td>{{ count(version.technicalPages) }}</td><td>{{ count(version.parsedPages) }}</td><td>{{ count(version.clauseCount) }}</td><td>{{ count(version.indexedChunks) }}</td><td>{{ stateLabel(version.status) }}</td></tr></tbody>
         </table>
       </div>
+      </details>
     </AppModal>
   </section>
 </template>
 
 <style scoped>
+.edition-options { border: 0; padding: 0; margin: 0; }
 .fixed-reference-selection { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-bottom: 18px; padding: 15px 18px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); background: var(--surface); }
 .edition-overview { min-width: 0; flex: 1 1 20rem; }
 .edition-summary { margin: 5px 0; overflow-wrap: anywhere; }

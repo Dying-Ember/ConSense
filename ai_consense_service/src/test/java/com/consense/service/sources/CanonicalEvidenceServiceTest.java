@@ -112,6 +112,47 @@ class CanonicalEvidenceServiceTest {
     }
     @AfterEach void stop(){if(server!=null)server.stop(0);}
 
+    @Test void reviewedRegistrationUsesEachModuleHealthAndSnapshotWithoutGlobalBase() throws Exception {
+        List<String> advisoryRequests=Collections.synchronizedList(new ArrayList<>());
+        java.util.concurrent.atomic.AtomicBoolean badHealth=new java.util.concurrent.atomic.AtomicBoolean();
+        HttpServer advisory=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        advisory.createContext("/",exchange->{
+            advisoryRequests.add(exchange.getRequestURI().toString());
+            String body=exchange.getRequestURI().getPath().equals("/health")
+                    ?badHealth.get()?"{\"oer\":{}}":"{\"oer\":{\"inputContract\":\"canonical-source-chunks-upstream-scope-and-parser-projection-v1\",\"assetReturnContract\":\"source-and-projection-bound-content-addressed-assets-v1\",\"canonicalProjectionEndpoint\":\"/project\",\"scopePolicy\":{\"manifestSha256\":\""+repeat('d')+"\"}}}"
+                    :raw;
+            byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type","application/json");
+            exchange.sendResponseHeaders(200,bytes.length);
+            try(OutputStream out=exchange.getResponseBody()){out.write(bytes);}
+        });
+        advisory.start();
+        try{
+            config.setBaseUrl(null);
+            config.getRetrievalBaseUrls().put("vetting","http://127.0.0.1:"+server.getAddress().getPort());
+            config.getRetrievalBaseUrls().put("advisory","http://127.0.0.1:"+advisory.getAddress().getPort());
+            register("vetting");int vettingCalls=remoteCalls;
+            assertEquals(2,vettingCalls);
+            register("advisory");
+            assertEquals(vettingCalls,remoteCalls);
+            assertEquals(Arrays.asList("/health","/canonical/"+address()+"?module=advisory"),advisoryRequests);
+            badHealth.set(true);
+            assertReason("OER_CANONICAL_CAPABILITY_MISMATCH",()->register("advisory"));
+            assertEquals(3,advisoryRequests.size());
+            badHealth.set(false);config.setBaseUrl("http://127.0.0.1:1");
+            register("advisory");
+            assertEquals(vettingCalls,remoteCalls);
+            assertEquals(5,advisoryRequests.size());
+        }finally{advisory.stop(0);}
+    }
+
+    @Test void reviewedRegistrationRetainsSingleBaseUrlFallbackForBothModules(){
+        config.setMaxSnapshotBytes(Integer.MAX_VALUE);
+        register("vetting");int calls=remoteCalls;
+        register("advisory");
+        assertEquals(calls+2,remoteCalls);
+    }
+
     @Test void python_seal_full_field_roundtrip_and_three_page_pointer_preserve_unknown() {
         CanonicalSourceBinding row=register("vetting");assertEquals(raw,row.getSnapshotJson());
         assertEquals(raw,service.snapshot("project-a",11L,address(),"advisory"));

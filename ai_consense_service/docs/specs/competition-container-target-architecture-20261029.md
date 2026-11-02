@@ -1,6 +1,6 @@
 # 比赛部署：选定本机架构与镜像准备图
 
-**用途与状态：**供工程师按[运行方案决定](competition-runtime-plan-20261029.md)准备本机预演；已选定四个 CPU 常驻职责加一个固定 GPU 容器，不再把 MySQL 或临时 GPU 任务容器列为本轮待选方案。此图是准备约定，不是已部署系统或验收回执。01准备材料已发布并独立复核通过，02／03／04由各自主会话按[票据依赖](../../../.scratch/competition-external-runtime/README.md)并行实施，后续实际验收分别留证。
+**用途与状态：**供工程师按[运行方案决定](competition-runtime-plan-20261029.md)准备本机预演；已选定四个 CPU 常驻职责加一个固定 GPU 容器，不再把 MySQL 或临时 GPU 任务容器列为本轮待选方案。此图是准备约定，不是已部署系统或验收回执。01准备材料已发布并独立复核通过；各票按[原始依赖与验收](../../../.scratch/competition-external-runtime/README.md)核对，具备实际输入和资源条件的工作可并行准备与验证，真实验收分别留证。
 
 **运行身份：**使用 Docker，全部实际容器（包括数据库和初始化职责）采用具名账户 `consense`、UID/GID `10001:10001`；各角色实际进程、挂载和 GPU 权限仍须逐一验证。容器非 root 与构建／安装权限分开记录，不额外要求 Docker daemon rootless。本机 Qwen 仅使用明确标记的占位文件和兼容 API 协议替身；赛方真实 Qwen／vLLM、H800 兼容与推理未验。稳定 Paddle／MinerU 双路 OCR、embedding 与 rerank 后续必须以真实权重在 Docker 内推理。
 
@@ -98,4 +98,4 @@ flowchart LR
 - **再验证行为与恢复：**真实 OCR／检索推理、Qwen 标记替身接线、上传与来源、引用与人工记录、浏览器起草／审核／咨询、停止重建后重读、离线重启和失败恢复分别留证。处理草稿与在途任务后受控换版，保留旧网页及回退数据；关键证据落盘后才发布成功状态。
 - **资料规则不变：**图纸识别后排除，不进行图纸 OCR 或 CAD 解析；不扩大原件范围，不恢复此前作废的未完成任务或将旧质量缺口带回全面整改。冻结比较仍为 `8a40dfcca04730ba7b40cdefb36b596a37bbcb53`。
 
-票据 01 **仍未关闭，门审查待完成**。通用 Docker 身份／挂载／GPU 可见、CPU 生命周期及最小用户空间外置探针不等于业务实施通过；真实持久 H2 TCP、Qdrant server 转换、业务镜像、稳定双路 OCR／检索真实容器推理、完整流式／停止／恢复和浏览器业务链仍未验。真实 Qwen／vLLM、H800、赛方权限／网络／扫描受理另列未验。完整关闭条件以[实施说明](competition-container-external-runtime-20261029.md)、[运行方案](competition-runtime-plan-20261029.md)与[票据 01](../../../.scratch/competition-external-runtime/issues/01-baseline-and-runtime-plan.md)为准。
+票据 01 **已完成独立复核并关闭**；准备票通过不等于业务实施通过。通用 Docker 身份／挂载／GPU 可见、CPU 生命周期及最小用户空间外置探针不等于业务实施通过；真实持久 H2 TCP、Qdrant server 转换、业务镜像、稳定双路 OCR／检索真实容器推理、完整流式／停止／恢复和浏览器业务链仍未验。真实 Qwen／vLLM、H800、赛方权限／网络／扫描受理另列未验。完整关闭条件以[实施说明](competition-container-external-runtime-20261029.md)、[运行方案](competition-runtime-plan-20261029.md)与[票据 01](../../../.scratch/competition-external-runtime/issues/01-baseline-and-runtime-plan.md)为准。

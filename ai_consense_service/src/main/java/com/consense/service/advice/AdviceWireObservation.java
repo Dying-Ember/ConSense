@@ -69,8 +69,9 @@ final class AdviceWireObservation {
             metadata.put("preflightRequest",attempt.entity("preflight-request.utf8.json",preflight));
             metadata.put("generationRequest",attempt.entity("generation-request.utf8.json",generation));
             metadata.put("httpEntityScope","Exact UTF8 JSON entities from the sealed Qwen request; no fields removed or normalized. TCP/TLS/framing bytes are unobserved.");
-            metadata.put("dispatchObservedByThisRecorder",false);metadata.put("dispatchEvidence","Match these entity hashes and serialized input identity to the actual durable preflight/answer ledger receipts.");
-            metadata.put("providerMaximumMeasured",false);metadata.put("sourceFreshnessAtPrepare","current guards around preflight and generation are separate from this prepared-entity record");
+            metadata.put("inputTokenPreflight","not_performed");metadata.put("preflightRequestDispatched",false);metadata.put("inputTokensObserved",false);
+            metadata.put("dispatchObservedByThisRecorder",false);metadata.put("dispatchEvidence","Match the generation entity hash and serialized input identity to the durable answer ledger receipt; the preflight entity is prepared only.");
+            metadata.put("providerMaximumMeasured",false);metadata.put("sourceFreshnessAtPrepare","current guards around generation are separate from this prepared-entity record");
             attempt.json("request-receipt.json",metadata);return attempt;
         } catch(IOException error){throw failed("observation_request_seal_failed");}
     }

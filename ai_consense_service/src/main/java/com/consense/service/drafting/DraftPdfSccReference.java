@@ -34,6 +34,9 @@ public class DraftPdfSccReference {
 
     public Map<String,Object> search(Map<String,Object> revision,String sourceId,String query,int offset) {
         String denied=denial(revision,sourceId);if(denied!=null)return unavailable(denied);
+        return searchPackaged(query,offset);
+    }
+    public Map<String,Object> searchPackaged(String query,int offset) {
         Snapshot data=load();if(data==null)return unavailable("reference_missing_or_integrity_failed");
         if(query==null)query="";query=query.trim().toLowerCase(Locale.ROOT);
         if(query.length()>120||offset<0)return unavailable("invalid_search");
@@ -49,6 +52,9 @@ public class DraftPdfSccReference {
 
     public Map<String,Object> detail(Map<String,Object> revision,String sourceId,String pointId) {
         String denied=denial(revision,sourceId);if(denied!=null)return unavailable(denied);
+        return detailPackaged(pointId);
+    }
+    public Map<String,Object> detailPackaged(String pointId) {
         Snapshot data=load();if(data==null)return unavailable("reference_missing_or_integrity_failed");
         Map<String,Object> point=data.points.get(pointId);if(point==null)return unavailable("point_not_found");
         Map<String,Object> safe=summary(point,data);for(String key:Arrays.asList("meaning","applicability","valueSource","impacts","evidence"))safe.put(key,point.get(key));

@@ -8,6 +8,20 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DraftIncompleteNoticeTest {
+    @Test void trustedEnglishNoticesAreRestrictedToExactApplicationText() {
+        String known="1. Contract number and title: Review the sources and adopt the required answer.";
+        String multi="2. Contract number and title: Review the sources and adopt the required answer.\nReview the guidance and modification scope.";
+        String foreign="3. Contrat de paiement: Review the sources and adopt the required answer.";
+        String quoted="4. Contract number and title — “Paiement”: Review the sources and adopt the required answer.";
+        String changed="5. Contract number and title: Paiement dans 14 jours.";
+        List<Map<String,Object>> bindings=new ArrayList<>();
+        for(String text:Arrays.asList(known,multi,foreign,quoted,changed))bindings.add(DraftBusinessRules.map("applicationStatus","delivery_notice","text",text));
+        bindings.add(DraftBusinessRules.map("applicationStatus","applied","text","6. Contract number and title: Review the sources and adopt the required answer."));
+        Set<String> trusted=DraftIncompleteNotice.trustedEnglish(bindings);
+        assertTrue(trusted.contains(known));assertTrue(trusted.contains(multi));
+        assertFalse(trusted.contains(foreign));assertFalse(trusted.contains(quoted));assertFalse(trusted.contains(changed));
+        assertFalse(trusted.contains("6. Contract number and title: Review the sources and adopt the required answer."));
+    }
     @Test void longTargetExcerptsShareTheSourceSummaryLimitWithoutMergingIdentitiesOrMutatingInputs(){
         String quote="A".repeat(239)+"\uD83D\uDE00"+" \n TAIL_MUST_STAY_IN_GRAPH".repeat(300),excerpt="A".repeat(239)+"\uD83D\uDE00…";
         Map<String,Object> graph=DraftReviewGraph.obj("graph",DraftReviewGraph.obj("variables",Arrays.asList(

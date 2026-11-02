@@ -30,6 +30,7 @@ public class OerCanonicalRetrievalClient {
     private static final String ASSETS = "source-and-projection-bound-content-addressed-assets-v1";
     private static final String RECIPE = "scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1";
     private static final String INDEX_STATUS = "read-only-existing-canonical-index-v1";
+    private static final String INDEX_INITIALIZATION = "consense.canonical-index-initialization.v1";
     private static final String INDEX_AVAILABILITY = "live-canonical-index-availability-v1";
     private static final String INDEX_AVAILABILITY_BOOTSTRAP = "source-verified-cold-canonical-availability-v1";
     private static final String SOURCE_PAGE_INDEX = "explicit-composite-index-pins-v1";
@@ -52,15 +53,17 @@ public class OerCanonicalRetrievalClient {
         long generation;
         boolean invalidated;
         Receipt receipt;
+        Receipt previousReceipt;
         String context;
     }
     private static final class Operation {
         final ReceiptState state;
         final long generation;
         final Receipt receipt;
+        final Receipt previousReceipt;
         final boolean indexing,observing;
         Operation(ReceiptState state,boolean indexing,boolean observing){
-            this.state=state;this.generation=state.generation;this.receipt=state.receipt;this.indexing=indexing;this.observing=observing;
+            this.state=state;this.generation=state.generation;this.receipt=state.receipt;this.previousReceipt=state.previousReceipt;this.indexing=indexing;this.observing=observing;
         }
     }
     private Operation beginOperation(String key,boolean indexing){
@@ -69,7 +72,7 @@ public class OerCanonicalRetrievalClient {
     private Operation beginOperation(String key,boolean indexing,boolean observing){
         ReceiptState state=receiptStates.computeIfAbsent(key,ignored->new ReceiptState());
         synchronized(state){
-            if(indexing){state.generation++;state.invalidated=true;state.receipt=null;state.context=null;}
+            if(indexing){state.generation++;state.invalidated=true;if(state.receipt!=null)state.previousReceipt=state.receipt;state.receipt=null;state.context=null;}
             else require(observing||!state.invalidated,"canonical_index_receipt_invalidated");
             return new Operation(state,indexing,observing);
         }
@@ -80,6 +83,7 @@ public class OerCanonicalRetrievalClient {
             // An expired response must not erase a later successful explicit index.
             if(operation.state.generation!=operation.generation)return;
             operation.state.generation++;operation.state.invalidated=true;
+            if(operation.state.receipt!=null)operation.state.previousReceipt=operation.state.receipt;
             operation.state.receipt=null;operation.state.context=null;
         }
     }
@@ -124,6 +128,7 @@ public class OerCanonicalRetrievalClient {
                 invalidate(operation);throw new IllegalStateException("canonical index signature changed");
             }
             operation.state.receipt=receipt;
+            operation.state.previousReceipt=null;
             if(operation.indexing)operation.state.invalidated=false;
             return new IndexState(true,receipt.signature,corpus.chunks.size(),null);
         }
@@ -447,11 +452,38 @@ public class OerCanonicalRetrievalClient {
                     &&("unknown".equals(envelope.path("status").asText())||required.contains(origin.path("id").asText())),"semantic complete context omitted its origin");
         }
     }
+    /** Initialization status is independent of ready; UNKNOWN conveys no build authority. */
+    public enum InitializationState { INITIALIZATION_ALLOWED, DATABASE_UNAVAILABLE, UNKNOWN }
     public static final class IndexState {
-        public final boolean ready;
+        public final boolean ready,initializationAllowed;
+        public final InitializationState initializationState;
         public final String signature,reason;
         public final int chunkCount;
-        public IndexState(boolean ready,String signature,int chunks,String reason){this.ready=ready;this.signature=signature;this.chunkCount=chunks;this.reason=reason;}
+        public IndexState(boolean ready,String signature,int chunks,String reason){this(ready,signature,chunks,reason,false);}
+        private IndexState(boolean ready,String signature,int chunks,String reason,boolean initializationAllowed){this(ready,signature,chunks,reason,initializationAllowed?InitializationState.INITIALIZATION_ALLOWED:InitializationState.UNKNOWN);}
+        private IndexState(boolean ready,String signature,int chunks,String reason,InitializationState initializationState){this.ready=ready;this.signature=signature;this.chunkCount=chunks;this.reason=reason;this.initializationState=initializationState;this.initializationAllowed=initializationState==InitializationState.INITIALIZATION_ALLOWED;}
+    }
+    private static IndexState statusFailure(RuntimeException error,int count,boolean statusEndpoint){
+        if(error instanceof com.consense.ai.HttpSupport.HttpResponseFailure){
+            String kind=((com.consense.ai.HttpSupport.HttpResponseFailure)error).errorKind();
+            boolean database=statusEndpoint&&"QDRANT_BACKEND_UNAVAILABLE".equals(kind);
+            return new IndexState(false,null,count,database?"canonical_index_database_unavailable":"canonical_index_status_unknown",database?InitializationState.DATABASE_UNAVAILABLE:InitializationState.UNKNOWN);
+        }
+        return new IndexState(false,null,count,error.getMessage());
+    }
+
+    private static IndexState initializationDecision(JsonNode result,ObjectNode request,String module,Corpus corpus,int count){
+        require(result.isObject()&&INDEX_INITIALIZATION.equals(result.path("initializationContract").asText())
+                &&falseBoolean(result.path("ready"))&&trueBoolean(result.path("readOnly"))
+                &&trueBoolean(result.path("initializationAllowed"))
+                &&result.path("projectId").isTextual()&&request.path("projectId").equals(result.path("projectId"))
+                &&result.path("targetModule").isTextual()&&module.equals(result.path("targetModule").asText())
+                &&result.path("canonicalProjections").isArray()&&request.path("projectionSha256").equals(result.path("canonicalProjections"))
+                &&result.path("sourcePageEvidence").isObject()
+                &&JsonUtils.mapper().valueToTree(corpus.sourcePageEvidence).equals(result.path("sourcePageEvidence")),
+                "canonical initialization decision differs");
+        scope(result.path("competitionScope"),module,corpus.policy);
+        return new IndexState(false,null,count,"canonical_index_missing",true);
     }
     /** Fresh live availability only; explicit status/build retain complete vector integrity verification. */
     public IndexState indexAvailable(String key,String module,List<CanonicalSourceBinding> current,int expectedChunks){
@@ -506,36 +538,51 @@ public class OerCanonicalRetrievalClient {
     }
     IndexState compactRecoveryAvailability(String module,String key,List<CanonicalSourceBinding> current,int expectedChunks,String sourceGeneration,Runnable guard){
         require(Arrays.asList("advisory","vetting").contains(module),"compact recovery module unsupported");
-        Operation operation=null;boolean supersededReceipt=false,retryableColdAdapter=false;
+        Operation operation=null;boolean supersededReceipt=false,retryableColdAdapter=false;RuntimeException statusError=null;
         try{
             require(expectedChunks>=0&&sha(sourceGeneration),"verified Advisory source denominator required");
             operation=beginOperation(key,false,true);Receipt receipt=operation.receipt;
-            synchronized(operation.state){currentOperation(operation);}
+            Receipt expected=receipt!=null?receipt:operation.previousReceipt;
+            synchronized(operation.state){require(operation.state.generation==operation.generation,"canonical_index_operation_invalidated");
+                if(operation.state.invalidated)require("advisory".equals(module)&&receipt==null,"canonical_index_receipt_invalidated");}
             Corpus selected=scalarCorpus(current,module);guard.run();
             Capability before=stageHealth(null,false,module,selected);guard.run();
             if(!before.indexAvailability||!before.indexAvailabilityBootstrap)return new IndexState(false,null,expectedChunks,"canonical_index_bootstrap_unsupported");
-            if(receipt!=null)require(module.equals(receipt.module)&&selected.fingerprint.equals(receipt.fingerprint)
-                    &&before.fingerprint.equals(receipt.health)&&before.sourceUnitPolicy.equals(receipt.sourceUnitPolicy),"current canonical scope or recipe changed");
+            if(expected!=null)require(module.equals(expected.module)&&selected.fingerprint.equals(expected.fingerprint)
+                    &&before.fingerprint.equals(expected.health)&&before.sourceUnitPolicy.equals(expected.sourceUnitPolicy)
+                    &&(expected.verifiedSourceGenerationSha256==null||expected.verifiedSourceGenerationSha256.equals(sourceGeneration)),"current canonical scope or recipe changed");
             bindContext(operation,module,selected,before);
             ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("projectId",key);request.put("module",module);
             request.set("projectionSha256",JsonUtils.mapper().valueToTree(selected.projections));
-            if(receipt==null)request.put("coldBootstrap",true);
-            else{request.put("expectedSignature",receipt.signature);if(receipt.generationKnown){if(receipt.indexGeneration==null)request.putNull("expectedGeneration");else request.put("expectedGeneration",receipt.indexGeneration);}}
+            if(expected==null){request.put("coldBootstrap",true);request.put("initializationDecision",true);}
+            else{request.put("expectedSignature",expected.signature);if(expected.generationKnown){if(expected.indexGeneration==null)request.putNull("expectedGeneration");else request.put("expectedGeneration",expected.indexGeneration);}}
             if(!selected.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(selected.sourcePageEvidence));
             guard.run();JsonNode result;
             try{result=statusReceipt(http.postJson(url(module,"/index-canonical/availability"),JsonUtils.write(request),properties.getVetting().getRetrievalTimeoutMs()));}
             catch(com.consense.common.BizException unavailable){
+                statusError=unavailable;
                 String detail=unavailable.getMessage();
-                retryableColdAdapter=receipt==null&&detail!=null&&detail.contains("HTTP 422 ")&&detail.contains("INDEX_ADAPTER_PREDECESSOR_CHANGED");
+                retryableColdAdapter=expected==null&&detail!=null&&detail.contains("HTTP 422 ")&&detail.contains("INDEX_ADAPTER_PREDECESSOR_CHANGED");
                 throw unavailable;
             }
             guard.run();
+            if(result.has("initializationContract")){
+                require(expected==null,"existing index cannot be authorized for initialization");
+                IndexState decision=initializationDecision(result,request,module,selected,expectedChunks);
+                Capability after=stageHealth(null,false,module,selected);guard.run();
+                require(before.fingerprint.equals(after.fingerprint)&&before.sourceUnitPolicy.equals(after.sourceUnitPolicy),"canonical availability runtime changed");
+                bindContext(operation,module,selected,after);
+                synchronized(operation.state){require(operation.state.generation==operation.generation,"canonical_index_operation_invalidated");
+                    validateLocalSources(selected,current);require(selected.localRuntimeFingerprint.equals(localRuntimeFingerprint(module)),"current canonical runtime configuration changed");
+                    require(operation.state.receipt==null,"canonical index receipt changed before initialization");}
+                return decision;
+            }
             require(key.equals(result.path("projectId").asText())&&trueBoolean(result.path("ready"))&&trueBoolean(result.path("readOnly"))
                     &&falseBoolean(result.path("fullVectorIntegrityChecked"))&&INDEX_AVAILABILITY.equals(result.path("indexAvailabilityContract").asText())
-                    &&result.path("coldBootstrap").isBoolean()&&result.path("coldBootstrap").asBoolean()==(receipt==null)
+                    &&result.path("coldBootstrap").isBoolean()&&result.path("coldBootstrap").asBoolean()==(expected==null)
                     &&module.equals(result.path("targetModule").asText())&&properties.getVetting().getExpectedRetrievalContract().equals(result.path("contract").asText())
                     &&request.path("projectionSha256").equals(result.path("canonicalProjections"))&&sha(result.path("signature").asText())
-                    &&(receipt==null||receipt.signature.equals(result.path("signature").asText()))
+                    &&(expected==null||expected.signature.equals(result.path("signature").asText()))
                     &&integer(result.path("indexed"))&&result.path("indexed").asInt()==expectedChunks
                     &&integer(result.path("vectorPoints"))&&result.path("vectorPoints").asInt()>=0
                     &&integer(result.path("vectorDimension"))&&result.path("vectorDimension").asInt()>=(expectedChunks==0?0:1)
@@ -543,24 +590,33 @@ public class OerCanonicalRetrievalClient {
                     &&result.has("indexGeneration")&&(result.path("indexGeneration").isNull()
                         ||result.path("indexGeneration").isTextual()&&result.path("indexGeneration").asText().matches("[a-f0-9]{32}")),"canonical bootstrap availability identity differs");
             String generation=result.path("indexGeneration").isNull()?null:result.path("indexGeneration").asText();
-            require(receipt==null||!receipt.generationKnown||Objects.equals(receipt.indexGeneration,generation),"canonical index generation changed");
+            require(expected==null||!expected.generationKnown||Objects.equals(expected.indexGeneration,generation),"canonical index generation changed");
             String frozen=properties.getVetting().getExpectedRetrievalSignature();require(JsonUtils.isBlankText(frozen)||frozen.equals(result.path("signature").asText()),"frozen index signature differs");
             validateIndexPins(result,selected.sourcePageEvidence);scope(result.path("competitionScope"),module,selected.policy);
             guard.run();Capability after=stageHealth(null,false,module,selected);guard.run();
             require(before.fingerprint.equals(after.fingerprint)&&before.sourceUnitPolicy.equals(after.sourceUnitPolicy),"canonical availability runtime changed");
             bindContext(operation,module,selected,after);
             Receipt checked=new Receipt(result.path("signature").asText(),selected.fingerprint,before.fingerprint,module,before.sourceUnitPolicy,generation,true,sourceGeneration);
-            synchronized(operation.state){localAdmission(operation,selected,current,module);
+            synchronized(operation.state){
+                require(operation.state.generation==operation.generation,"canonical_index_operation_invalidated");
+                if(operation.state.invalidated){
+                    require("advisory".equals(module)&&receipt==null&&operation.state.receipt==null,"canonical_index_receipt_invalidated");
+                    operation.state.invalidated=false;bindContext(operation,module,selected,after);
+                }
+                localAdmission(operation,selected,current,module);
                 if(operation.state.receipt!=null){
                     require(sameReceipt(receipt,operation.state.receipt)||sameReceipt(checked,operation.state.receipt),"canonical index receipt changed before source attestation");
                     if(operation.state.receipt.generationKnown&&!Objects.equals(generation,operation.state.receipt.indexGeneration)){
                         supersededReceipt=true;throw new IllegalStateException("canonical recovery response was superseded by a known index generation");
                     }
                 }
-                operation.state.receipt=checked;}
+                operation.state.receipt=checked;operation.state.previousReceipt=null;}
             return new IndexState(true,checked.signature,expectedChunks,null);
         }catch(RuntimeException rejected){if(!supersededReceipt){if(retryableColdAdapter)rejectUnattestedAdapter(operation);else invalidate(operation);}
-            String message=rejected.getMessage();if(rejected instanceof com.consense.common.BizException&&message!=null&&message.contains("HTTP 404 ")&&message.contains("Project is not indexed"))return new IndexState(false,null,expectedChunks,"canonical_index_missing");
+            if(rejected==statusError&&rejected instanceof com.consense.ai.HttpSupport.HttpResponseFailure){
+                String kind=((com.consense.ai.HttpSupport.HttpResponseFailure)rejected).errorKind();
+                if("QDRANT_BACKEND_UNAVAILABLE".equals(kind)||"QDRANT_BACKEND_RELEASE_UNKNOWN".equals(kind))return statusFailure(rejected,expectedChunks,true);
+            }
             throw rejected;}
     }
     /** Same receipt identity as corpus(), without snapshots, payload maps or whole-source serialization. */
@@ -587,9 +643,21 @@ public class OerCanonicalRetrievalClient {
             Runnable guard,Runnable fullExit,boolean build,boolean rebuild){
         return compactIndex("advisory",key,current,expectedChunks,sourceKinds,sourceGeneration,guard,fullExit,build,rebuild);
     }
+    IndexState advisoryCompactInitialize(String key,List<CanonicalSourceBinding> current,int expectedChunks,Set<String> sourceKinds,String sourceGeneration,
+            Runnable guard,Runnable fullExit){
+        return compactIndex("advisory",key,current,expectedChunks,sourceKinds,sourceGeneration,guard,fullExit,true,false,true);
+    }
+    IndexState compactInitialize(String module,String key,List<CanonicalSourceBinding> current,int expectedChunks,Set<String> sourceKinds,String sourceGeneration,
+            Runnable guard,Runnable fullExit){
+        return compactIndex(module,key,current,expectedChunks,sourceKinds,sourceGeneration,guard,fullExit,true,false,true);
+    }
     IndexState compactIndex(String module,String key,List<CanonicalSourceBinding> current,int expectedChunks,Set<String> sourceKinds,String sourceGeneration,
             Runnable guard,Runnable fullExit,boolean build,boolean rebuild){
-        require(Arrays.asList("advisory","vetting").contains(module),"compact index module unsupported");Operation operation=null;
+        return compactIndex(module,key,current,expectedChunks,sourceKinds,sourceGeneration,guard,fullExit,build,rebuild,false);
+    }
+    private IndexState compactIndex(String module,String key,List<CanonicalSourceBinding> current,int expectedChunks,Set<String> sourceKinds,String sourceGeneration,
+            Runnable guard,Runnable fullExit,boolean build,boolean rebuild,boolean initialization){
+        require(Arrays.asList("advisory","vetting").contains(module),"compact index module unsupported");Operation operation=null;RuntimeException statusError=null;
         final boolean[] sourceRejected={false};
         Runnable sourceGuard=()->{try{guard.run();}catch(RuntimeException changed){sourceRejected[0]=true;throw changed;}};
         Runnable sourceExit=()->{try{fullExit.run();}catch(RuntimeException changed){sourceRejected[0]=true;throw changed;}};
@@ -601,17 +669,31 @@ public class OerCanonicalRetrievalClient {
             bindContext(operation,module,selected,before);
             if(!build){
                 synchronized(operation.state){require(operation.state.generation==operation.generation,"canonical_index_operation_invalidated");
-                    if(operation.state.invalidated)return new IndexState(false,null,expectedChunks,"canonical_index_receipt_invalidated");}
+                    if(operation.state.invalidated&&!"advisory".equals(module))return new IndexState(false,null,expectedChunks,"canonical_index_receipt_invalidated");}
                 require(INDEX_STATUS.equals(before.indexStatusContract),"read-only canonical index status capability missing");
                 if(receipt!=null)require(module.equals(receipt.module)&&receipt.fingerprint.equals(selected.fingerprint)
                         &&receipt.health.equals(before.fingerprint)&&receipt.sourceUnitPolicy.equals(before.sourceUnitPolicy),"current canonical scope or recipe changed");
             }
             ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("projectId",key);request.put("module",module);
             request.set("projectionSha256",JsonUtils.mapper().valueToTree(selected.projections));if(build&&rebuild)request.put("rebuild",true);
+            if(!build||initialization)request.put("initializationDecision",true);
             if(!selected.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(selected.sourcePageEvidence));
             if(build)sourceExit.run();
-            sourceGuard.run();String wire=http.postJson(url(module,build?"/index-canonical":"/index-canonical/status"),JsonUtils.write(request),properties.getVetting().getRetrievalIndexTimeoutMs());sourceGuard.run();
+            sourceGuard.run();String wire;
+            try{wire=http.postJson(url(module,build?"/index-canonical":"/index-canonical/status"),JsonUtils.write(request),properties.getVetting().getRetrievalIndexTimeoutMs());}
+            catch(RuntimeException failed){if(!build)statusError=failed;throw failed;}sourceGuard.run();
             JsonNode result=build?JsonUtils.parse(wire):statusReceipt(wire);
+            if(!build&&result.has("initializationContract")){
+                require(receipt==null&&operation.previousReceipt==null,"existing index cannot be authorized for initialization");
+                IndexState decision=initializationDecision(result,request,module,selected,expectedChunks);
+                Capability after=stageHealth(null,false,module,selected);sourceGuard.run();
+                require(before.fingerprint.equals(after.fingerprint)&&before.sourceUnitPolicy.equals(after.sourceUnitPolicy),"canonical runtime changed during compact index operation");
+                sourceExit.run();sourceGuard.run();bindContext(operation,module,selected,after);
+                synchronized(operation.state){require(operation.state.generation==operation.generation,"canonical_index_operation_invalidated");
+                    validateLocalSources(selected,current);require(selected.localRuntimeFingerprint.equals(localRuntimeFingerprint(module)),"current canonical runtime configuration changed");
+                    require(operation.state.receipt==null,"canonical index receipt changed before initialization");}
+                return decision;
+            }
             require(key.equals(result.path("projectId").asText())&&integer(result.path("indexed"))&&result.path("indexed").asInt()==expectedChunks
                     &&sha(result.path("signature").asText())&&module.equals(result.path("targetModule").asText())
                     &&properties.getVetting().getExpectedRetrievalContract().equals(result.path("contract").asText())
@@ -629,9 +711,9 @@ public class OerCanonicalRetrievalClient {
             synchronized(operation.state){localAdmission(operation,selected,current,module);
                 if(!build&&operation.state.receipt!=null){require(sameReceipt(receipt,operation.state.receipt)||sameReceipt(checked,operation.state.receipt),"canonical index receipt changed before source attestation");
                     if(operation.state.receipt.generationKnown&&!checked.generationKnown)checked=operation.state.receipt;}
-                operation.state.receipt=checked;if(build)operation.state.invalidated=false;}
+                operation.state.receipt=checked;operation.state.previousReceipt=null;if(build)operation.state.invalidated=false;}
             return new IndexState(true,checked.signature,expectedChunks,null);
-        }catch(RuntimeException rejected){invalidate(operation);if(build||sourceRejected[0])throw rejected;return new IndexState(false,null,expectedChunks,rejected.getMessage());}
+        }catch(RuntimeException rejected){invalidate(operation);if(build||sourceRejected[0])throw rejected;return statusFailure(rejected,expectedChunks,rejected==statusError);}
     }
     /** Current source and live module/recipe status, independent of legacy vector counts. */
     public IndexState indexStatus(String key,String module,CanonicalEvidenceService.VerifiedBindingFrame frame){
@@ -639,7 +721,7 @@ public class OerCanonicalRetrievalClient {
     }
     public IndexState indexStatus(String key,String module,List<CanonicalSourceBinding> current){return indexStatus(key,module,current,null);}
     private IndexState indexStatus(String key,String module,List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame) {
-        Corpus corpus=null;Operation operation=null;
+        Corpus corpus=null;Operation operation=null;RuntimeException statusError=null;
         try {
             operation=beginOperation(key,false,true);Receipt receipt=operation.receipt;
             corpus=corpus(current,module,frame);
@@ -656,9 +738,19 @@ public class OerCanonicalRetrievalClient {
             require(INDEX_STATUS.equals(currentHealth.indexStatusContract),"read-only canonical index status capability missing");
             ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("projectId",key);request.put("module",module);
             ArrayNode addresses=request.putArray("projectionSha256");corpus.projections.forEach(addresses::add);
+            request.put("initializationDecision",true);
             if(!corpus.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(corpus.sourcePageEvidence));
             if(frame!=null)frame.beforeWait();
-            JsonNode result=statusReceipt(http.postJson(url(module,"/index-canonical/status"),JsonUtils.write(request),properties.getVetting().getRetrievalIndexTimeoutMs()));
+            String wire;try{wire=http.postJson(url(module,"/index-canonical/status"),JsonUtils.write(request),properties.getVetting().getRetrievalIndexTimeoutMs());}
+            catch(RuntimeException failed){statusError=failed;throw failed;}
+            JsonNode result=statusReceipt(wire);
+            if(result.has("initializationContract")){
+                require(receipt==null,"existing index cannot be authorized for initialization");
+                IndexState decision=initializationDecision(result,request,module,corpus,corpus.chunks.size());
+                revalidateCurrent(operation,module,current,frame,corpus,currentHealth);
+                synchronized(operation.state){localAdmission(operation,corpus,current,module);require(operation.state.receipt==null,"canonical index receipt changed before initialization");}
+                return decision;
+            }
             require(result.isObject()&&key.equals(result.path("projectId").asText())
                     &&result.path("ready").isBoolean()&&result.path("ready").asBoolean()
                     &&result.path("readOnly").isBoolean()&&result.path("readOnly").asBoolean()
@@ -676,7 +768,7 @@ public class OerCanonicalRetrievalClient {
             Receipt recovered=new Receipt(result.path("signature").asText(),corpus.fingerprint,currentHealth.fingerprint,module,currentHealth.sourceUnitPolicy,
                     receipt==null?null:receipt.indexGeneration,receipt!=null&&receipt.generationKnown,receipt==null?null:receipt.verifiedSourceGenerationSha256);
             return publishReceipt(operation,recovered,corpus,current,module);
-        } catch(RuntimeException unavailable){invalidate(operation);return new IndexState(false,null,corpus==null?0:corpus.chunks.size(),unavailable.getMessage());}
+        } catch(RuntimeException unavailable){invalidate(operation);return statusFailure(unavailable,corpus==null?0:corpus.chunks.size(),unavailable==statusError);}
     }
 
     /** Complete JSON is authoritative; no old Chunk/Part DTO conversion occurs. */
@@ -684,16 +776,22 @@ public class OerCanonicalRetrievalClient {
         index(indexKey,module,frame.bindings(),frame,false);
     }
     public void index(String indexKey, String module, List<CanonicalSourceBinding> current){index(indexKey,module,current,null,false);}
+    void initialize(String indexKey,String module,CanonicalEvidenceService.VerifiedBindingFrame frame){index(indexKey,module,frame.bindings(),frame,false,null,true);}
+    void initialize(String indexKey,String module,List<CanonicalSourceBinding> current){index(indexKey,module,current,null,false,null,true);}
     public void rebuild(String indexKey,String module,CanonicalEvidenceService.VerifiedBindingFrame frame){index(indexKey,module,frame.bindings(),frame,true);}
     public void rebuild(String indexKey,String module,List<CanonicalSourceBinding> current){index(indexKey,module,current,null,true);}
     private void index(String indexKey, String module, List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame,boolean rebuild) {
-        index(indexKey,module,current,frame,rebuild,null);
+        index(indexKey,module,current,frame,rebuild,null,false);
     }
     Runnable indexAdvisory(String key,CanonicalEvidenceService.VerifiedBindingFrame frame,boolean rebuild,java.util.function.Supplier<String> sourceGeneration){
         require(frame!=null&&sourceGeneration!=null,"verified Advisory build epoch required");
-        return index(key,"advisory",frame.bindings(),frame,rebuild,sourceGeneration);
+        return index(key,"advisory",frame.bindings(),frame,rebuild,sourceGeneration,false);
     }
-    private Runnable index(String indexKey,String module,List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame,boolean rebuild,java.util.function.Supplier<String> sourceGeneration){
+    Runnable initializeAdvisory(String key,CanonicalEvidenceService.VerifiedBindingFrame frame,java.util.function.Supplier<String> sourceGeneration){
+        require(frame!=null&&sourceGeneration!=null,"verified Advisory build epoch required");
+        return index(key,"advisory",frame.bindings(),frame,false,sourceGeneration,true);
+    }
+    private Runnable index(String indexKey,String module,List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame,boolean rebuild,java.util.function.Supplier<String> sourceGeneration,boolean initialization){
         Operation operation=beginOperation(indexKey,true);
         try {
         Corpus corpus = corpus(current,module,frame);
@@ -703,6 +801,7 @@ public class OerCanonicalRetrievalClient {
         ObjectNode request = JsonUtils.mapper().createObjectNode();
         request.put("projectId", indexKey); request.put("module", module);
         if(rebuild)request.put("rebuild",true);
+        if(initialization)request.put("initializationDecision",true);
         ArrayNode addresses = request.putArray("projectionSha256"); corpus.projections.forEach(addresses::add);
         if(!corpus.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(corpus.sourcePageEvidence));
         if(frame!=null)frame.beforeWait();
@@ -878,12 +977,12 @@ public class OerCanonicalRetrievalClient {
 
     /** Returned seeds stay ranked; closure members retain complete source JSON and unknowns. */
     public JsonNode retrieve(String indexKey,String module,String query,String role,CanonicalEvidenceService.VerifiedBindingFrame frame){
-        return retrieve(indexKey,module,query,role,frame.bindings(),frame);
+        return retrieve(indexKey,module,query,role,frame.bindings(),frame,null);
     }
     public JsonNode retrieve(String indexKey,String module,String query,String role,List<CanonicalSourceBinding> current){
-        return retrieve(indexKey,module,query,role,current,null);
+        return retrieve(indexKey,module,query,role,current,null,null);
     }
-    private JsonNode retrieve(String indexKey,String module,String query,String role,List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame) {
+    JsonNode retrieve(String indexKey,String module,String query,String role,List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame,java.util.function.Consumer<Runnable> onCancel) {
         Operation operation=beginOperation(indexKey,false);Receipt receipt=operation.receipt;
         require(receipt!=null, "no current canonical index receipt");
         Corpus corpus;Capability live;
@@ -900,7 +999,9 @@ public class OerCanonicalRetrievalClient {
         request.put("projectId",indexKey); request.put("query",query); request.put("candidates",config.getCandidateLimit());
         request.put("limit",config.getTopK()); if(role!=null)request.put("role",role);
         if(frame!=null)frame.beforeWait();
-        JsonNode result=JsonUtils.parse(http.postJson(url(module,"/retrieve"),JsonUtils.write(request),config.getRetrievalTimeoutMs()));
+        String wire=onCancel==null?http.postJson(url(module,"/retrieve"),JsonUtils.write(request),config.getRetrievalTimeoutMs())
+                :http.postJsonCancelable(url(module,"/retrieve"),JsonUtils.write(request),config.getRetrievalTimeoutMs(),onCancel);
+        JsonNode result=JsonUtils.parse(wire);
         try {require(corpus.sourcePageEvidence.equals(sourcePageEvidence(current)),"source page evidence changed during retrieval");
             revalidateCurrent(operation,module,current,frame,corpus,live);}
         catch(RuntimeException invalid){invalidate(operation);throw invalid;}
@@ -916,7 +1017,12 @@ public class OerCanonicalRetrievalClient {
     JsonNode retrieveAdvisory(String indexKey,String query,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
             java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate,
             java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> compactParents){
-        return retrieveCompact("advisory",indexKey,query,null,current,sourceGeneration,guard,hydrate,compactParents,false);
+        return retrieveAdvisory(indexKey,query,current,sourceGeneration,guard,hydrate,compactParents,null);
+    }
+    JsonNode retrieveAdvisory(String indexKey,String query,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
+            java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate,
+            java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> compactParents,java.util.function.Consumer<Runnable> onCancel){
+        return retrieveCompact("advisory",indexKey,query,null,current,sourceGeneration,guard,hydrate,compactParents,false,null,onCancel);
     }
     JsonNode retrieveCompact(String module,String indexKey,String query,String role,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
             java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate,
@@ -926,6 +1032,11 @@ public class OerCanonicalRetrievalClient {
     JsonNode retrieveCompact(String module,String indexKey,String query,String role,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
             java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate,
             java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> compactParents,boolean requireCompact,Set<String> selectedSources){
+        return retrieveCompact(module,indexKey,query,role,current,sourceGeneration,guard,hydrate,compactParents,requireCompact,selectedSources,null);
+    }
+    private JsonNode retrieveCompact(String module,String indexKey,String query,String role,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
+            java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate,
+            java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> compactParents,boolean requireCompact,Set<String> selectedSources,java.util.function.Consumer<Runnable> onCancel){
         require(Arrays.asList("advisory","vetting").contains(module),"compact query module unsupported");
         Set<String> sourceSelection=selectedSources==null?null:new LinkedHashSet<>(selectedSources);
         Operation operation=beginOperation(indexKey,false);Receipt receipt=operation.receipt;
@@ -948,8 +1059,10 @@ public class OerCanonicalRetrievalClient {
             guard.run();
         }catch(RuntimeException invalid){invalidate(operation);throw invalid;}
         String response;
-        try{response=http.postJson(url(module,"/retrieve"),JsonUtils.write(request),config.getRetrievalTimeoutMs());}
+        try{response=onCancel==null?http.postJson(url(module,"/retrieve"),JsonUtils.write(request),config.getRetrievalTimeoutMs())
+                :http.postJsonCancelable(url(module,"/retrieve"),JsonUtils.write(request),config.getRetrievalTimeoutMs(),onCancel);}
         catch(RuntimeException rejected){
+            if(rejected instanceof java.util.concurrent.CancellationException)throw rejected;
             if(queryBudgetRejected(rejected)){
                 try{guard.run();}catch(RuntimeException changed){invalidate(operation);throw changed;}
             }else invalidate(operation);

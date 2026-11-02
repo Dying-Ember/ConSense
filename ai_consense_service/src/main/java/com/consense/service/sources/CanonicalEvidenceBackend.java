@@ -45,6 +45,7 @@ public class CanonicalEvidenceBackend {
     }
     public int normalMaximumBytes(){return NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes());}
     public String health(){return get(null,null,null,null,false,null,properties.getMaxSnapshotBytes()).json();}
+    public String health(String module){return get(null,null,null,null,false,module,properties.getMaxSnapshotBytes()).json();}
     public String normalHealth(String module){return request(normalBase(module).newBuilder().addPathSegment("health").build(),normalMaximumBytes()).json();}
     public String normalSnapshot(String projection,String module){
         if(projection==null||!projection.matches("[a-f0-9]{64}"))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
@@ -139,9 +140,12 @@ public class CanonicalEvidenceBackend {
         Request.Builder wire=new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("sources").addPathSegment("read").build());
         try{
             com.fasterxml.jackson.databind.JsonNode body=JsonUtils.mapper().reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(request);
-            if(body!=null&&module.equals(body.path("module").asText())&&java.util.Arrays.asList("vetting","advisory").contains(module)
-                    &&"prepare".equals(body.path("operation").asText())&&"semantic_units".equals(body.path("view").asText()))
-                wire.tag(Integer.class,normalTimeout());
+            if(body!=null&&module.equals(body.path("module").asText())&&java.util.Arrays.asList("vetting","advisory").contains(module)) {
+                if("prepare".equals(body.path("operation").asText())&&"semantic_units".equals(body.path("view").asText()))
+                    wire.tag(Integer.class,normalTimeout());
+                else if("catalog".equals(body.path("operation").asText())&&"canonical_units".equals(body.path("view").asText()))
+                    wire.tag(Integer.class,Math.max(properties.getTimeoutMs(),180000));
+            }
         }catch(IOException malformed){/* Invalid requests retain the ordinary transport budget. */}
         return execute(wire.post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),Utf8.bytes(request))).build(),maximum).json();
     }

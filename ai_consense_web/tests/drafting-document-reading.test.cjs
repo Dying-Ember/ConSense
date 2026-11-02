@@ -7,9 +7,12 @@ const { createRequire } = require('node:module')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
 const JSZip = createRequire(require.resolve('mammoth/package.json'))('jszip')
 const window = new JSDOM('').window
+const portableSha256 = loadTypeScript(path.join(__dirname, '../src/api/sha256Bytes.ts'), {
+  globals: { crypto: {}, setTimeout }, dependencies: { '@noble/hashes/sha256': require('@noble/hashes/sha256') }
+})
 const { convertDocumentReading } = loadTypeScript(path.join(__dirname, '../src/drafting/document-reading.ts'), {
-  globals: { crypto: webcrypto, document: window.document, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter },
-  dependencies: { jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) }, './document-reading-text': loadTypeScript(path.join(__dirname, '../src/drafting/document-reading-text.ts')), './reading-list-markers': loadTypeScript(path.join(__dirname, '../src/drafting/reading-list-markers.ts')) }
+  globals: { crypto: {}, document: window.document, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter },
+  dependencies: { '@/api/sha256Bytes': portableSha256, jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) }, './document-reading-text': loadTypeScript(path.join(__dirname, '../src/drafting/document-reading-text.ts')), './reading-list-markers': loadTypeScript(path.join(__dirname, '../src/drafting/reading-list-markers.ts')) }
 })
 
 async function docx(body, extraParts = {}) {

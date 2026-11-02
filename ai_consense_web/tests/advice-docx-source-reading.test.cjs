@@ -25,6 +25,15 @@ async function docx(body, extras = {}) {
   const position = async (partName, nodePath) => ({ kind: 'docx_native', sourceSha256: sha, partName, partSha256: await hash(await zip.file(partName).async('arraybuffer')), nodePath })
   return { bytes, sha, position }
 }
+test('a trailing page break preserves the exact Advisory paragraph and following text', async () => {
+  const source = await docx('<w:p><w:r><w:t>Advice source</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p><w:p><w:r><w:t>Following clause</w:t></w:r></w:p>')
+  const paragraph = await source.position('word/document.xml', `${root}/${c('p')}[1]`)
+  const reading = await readAdviceDocx(source.bytes, source.sha, [paragraph]), flow = new JSDOM(reading.html).window.document
+  const target = [...flow.querySelectorAll('[data-advice-target]')].find(node => node.dataset.adviceTarget === docxPositionKey(paragraph))
+  assert.ok(target); assert.equal(target.textContent, 'Advice source\n')
+  assert.match(flow.body.textContent, /Following clause/); assert.equal(reading.missingTargets.length, 0)
+  assert.ok(!reading.warnings.some(warning => /Incomplete visual conversion|Visual conversion unavailable/.test(warning)))
+})
 test('repeated source text selects the unique actual table cell; entire table and neighbours remain readable', async () => {
   const source = await docx('<w:p><w:r><w:t>Repeated clause</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Repeated clause</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Opposing condition</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>Next parent clause</w:t></w:r></w:p>')
   const cell = await source.position('word/document.xml', `${root}/${c('tbl')}[1]/${c('tr')}[1]/${c('tc')}[1]`)

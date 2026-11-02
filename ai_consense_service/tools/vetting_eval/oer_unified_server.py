@@ -74,11 +74,18 @@ def configure_unified_environment(environ, workspace):
 
 
 def create_unified_app(policy, *, backend=None, artifact_store=None, target_module='vetting',
-                       maximum_message_bytes=MAX_NORMAL_MESSAGE_BYTES):
+                       maximum_message_bytes=MAX_NORMAL_MESSAGE_BYTES, with_ocr=False, with_business=False):
+    if with_ocr and target_module != 'vetting':
+        raise ValueError('OCR routes belong to the Vetting source service')
     fail(type(maximum_message_bytes) is int and 1024 <= maximum_message_bytes <= MAX_NORMAL_MESSAGE_BYTES,
          'UNIFIED_MESSAGE_LIMIT_INVALID', 'Normal messages must stay within the finite 1GiB maximum')
     native_maximum = min(maximum_message_bytes, MAX_SNAPSHOT_BYTES)
     backend = importlib.import_module('server') if backend is None else backend
+    if with_business:
+        try:
+            backend._fixed_business_configuration(None)
+        except Exception:
+            raise ValueError('Trusted business configuration is unavailable') from None
     artifact_store = artifact_store or ArtifactStore(Path(backend.STATE) / 'artifacts')
     registry = UnifiedCanonicalSourceRegistry(Path(backend.STATE) / 'canonical', artifact_store,
         family_policy=policy, family_target_module=target_module, maximum_message_bytes=maximum_message_bytes)
@@ -90,7 +97,8 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
         target_module=target_module, source_registry=registry, runtime_factory=UnifiedOerWindowRuntime,
         app=app, maximum_message_bytes=native_maximum, normal_maximum_message_bytes=maximum_message_bytes,
         strict_json_paths=('/project', '/project/native', '/project/native-collection', '/project/native-pdf', FAMILY_ENDPOINT, NORMAL_OBSERVED_ENDPOINT,
-                           '/index', '/index-canonical', '/index-canonical/status', '/index-canonical/availability', '/retrieve', SOURCE_READ_ENDPOINT))
+                           '/index', '/index-canonical', '/index-canonical/status', '/index-canonical/availability', '/retrieve', SOURCE_READ_ENDPOINT),
+        preserve_ocr=with_ocr, business_backend=backend if with_business else None)
     install_native_pdf_source_family_route(app, registry, artifact_store, policy,
         target_module=target_module, maximum_message_bytes=native_maximum,
         software_guard=backend._windows_runtime.algorithms)
@@ -100,11 +108,36 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
     install_source_page_index_route(app, backend)
     install_source_read_route(app, registry, policy, target_module=target_module,
         software_guard=backend._windows_runtime.algorithms)
+    if with_business:
+        required = {('/v1/models', 'GET'), ('/v1/chat/completions', 'POST'),
+                    ('/v1/responses', 'POST'), ('/v1/responses/input_tokens', 'POST')}
+        routes = [route for route in backend.app.routes
+                  if any((route.path, method) in required for method in getattr(route, 'methods', ()))]
+        found = [(route.path, method) for route in routes for method in route.methods
+                 if (route.path, method) in required]
+        existing = {(route.path, method) for route in app.routes for method in getattr(route, 'methods', ())}
+        if len(found) != len(required) or set(found) != required or existing.intersection(required):
+            raise ValueError('Exact business routes are unavailable or conflict')
+        app.router.routes.extend(routes)
+    if with_ocr:
+        required = {('/ocr', 'POST'), ('/native-pdf/table-candidates', 'POST'), ('/ocr/tasks/{task_id}', 'GET'),
+                    ('/ocr/tasks/{task_id}/result', 'GET'), ('/ocr/tasks/{task_id}', 'DELETE')}
+        routes = [route for route in backend.app.routes
+                  if any((route.path, method) in required for method in getattr(route, 'methods', ()))]
+        found = [(route.path, method) for route in routes for method in route.methods
+                 if (route.path, method) in required]
+        existing = {(route.path, method) for route in app.routes for method in getattr(route, 'methods', ())}
+        if len(found) != len(required) or set(found) != required or existing.intersection(required):
+            raise ValueError('Exact OCR task routes or native PDF route are unavailable or conflict')
+        app.router.routes.extend(routes)
     old_health = next(route for route in app.routes if getattr(route, 'path', None) == '/health')
     endpoint = old_health.endpoint
     app.router.routes.remove(old_health)
     def health():
         result = endpoint()
+        if with_ocr:
+            result['ocrRouteExposed'] = True
+            result['ocrEngine'] = 'Local OCR endpoint; configured complete parsers or RapidOCR CPU baseline'
         # Only this composition's canonical load is scoped; publishing retains
         # its existing every-read validators. Standalone constants stay honest.
         for key in ('nativeCanonical', 'nativeDocumentCollection', 'nativePdfCanonical'):
@@ -137,6 +170,8 @@ def main():
     parser.add_argument('--port', type=int, default=8874)
     parser.add_argument('--scope-manifest')
     parser.add_argument('--scope-manifest-sha256')
+    parser.add_argument('--with-ocr', action='store_true')
+    parser.add_argument('--with-business', action='store_true')
     args = parser.parse_args()
     supplied = dict(os.environ)
     if args.scope_manifest:
@@ -147,7 +182,8 @@ def main():
     policy = load_policy(values['CONSENSE_SL_SCOPE_MANIFEST'], values.get('CONSENSE_SL_SCOPE_MANIFEST_SHA256'))
     os.environ.update(values)
     import uvicorn
-    uvicorn.run(create_unified_app(policy, target_module=values['CONSENSE_OER_TARGET_MODULE']),
+    uvicorn.run(create_unified_app(policy, target_module=values['CONSENSE_OER_TARGET_MODULE'],
+                                  with_ocr=args.with_ocr, with_business=args.with_business),
                 host=args.host, port=args.port)
 
 

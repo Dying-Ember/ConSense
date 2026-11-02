@@ -64,11 +64,13 @@ class NativeOerWindowRuntime(OerWindowRuntime):
         return super().signature(chunks)
 
     def retrieve(self, request):
-        result = super().retrieve(request)
-        # A source mutation during a long query must not escape in its answer.
-        stored = self.s._projects[self.s.project_key(request.projectId)]
-        self._validate_native_sources(stored['chunks'])
-        return result
+        from window_runtime import retrieved_metadata_scope
+        with retrieved_metadata_scope() as holder:
+            result = super().retrieve(request)
+            # A source mutation during a long query must not escape in its answer.
+            fail(len(holder) == 1, 'INDEX_REQUEST_METADATA_MISSING', 'Verified request metadata is unavailable')
+            self._validate_native_sources(holder[0]['chunks'])
+            return result
 
     def algorithms(self):
         base = super().algorithms()

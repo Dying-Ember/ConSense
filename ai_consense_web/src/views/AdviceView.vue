@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { adviceApi } from '@/api'
+import { adviceApi, type FixedSelectionState } from '@/api'
 import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument, AdviceSourcePreparation, AdviceSession, AdviceBasisScope, LlmSelection } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
@@ -28,6 +28,7 @@ const quickQuestions = ref<QuickQuestion[]>([])
 const indexStatus = ref<IndexStatus | null>(null)
 const question = ref('')
 const referenceDraftScope = ref<{ projectId: string; key: string } | null>(null)
+const fixedSelectionState = ref<FixedSelectionState | null>(null)
 const scope = ref('fullset')
 const basisScope = ref<AdviceBasisScope>('project_contract')
 const sessions = ref<AdviceSession[]>([])
@@ -50,6 +51,7 @@ const displayedCitation = computed(() => {
 })
 const activeSources = ref<Citation[]>([])
 const activeSourceScope = ref('fullset')
+let activeSourceMessage: ChatMessage | null = null
 const historyEl = ref<HTMLElement | null>(null)
 const followLatest = ref(true)
 const streamPhase = ref('')
@@ -122,6 +124,7 @@ const evidenceCopy = {
 }
 
 const projectId = computed(() => store.activeProjectId)
+const fixedSelectionBlocked = computed(() => !!projectId.value && (fixedSelectionState.value?.projectId !== projectId.value || !['ready', 'disabled'].includes(fixedSelectionState.value?.status ?? '')))
 const questionDraftKey = computed(() => {
   if (!projectId.value || !sessionsLoaded.value || referenceDraftScope.value?.projectId !== projectId.value) return null
   const selected = sessions.value.find(item => item.id === sessionId.value)
@@ -263,7 +266,7 @@ function resetScopedState() {
   indexStatus.value = null; indexError.value = ''
   sourceErrorReason.value = null
   sessionError.value = ''
-  activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
+  activeSources.value = []; activeCitation.value = null; activeSourceMessage = null; clarificationReply.value = null
   asking.value = false; indexing.value = false; sourceChecking.value = false; preparingSources.value = false; preparation.value = null
   clearRebuildBusy()
 }
@@ -308,6 +311,7 @@ async function reload() {
   quickQuestions.value = quickList
   activeSources.value = []
   activeCitation.value = null
+  activeSourceMessage = null
   await scrollToBottom()
 }
 
@@ -492,6 +496,11 @@ async function stopCurrentRequest() {
 async function ask(text?: string) {
   const content = (text ?? question.value).trim()
   if (!content || asking.value || sessionCreating.value) return
+  if (fixedSelectionBlocked.value) {
+    if (!question.value.trim()) question.value = content
+    sessionError.value = streamCopy('Check and save one SL edition before asking.', '请先核对并保存一个 SL 版本，再提问。', '請先核對並儲存一個 SL 版本，再提問。')
+    return
+  }
   if (sourcesUnavailable.value || preparingSources.value) {
     if (!question.value.trim()) question.value = content
     sessionError.value = preparingSources.value ? pick(evidenceCopy.preparing) : sourceProblemText(sourceProblemReason.value)
@@ -563,7 +572,19 @@ async function ask(text?: string) {
       sources: response.sources,
       deliveryState: 'complete'
     })
-    if (!activeCitation.value) { activeSources.value = response.sources ?? []; activeSourceScope.value = response.sourceScope ?? selectedScope; activeCitation.value = response.sources?.[0] ?? null }
+    if (activeSourceMessage === message) {
+      const selectedId = activeCitation.value?.evidenceId
+      const matches = selectedId ? (response.sources ?? []).filter(source => source.evidenceId === selectedId) : []
+      activeSources.value = response.sources ?? []
+      activeSourceScope.value = response.sourceScope ?? selectedScope
+      activeCitation.value = matches.length === 1 ? matches[0] : null
+      if (!activeCitation.value) activeSourceMessage = null
+      showCompletePassage.value = false; sourceDetails.value = false
+    } else if (!activeCitation.value && !activeSourceMessage) {
+      activeSources.value = response.sources ?? []; activeSourceScope.value = response.sourceScope ?? selectedScope
+      activeCitation.value = response.sources?.[0] ?? null
+      activeSourceMessage = activeCitation.value ? message : null
+    }
     clarificationReply.value = null
     if (!response.grounded) {
       store.notify(draftFlowchartReady(response) ? pick(evidenceCopy.draftReady) : t('advice.unknown.title'))
@@ -630,6 +651,7 @@ async function clearChat() {
     clarificationReply.value = null
     activeSources.value = []
     activeCitation.value = null
+    activeSourceMessage = null
   } catch (error) {
     // 全局 reporter 已经 toast 出 message；这里把堆栈打 console 方便排查
     console.error('[clearChat] failed', error)
@@ -656,11 +678,12 @@ function citationLabel(citation: Citation, index: number) {
 
 function openMessageSources(message: ChatMessage, citationText?: string) {
   if (!message.sources?.length) return
-  activeSources.value = message.sources
   // 若点的是具体引用按钮（citationText 非空），按 fileLabel 找到对应的 source 并联动到它；
   // 否则默认联动到第一个 source（向后兼容）。
   const matches = citationText ? message.sources.filter(source => source.fileLabel === citationText || source.evidenceId === citationText) : []
   if (citationText && matches.length !== 1) return
+  activeSources.value = message.sources
+  activeSourceMessage = message
   activeSourceScope.value = message.sourceScope ?? scope.value
   activeCitation.value = matches[0] ?? message.sources[0]
   showCompletePassage.value = false
@@ -714,7 +737,7 @@ async function askPrecedence() {
           <AppIcon name="refresh" :size="15" />{{ pick(evidenceCopy.recheck) }}
         </button>
         <!-- FR-A-03 / 原型 Precedence basis：直接以快捷问题形式查询合约文件优先次序（SCC 4.1） -->
-        <button class="btn" type="button" :disabled="asking || sourcesUnavailable || preparingSources" @click="askPrecedence">
+        <button class="btn" type="button" :disabled="asking || sourcesUnavailable || preparingSources || fixedSelectionBlocked" @click="askPrecedence">
           <AppIcon name="info" :size="15" />{{ t('advice.actions.precedence') }}
         </button>
         <button class="btn" type="button" :disabled="!projectId || choosingNewScope || sessionCreating" @click="requestClearChat">
@@ -733,7 +756,8 @@ async function askPrecedence() {
         <button class="btn danger" type="button" @click="clearChat">{{ streamCopy('Clear saved messages', '确认清空已保存消息', '確認清空已儲存訊息') }}</button>
       </template>
     </AppModal>
-    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="advisory" @scope-change="referenceDraftScope = $event" />
+    <FixedReferenceSelection :project-id="projectId" :locale="store.locale" module="advisory" @scope-change="referenceDraftScope = $event" @selection-state="fixedSelectionState = $event" />
+    <p v-if="fixedSelectionBlocked" role="status" class="small">{{ streamCopy('Check and save one SL edition before asking.', '请先核对并保存一个 SL 版本，再提问。', '請先核對並儲存一個 SL 版本，再提問。') }}</p>
     <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ t('advice.sourceScope.includedCount', { count: scopeDocuments.filter(item => item.included).length }) }}</summary>
       <p class="muted small">{{ pick(evidenceCopy.project) }} ID: {{ projectId }} · {{ pick(evidenceCopy.session) }} ID: {{ sessionId || '—' }}</p>
@@ -826,9 +850,9 @@ async function askPrecedence() {
               <template v-else>
                 <div v-if="message.deliveryState === 'processing'" class="advice-progress" role="status" aria-live="polite">
                   <span class="progress-dot" aria-hidden="true" /> {{ phaseLabel(streamPhase) }} · {{ elapsedSeconds }}s
-                  <p v-if="message.content" class="muted small">{{ streamCopy('The answer is continuing; the complete result has not been saved yet.', '答复正在继续，完整结果尚未保存。', '答覆正在繼續，完整結果尚未儲存。') }}</p>
+                  <p v-if="message.content" class="muted small">{{ streamCopy('The answer is in progress and may change as sources are checked; the complete result has not been saved yet.', '答复仍在生成，核对来源后内容可能调整；完整结果尚未保存。', '答覆仍在生成，核對來源後內容可能調整；完整結果尚未儲存。') }}</p>
                 </div>
-                <p v-if="message.deliveryState === 'failed' || message.deliveryState === 'stopped'" class="warning-note" role="alert">{{ message.deliveryState === 'stopped' ? streamCopy('Stopped. Any displayed portions are not a completed answer.', '已停止，已显示的部分不构成完整答复。', '已停止，已顯示的部分不構成完整答覆。') : streamCopy('This request failed before completion. Any displayed portions are not a completed answer.', '本次请求未完成，已显示的部分不构成完整答复。', '本次請求未完成，已顯示的部分不構成完整答覆。') }}</p>
+                <p v-if="message.deliveryState === 'failed' || message.deliveryState === 'stopped'" class="warning-note" role="alert">{{ message.deliveryState === 'stopped' ? streamCopy('Stop requested; the display has stopped. Whether the task has ended is not yet confirmed. Displayed portions are not a completed answer; check session history before retrying.', '已请求停止，显示已停止；任务是否结束尚未确认。已显示的部分不构成完整答复，请在重试前查看会话历史。', '已請求停止，顯示已停止；任務是否結束尚未確認。已顯示的部分不構成完整答覆，請在重試前查看會話歷史。') : streamCopy('This request failed before completion. Any displayed portions are not a completed answer.', '本次请求未完成，已显示的部分不构成完整答复。', '本次請求未完成，已顯示的部分不構成完整答覆。') }}</p>
                 <p v-if="!message.deliveryState || message.deliveryState === 'complete'" class="muted small">{{ message.modelIdentity?.model || message.model ? `${t('llm.recordedModel')}: ${message.modelIdentity?.model || message.model}` : t('llm.identityUnknown') }}</p>
                 <strong v-if="!message.deliveryState || message.deliveryState === 'complete'">{{ message.content ? pick(message.title) : t('advice.unknown.title') }}</strong>
                 <p v-if="message.basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
@@ -888,7 +912,7 @@ async function askPrecedence() {
               :placeholder="t('advice.placeholder')"
               @keydown.enter.exact.prevent="submit"
             />
-            <button class="btn primary" type="button" :disabled="asking || sessionCreating || sourcesUnavailable || preparingSources || !question.trim()" @click="submit">
+            <button class="btn primary" type="button" :disabled="asking || sessionCreating || sourcesUnavailable || preparingSources || fixedSelectionBlocked || !question.trim()" @click="submit">
               <AppIcon name="advice" :size="15" />
               {{ asking ? t('common.loading') : t('advice.actions.ask') }}
             </button>
@@ -899,7 +923,7 @@ async function askPrecedence() {
         <div class="surface-body" style="border-top: 1px solid var(--line)">
           <div class="muted small" style="margin-bottom: 8px">{{ t('advice.quick') }}</div>
           <div class="quick-list">
-            <button v-for="(item, i) in quickQuestions" :key="i" type="button" :disabled="asking || sourcesUnavailable || preparingSources" @click="askQuick(item)">
+            <button v-for="(item, i) in quickQuestions" :key="i" type="button" :disabled="asking || sourcesUnavailable || preparingSources || fixedSelectionBlocked" @click="askQuick(item)">
               {{ pick(item.text) }}
             </button>
           </div>

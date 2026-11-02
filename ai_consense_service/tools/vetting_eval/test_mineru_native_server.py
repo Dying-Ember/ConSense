@@ -28,6 +28,25 @@ class MineruNativeServerTests(unittest.TestCase):
             expected = vars(before[name]) | {'max_new_tokens': MAX_TOKENS}
             self.assertEqual(vars(actual), expected)
 
+    def test_r153_adapter_is_forwarded_and_conflicts_rejected(self):
+        from mineru_native_server import install_adapter
+        class Engine:
+            def generate(self, *args, **kwargs):
+                return args, kwargs
+        marker = object(); install_adapter(Engine, marker)
+        args, kwargs = Engine().generate('prompt', request_id='authored')
+        self.assertEqual(args, ('prompt',)); self.assertIs(kwargs['lora_request'], marker)
+        with self.assertRaises(ValueError):
+            Engine().generate('prompt', lora_request=object())
+
+    def test_r153_adapter_identity_mismatch_fails_before_model_load(self):
+        import tempfile
+        from pathlib import Path
+        from mineru_native_server import check_adapter
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); (root / 'adapter_config.json').write_bytes(b'bad')
+            with self.assertRaises(ValueError): check_adapter(root)
+
     def test_conflicting_profile_and_fallback_fail(self):
         model = self.model(); original = model._create_model
         with self.assertRaisesRegex(ValueError, 'generation limit'):

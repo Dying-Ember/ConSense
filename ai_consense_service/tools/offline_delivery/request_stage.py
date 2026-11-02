@@ -10,6 +10,8 @@ import time
 import uuid
 
 from delivery import STAGES, asset, documents, require, sha, validate
+
+OPERATION_STAGES = (*STAGES, 'fixed-reference-query')
 from gpu_stage import kubectl
 
 MAX_BODY = 64 * 1024 * 1024
@@ -25,7 +27,7 @@ def save(path, value):
 
 
 def envelope(stage, body, source, profile):
-    require(stage in STAGES and isinstance(body, bytes) and len(body) <= MAX_BODY, 'finite exact stage request required')
+    require(stage in OPERATION_STAGES and isinstance(body, bytes) and len(body) <= MAX_BODY, 'finite exact stage request required')
     require(isinstance(source, dict) and source and isinstance(profile, dict) and profile, 'explicit source and runtime profile identities required')
     value = {'contract': 'consense.gpu-operation.v1', 'operationId': uuid.uuid4().hex, 'stage': stage,
              'source': source, 'profile': profile, 'bodySha256': hashlib.sha256(body).hexdigest(),
@@ -36,7 +38,7 @@ def envelope(stage, body, source, profile):
 
 def verify_operation(value):
     unsigned = {key: item for key, item in value.items() if key != 'bindingSha256'}
-    require(value.get('contract') == 'consense.gpu-operation.v1' and value.get('stage') in STAGES
+    require(value.get('contract') == 'consense.gpu-operation.v1' and value.get('stage') in OPERATION_STAGES
             and isinstance(value.get('operationId'), str) and len(value['operationId']) == 32
             and all(char in '0123456789abcdef' for char in value['operationId'])
             and value.get('bindingSha256') == hashlib.sha256(encoded(unsigned)).hexdigest(), 'operation binding changed')

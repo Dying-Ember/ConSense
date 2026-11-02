@@ -106,9 +106,14 @@ public class VettingService {
 
     /** Search the same source-bound project index as Vetting without starting a model review. */
     public ProjectTextSearchResult searchProjectText(String projectId,String query,boolean allSources) {
+        String requestId=UUID.randomUUID().toString();String previous=org.slf4j.MDC.get("vettingSearchRequestId");
+        org.slf4j.MDC.put("vettingSearchRequestId",requestId);
+        try {
+        searchLog(requestId,"start",null);
         projectService.require(projectId);
         if(JsonUtils.isBlankText(query)||query.length()>1000)throw new BizException(4101,"Enter a search of up to 1000 characters.");
         if(!canonicalEnabled())throw new BizException(4101,"Project text search is unavailable.");
+        searchLog(requestId,"select_sources",null);
         List<SourceDocument> selected=freshSourceStamps(projectId);
         if(!compactSources(selected))selected=freshSourceSet(projectId);
         final List<SourceDocument> snapshot=selected;
@@ -118,13 +123,30 @@ public class VettingService {
         if(compact&&currentSources!=null)for(SourceDocument source:snapshot)pins.put(source.getId(),currentSources.observeOriginal(source));
         Runnable guard=()->{assertMaterialSourcesCurrent(projectId,snapshot,!compact);requireOriginalFreshness(snapshot,pins);};
         guard.run();
+        searchLog(requestId,"load_semantic",null);
+        ProjectTextSearchResult result;
         try(OerBusinessEvidence.Session session=oer.loadSemantic(projectId,"vetting",snapshot)) {
+            searchLog(requestId,"retrieve",null);
             List<VettingCorpus.Chunk> hits=oer.retrieveReviewTextForPreview(session,query.trim(),allSources?null:"tender",guard);
             guard.run();
-            return new ProjectTextSearchResult(snapshot.size(),session.documentIds.size(),hits.stream().map(hit->new ProjectTextSearchHit(
+            result=new ProjectTextSearchResult(snapshot.size(),session.documentIds.size(),hits.stream().map(hit->new ProjectTextSearchHit(
                             hit.getDocumentId(),hit.getFileName(),hit.getPageNo(),hit.getAnchor(),hit.getContent(),
                             hit.getSourceHash(),hit.getOriginalSourceSha256())).collect(Collectors.toList()));
+            searchLog(requestId,"close_session",null);
         }
+        searchLog(requestId,"service_complete",null);return result;
+        } catch(RuntimeException|Error failure) {
+            searchLog(requestId,"failed",failure);throw failure;
+        } finally {
+            if(previous==null)org.slf4j.MDC.remove("vettingSearchRequestId");else org.slf4j.MDC.put("vettingSearchRequestId",previous);
+        }
+    }
+    private static void searchLog(String requestId,String stage,Throwable failure){
+        try {
+            if(failure==null)log.info("Vetting search requestId={} stage={}",requestId,stage);
+            else log.error("Vetting search requestId={} stage={} diagnostic={}",requestId,stage,DiagnosticSummary.unexpected(failure));
+        } catch(ThreadDeath fatal) { throw fatal; }
+        catch(Throwable ignored) { /* Diagnostics must not alter the search result. */ }
     }
     private com.consense.service.drafting.DraftingService draftingIdentity;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
@@ -264,8 +286,8 @@ public class VettingService {
         catch(Error failure){failFatalRun(saved.getId(),failure,done,probe);throw failure;}
     }
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay=20000,initialDelay=20000)
-    public void renewLeases(){if(checkpoints!=null)for(String id:completions.keySet())try{checkpoints.renew(id,executionOwner);}catch(RuntimeException lost){log.warn("审查 {} 执行租约无法续期：{}",id,brief(lost));}}
-    private String recoveryContract(String supplement){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v9-run-fixed-reference-selection\n"+JsonUtils.write(Arrays.asList(
+    public void renewLeases(){if(checkpoints!=null)for(String id:completions.keySet())try{checkpoints.renew(id,executionOwner);}catch(RuntimeException lost){log.warn("审查 {} 执行租约无法续期：{}",id,com.consense.common.DiagnosticSummary.of(lost));}}
+    private String recoveryContract(String supplement){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v10-pending-evidence-review\n"+JsonUtils.write(Arrays.asList(
             PACKAGE_IDENTITY_LIFECYCLE,VettingPackageIdentity.POLICY,com.consense.service.drafting.DraftingService.PackageIdentitySnapshot.POLICY,
             VettingPromptPolicy.metadata(supplement),VettingOutputSchema.contractSha256(),VettingSemanticReview.policyContractSha256(),
             v.isSemanticEnabled(),v.getSemanticTopics(),v.getSemanticContextChars(),v.getSemanticContextExpansionChars(),v.getProjectReferenceComparisons(),v.getProjectReferenceContextChars(),
@@ -535,13 +557,16 @@ public class VettingService {
         readingIdentity.getIdentityEvidence().add(new com.consense.document.OerDocumentIdentity.Evidence("human_text_contract_material","original:"+claimed.getSourceSha256(),
                 "Explicit original-byte-bound textual reading confirmation; source family, edition, quality and legal applicability are not newly established"));
         String parseJobId=DocumentParseProbe.configured(props)?"parse-"+claimed.getSourceSha256().substring(0,12)+"-"+UUID.randomUUID():null;
+        LinkageError linkageFailure=null;
         try (AutoCloseable progress=observeParseProgress(claimed)) {
             DocumentParser.ParsedDocument parsed=parseJobId==null?documentParser.parseOrdinary(claimed.getFileName(),sourceBytes,null,readingIdentity)
                     :documentParser.parseOrdinary(claimed.getFileName(),sourceBytes,parseJobId,String.valueOf(documentId),claimed.getSourceSha256(),null,readingIdentity);
             if("FAILED".equals(parsed.getParseStatus())) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(parsed.getMessage(),1024));}
             else captureParsedSource(outcome,parsed,sourceBytes,true);
         } catch(Exception failure) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(brief(failure),1024));}
+        catch(LinkageError failure) {linkageFailure=failure;outcome.setParseStatus("FAILED");outcome.setParseMessage("解析失败：运行环境缺少必要组件，原件已保留。");}
         VettingFileVO result;
+        try {
         synchronized(lock(projectId)) {
             result=tx().execute(status->{
                 if(sourceDocumentRepository.compareAndSetReviewRole(claimed.getId(),projectId,claimed.getSourceSha256(),claimed.getCategory(),claimed.getFileName(),claimed.getOerIdentityJson(),
@@ -560,6 +585,11 @@ public class VettingService {
             });
         }
         if(parseJobId!=null)DocumentParseProbe.bindPersisted(props,parseJobId,String.valueOf(documentId),claimed.getSourceSha256(),result.getSourceHash(),result.getParseStatus());
+        } catch(RuntimeException persistenceFailure) {
+            if(linkageFailure!=null) {linkageFailure.addSuppressed(persistenceFailure);throw linkageFailure;}
+            throw persistenceFailure;
+        }
+        if(linkageFailure!=null)throw linkageFailure;
         return result;
     }
     private void captureParsedSource(SourceDocument source,DocumentParser.ParsedDocument parsed,byte[] original,boolean confirmedText) {
@@ -635,6 +665,11 @@ public class VettingService {
                 if ("FAILED".equals(p.getParseStatus())) failed++; else parsed++;
                 messages.add(d.getFileName()+" · "+p.getParseStatus()+" · "+p.getMessage());
             } catch(Exception e) { d.setParseStatus("FAILED"); d.setParseMessage(truncate(brief(e),1024)); failed++; messages.add(d.getFileName()+" 解析失败："+brief(e)); }
+            catch(LinkageError failure) {
+                d.setParseStatus("FAILED");d.setParseMessage("解析失败：运行环境缺少必要组件，原件已保留。");
+                try {sourceDocumentRepository.saveAndFlush(d);} catch(RuntimeException persistenceFailure) {failure.addSuppressed(persistenceFailure);}
+                throw failure;
+            }
             sourceDocumentRepository.saveAndFlush(d);
             if(parseJobId!=null)DocumentParseProbe.bindPersisted(props,parseJobId,String.valueOf(d.getId()),rawSha256,VettingCorpus.sourceHash(d),d.getParseStatus());
         } return new UploadResultVO(accepted,parsed,failed,messages);
@@ -673,8 +708,8 @@ public class VettingService {
                     admitted.add(document);
                 }catch(com.consense.service.sources.CanonicalEvidenceException unavailable){
                     if(!missingObservedEvidence(unavailable))throw unavailable;
-                    log.warn("Selected Vetting source {} '{}' has no usable observed evidence and remains unreviewed (parseStatus={})",
-                            document.getId(),document.getFileName(),document.getParseStatus());
+                    log.warn("Selected Vetting source {} has no usable observed evidence and remains unreviewed (parseStatus={})",
+                            document.getId(),document.getParseStatus());
                 }
                 assertMaterialSourcesCurrent(projectId,snapshot);
                 preparedStamps=currentSourceStamps(projectId,snapshot);
@@ -814,8 +849,8 @@ public class VettingService {
                     admitted.add(document);
                 }catch(com.consense.service.sources.CanonicalEvidenceException unavailable){
                     if(!missingObservedEvidence(unavailable))throw unavailable;
-                    log.warn("Selected Vetting source {} '{}' has no usable observed evidence and remains unreviewed (parseStatus={})",
-                            document.getId(),document.getFileName(),document.getParseStatus());
+                    log.warn("Selected Vetting source {} has no usable observed evidence and remains unreviewed (parseStatus={})",
+                            document.getId(),document.getParseStatus());
                 }
                 assertMaterialSourcesCurrent(projectId,snapshot);
             }
@@ -941,12 +976,12 @@ public class VettingService {
             probe.observe("merge_and_complete_transaction_returned",()->VettingServiceProbe.returnedTransaction("result",result,
                     "finalRecords",probe.reference("merge_pending_commit_records"),"boundary","Original REQUIRED TransactionTemplate returned; see commit observation. Referenced records are after original saves/flush, before transaction completion; no extra DAO read."));
             if(partialFailure){originalFailure=new BizException(4101,semanticResult.getModelFailure());
-                probe.originalFailure("service_run_partial_model_failure",originalFailure);log.warn("Review {} retained accepted packet results after model failure: {}",id,semanticResult.getModelFailure());
+                probe.originalFailure("service_run_partial_model_failure",originalFailure);log.warn("Review {} retained accepted packet results after model failure: {}",id,com.consense.common.DiagnosticSummary.of(originalFailure));
                 done.completeExceptionally(originalFailure);outcome="failed_partial";}
             else{done.complete(result);outcome="completed";}
         } catch(Exception e) {
             originalFailure=e;probe.elapsed(stage,stageStarted,stageOverhead,"Original operation failed in this stage; observer wall excluded",false);
-            probe.originalFailure("service_run_failure",e);log.error("审查任务 {} 失败",id,e);failRun(id,brief(e),done,probe);
+            probe.originalFailure("service_run_failure",e);logRunFailure(id,stage,e);failRun(id,brief(e),done,probe);
         } catch(Error e) {
             originalFailure=e;throw e;
         } finally {
@@ -958,6 +993,11 @@ public class VettingService {
                 }
             } finally {completions.remove(id,done);serviceProbes.remove(id,probe);}
         }
+    }
+    static void logRunFailure(String id,String stage,Throwable failure) {
+        log.error("审查任务 {} 在阶段 {} 失败: {}; cause={}",id,stage,
+                com.consense.common.DiagnosticSummary.of(failure),
+                com.consense.common.DiagnosticSummary.of(failure==null?null:failure.getCause()));
     }
     private List<Map<String,Object>> candidateOrder(List<Candidate> candidates,IdentityHashMap<Candidate,List<Integer>> originalOrdinals){
         List<Map<String,Object>> out=new ArrayList<>();for(int i=0;i<candidates.size();i++){Candidate c=candidates.get(i);out.add(VettingServiceProbe.map("order",i,"originalOrdinals",originalOrdinals.get(c),"candidate",c));}return out;
@@ -1204,7 +1244,7 @@ public class VettingService {
             if(canonical)notes.add("片段与字符统计以已采用 canonical 观察为分母；未采用区域及原件完整性未确认。");
             else if(usable) notes.add(rulesScanned?(contractSource(d)?"规则已扫描全部可解析招标合同正文。":
                     "standard".equals(VettingCorpus.sourceRole(d))?"标准文件仅作参考对照，规则未当作实际合同执行。":"项目事实或文件目录不作为有效合同条款执行规则扫描。" ):"规则和语义审查尚未完成。");
-            if(usable && rulesScanned && checked.size()<parts.size()) notes.add("语义仅覆盖 "+checked.size()+"/"+parts.size()+" 片段，其他片段未进入成功的模型调用。");
+            if(usable && rulesScanned && checked.size()<parts.size()) notes.add("语义仅覆盖 "+checked.size()+"/"+parts.size()+" 片段；其他片段未计入覆盖，可能未提交或结果不足以确认。");
             if(usable && !checked.isEmpty()) processed++;
             documents.add(new DocumentCoverageVO(String.valueOf(d.getId()),fileKey(d),d.getFileName(),d.getParseStatus(),chars,covered,parts.size(),checked.size(),notes));
         } if(unreviewed>0)warnings.add(unreviewed+" selected source file(s) had no usable evidence and were not reviewed.");
@@ -1358,12 +1398,12 @@ public class VettingService {
                                 if(count<0)break;if(count>0)header.append(chars,0,count);
                             }
                             display.coverageHeader=header.toString();
-                        } catch(IOException | SQLException error) {log.warn("Source file coverage summary unavailable for document {}",display.source.getId(),error);}
+                        } catch(IOException | SQLException error) {log.warn("Source file coverage summary unavailable for document {}: {}",display.source.getId(),com.consense.common.DiagnosticSummary.of(error));}
                         finally {clob.free();}
                     }
                 }
             }
-        } catch(SQLException error) {log.warn("Source file coverage summaries unavailable for project {}",projectId,error);}
+        } catch(SQLException error) {log.warn("Source file coverage summaries unavailable for project {}: {}",projectId,com.consense.common.DiagnosticSummary.of(error));}
     }
     private boolean reviewable(SourceDocument d) { return ("PARSED".equals(d.getParseStatus())||"PARTIAL".equals(d.getParseStatus())) && !JsonUtils.isBlankText(d.getTextContent()) && !excluded(d); }
     private static boolean missingObservedEvidence(com.consense.service.sources.CanonicalEvidenceException failure) {
@@ -1509,7 +1549,7 @@ public class VettingService {
                 ||JsonUtils.isBlankText(expectedSourceRole)||!expectedSourceRole.equals(VettingCorpus.sourceRole(d)))throw new BizException(4104,"原件字节或角色与证据版本不一致，不能回取当前替换文件。");
         try {
             Path root=Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
-            Path path=Paths.get(d.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            Path path=StorageService.resolveStoredPath(root,d.getStoragePath());
             if(!path.startsWith(root)||!Files.isRegularFile(path)) throw new BizException(4102,"审查原始文件不可用");
             byte[] bytes=Files.readAllBytes(path);
             if(!expectedOriginalSourceSha256.equals(OerSourceMetadata.originalSha256(bytes)))throw new BizException(4104,"原件字节与证据版本不一致，不能回取当前替换文件。");
@@ -1576,7 +1616,7 @@ public class VettingService {
         SourceDocument before=readerOriginalSource(projectId,documentId,originalSha,routingSha,businessSha);
         try {
             Path root=Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
-            Path path=Paths.get(before.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            Path path=StorageService.resolveStoredPath(root,before.getStoragePath());
             if(!path.startsWith(root)||!Files.isRegularFile(path))throw new BizException(4104,"登记原件不可用。");
             byte[] bytes=Files.readAllBytes(path);
             if(!originalSha.equals(OerSourceMetadata.originalSha256(bytes)))throw new BizException(4104,"原件字节已变化，请刷新来源后核对。");
@@ -1594,7 +1634,7 @@ public class VettingService {
         SourceDocument before=registeredOriginalSource(projectId,documentId,originalSha,routingSha);
         try {
             Path root=Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
-            Path path=Paths.get(before.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            Path path=StorageService.resolveStoredPath(root,before.getStoragePath());
             if(!path.startsWith(root)||!Files.isRegularFile(path))throw new BizException(4104,"The registered original is unavailable.");
             byte[] bytes=Files.readAllBytes(path);
             if(!originalSha.equals(OerSourceMetadata.originalSha256(bytes)))throw new BizException(4104,"The registered original changed.");
@@ -1692,7 +1732,7 @@ public class VettingService {
     private void assertSavedReaderOriginal(SourceDocument source,String originalSha){
         if(!storageService.matchesStoredBytes(source.getStoragePath(),originalSha))throw new BizException(4104,"The registered original is unavailable or has changed.");
         try{
-            Path original=Paths.get(source.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            Path original=StorageService.resolveStoredPath(Paths.get(props.getStorageRoot()),source.getStoragePath());
             if(!original.startsWith(Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath()))throw new BizException(4104,"The registered original is unavailable.");
             try(java.io.InputStream input=Files.newInputStream(original)){assertReaderOriginalIdentity(source,input.readNBytes(64));}
         }catch(java.io.IOException unavailable){throw new BizException(4104,"The registered original is unavailable.");}
@@ -2034,16 +2074,23 @@ public class VettingService {
         List<com.fasterxml.jackson.databind.JsonNode> references=new ArrayList<>();
         if(checkpoints!=null)for(ReliablePacketVO saved:checkpoints.reliable(run.getId()))references.addAll(saved.getPacket().getFixedBaselineEvidence());
         for(FindingVO finding:findings)for(FindingEvidence evidence:finding.getEvidence())if(evidence.getFixedBaselineEvidence()!=null)references.add(evidence.getFixedBaselineEvidence());
-        Set<String> verified=new HashSet<>();for(com.fasterxml.jackson.databind.JsonNode saved:references){
-            String identity=JsonUtils.write(saved);if(!verified.add(identity))continue;
-            try{if(fixedBaseline==null)throw new IllegalStateException("fixed reference backend unavailable");
-                com.fasterxml.jackson.databind.JsonNode current=fixedBaseline.evidence(fixedBaseline.readOnlyHitById(saved.path("parentId").asText())).pointer();
+        if(references.isEmpty())return;
+        try{
+            if(fixedBaseline==null)throw new IllegalStateException("fixed reference backend unavailable");
+            Set<String> ids=new LinkedHashSet<>();for(com.fasterxml.jackson.databind.JsonNode saved:references)ids.add(saved.path("parentId").asText());
+            List<com.consense.vector.VectorStore.SearchHit> hits=fixedBaseline.readOnlyHitsForProject(run.getProjectId(),ids);
+            Map<String,com.fasterxml.jackson.databind.JsonNode> current=new HashMap<>();
+            for(com.consense.vector.VectorStore.SearchHit hit:hits)current.put(hit.getId(),fixedBaseline.evidence(hit).pointer());
+            for(com.fasterxml.jackson.databind.JsonNode saved:references){
+                com.fasterxml.jackson.databind.JsonNode pointer=current.get(saved.path("parentId").asText());
+                if(pointer==null)throw new IllegalStateException("fixed reference missing");
                 for(String key:Arrays.asList("evidenceBackend","parentId","manifestSha256","baselineVersion","sourceFamily","sourceRole","originalSourceSha256","originalPageNos","pageNo"))
-                    if(!Objects.equals(saved.get(key),current.get(key)))throw new IllegalStateException("fixed reference identity changed");
-            }catch(RuntimeException stale){
-                log.warn("Fixed reference export verification failed for run {} and parent {}",run.getId(),saved.path("parentId").asText(),stale);
-                throw new BizException(4104,"固定开发基线证据已变化或不可用，不能导出旧引用作为当前报告；快照仍保留。",null,stale);
+                    if(!Objects.equals(saved.get(key),pointer.get(key)))throw new IllegalStateException("fixed reference identity changed");
             }
+            fixedBaseline.currentReadGuardForProject(run.getProjectId(),hits,null).run();
+        }catch(RuntimeException stale){
+            log.warn("Fixed reference export verification failed for run {}: {}",run.getId(),com.consense.common.DiagnosticSummary.of(stale));
+            throw new BizException(4104,"固定开发基线证据已变化或不可用，不能导出旧引用作为当前报告；快照仍保留。",null,stale);
         }
     }
     private List<VettingFinding> activeFindings(String id) { return findingRepository.findByProjectIdOrderByCodeAsc(id).stream().filter(f -> !Boolean.FALSE.equals(f.getActive())).collect(Collectors.toList()); }

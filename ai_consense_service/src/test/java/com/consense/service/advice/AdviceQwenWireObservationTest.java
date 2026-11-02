@@ -31,7 +31,7 @@ class AdviceQwenWireObservationTest {
     private static final String SECRET="AUTHORED-QWEN-SECRET",SOURCE=VettingCorpus.hash("AUTHORED SOURCE");
     private static final String USER="完整原题☃\nDeclared ownership for this alias (source observations): {\"clauseId\":null,\"ownerStatus\":\"unknown\"}\nComplete source with  two spaces.\n";
 
-    @Test void compactDrawingUsesTheSealedQwenBudgetAndPublishesAnExplicitUnverifiedDraft() throws Exception {
+    @Test void compactDrawingUsesASealedDirectQwenRequestAndPublishesAnExplicitUnverifiedDraft() throws Exception {
         Fixture f=new Fixture(Files.createDirectory(root.resolve("compact-drawing")),true,true);
         f.answers.add("{\"tool\":\"draw_flowchart\",\"nodes\":[{\"id\":\"start\",\"label\":\"Written request\"},{\"id\":\"end\",\"label\":\"Decision issued\"}],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"label\":\"Within 14 days of receipt\"}],\"citations\":[\"[1]\"]}");
         AdviceService.AnswerRecord answer;
@@ -42,10 +42,11 @@ class AdviceQwenWireObservationTest {
         }
         assertEquals(1,f.sections.size());assertTrue(f.sections.get(0).contains("```mermaid\nflowchart TD"));
         assertTrue(f.sections.get(0).contains("not independently verified"));assertTrue(f.sections.get(0).contains("Sources consulted (not independent validation): [1]"));
-        assertEquals(2,f.bodies.size());assertFalse(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
+        assertEquals(1,f.bodies.size());assertFalse(JsonUtils.parse(f.bodies.get(0)).path("stream").asBoolean());
+        assertEquals("not_performed",json(attempts(f.directory).get(0),"request-receipt.json").path("inputTokenPreflight").asText());
         VettingInputBudget.Input input=boundInput(attempts(f.directory).get(0));
         assertTrue(input.getSchema().path("properties").has("tool"));assertFalse(input.getSchema().path("properties").has("sections"));
-        verify(f.ledger).reserve(anyString(),anyString(),eq("draft-preflight-0"),anyString(),eq(false));
+        verify(f.ledger,never()).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
         verify(f.ledger).reserve(anyString(),anyString(),eq("draft-answer-0"),anyString(),eq(true));
     }
 
@@ -58,14 +59,14 @@ class AdviceQwenWireObservationTest {
             assertNotNull(answer);assertFalse(answer.isGrounded());assertTrue(f.sections.isEmpty());
             ReflectionTestUtils.invokeMethod(f.publication,"publishValidated");
         }
-        assertEquals(4,f.bodies.size());assertEquals(1,f.sections.size());assertFalse(f.sections.get(0).contains("[99]"));
-        String repair=JsonUtils.parse(f.bodies.get(3)).path("messages").get(1).path("content").asText();
+        assertEquals(2,f.bodies.size());assertEquals(1,f.sections.size());assertFalse(f.sections.get(0).contains("[99]"));
+        String repair=JsonUtils.parse(f.bodies.get(1)).path("messages").get(1).path("content").asText();
         assertTrue(repair.contains("Correct the draw_flowchart JSON"));assertFalse(repair.contains("full complete answer"));
     }
 
     @Test void drawingStillRejectsSourceChangeAfterGenerationBeforePublication() throws Exception {
         Fixture f=new Fixture(Files.createDirectory(root.resolve("drawing-stale-source")),false,false);
-        Runnable guard=()->{if(f.bodies.size()>=2)throw new com.consense.common.BizException(4204,"AUTHORED source changed");};
+        Runnable guard=()->{if(f.bodies.size()>=1)throw new com.consense.common.BizException(4204,"AUTHORED source changed");};
         try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:drawing-stale",guard)){
             com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->ReflectionTestUtils.invokeMethod(f.service,"completeAdvice",AdviceFlowchartTool.INSTRUCTION,USER,null,null,f.operation,SOURCE,guard,f.publication,"Draw a flowchart","draft",false));
             assertEquals(4204,rejected.getCode());assertTrue(f.sections.isEmpty());assertNull(ReflectionTestUtils.getField(f.publication,"draftFlowchart"));
@@ -82,9 +83,8 @@ class AdviceQwenWireObservationTest {
             ReflectionTestUtils.invokeMethod(f.publication,"publishValidated");
             assertFalse(f.sections.isEmpty());
         }
-        verify(f.ledger).reserve(anyString(),anyString(),eq("draft-preflight-0"),anyString(),eq(false));
         verify(f.ledger).reserve(anyString(),anyString(),eq("draft-answer-0"),anyString(),eq(true));
-        verify(f.ledger).reserve(anyString(),anyString(),eq("supplement-preflight-0"),anyString(),eq(false));
+        verify(f.ledger,never()).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
         verify(f.ledger).reserve(anyString(),anyString(),eq("supplement-answer-0"),anyString(),eq(true));
     }
     @Test void malformedCompleteDraftKeepsOutputInvalidAndPublishesNoSections() throws Exception {
@@ -96,23 +96,91 @@ class AdviceQwenWireObservationTest {
         }
     }
 
-    @Test void actualSealedEntitiesExistBeforeDispatchAndExactlyMatchBothLedgerRequestHashes() throws Exception {
+    @Test void actualSealedEntitiesShowOnlyGenerationWasDispatched() throws Exception {
         for(boolean streaming:Arrays.asList(false,true)){
             Fixture f=new Fixture(Files.createDirectory(root.resolve("enabled-"+streaming)),true,streaming);f.complete("AUTHORED system",USER);
-            assertEquals(2,f.bodies.size());Path attempt=attempts(f.directory).get(0);JsonNode receipt=json(attempt,"request-receipt.json");
+            assertEquals(1,f.bodies.size());Path attempt=attempts(f.directory).get(0);JsonNode receipt=json(attempt,"request-receipt.json");
             VettingInputBudget.Input input=boundInput(attempt);assertTrue(VettingInputBudget.validBinding(input));
             assertEquals(USER,input.getMessages().get(1).getContent());assertEquals(USER,json(attempt,"generation-request.utf8.json").path("messages").get(1).path("content").asText());
-            assertEquals(f.bodies,Arrays.asList(text(attempt,"preflight-request.utf8.json"),text(attempt,"generation-request.utf8.json")));
+            assertEquals(f.bodies,Collections.singletonList(text(attempt,"generation-request.utf8.json")));
+            assertEquals("not_performed",receipt.path("inputTokenPreflight").asText());
+            assertFalse(receipt.path("preflightRequestDispatched").asBoolean(true));assertFalse(receipt.path("inputTokensObserved").asBoolean(true));
             assertEquals(1,json(attempt,"preflight-request.utf8.json").path("max_tokens").asInt());assertFalse(json(attempt,"preflight-request.utf8.json").path("stream").asBoolean());
             assertEquals(streaming,json(attempt,"generation-request.utf8.json").path("stream").asBoolean());assertEquals(16384,json(attempt,"generation-request.utf8.json").path("max_tokens").asInt());
-            ArgumentCaptor<Map> receipts=ArgumentCaptor.forClass(Map.class);verify(f.ledger,times(2)).complete(any(),receipts.capture());
-            assertEquals(receipts.getAllValues().get(0).get("requestSha256"),receipt.path("preflightRequest").path("sha256").asText());
-            assertEquals(receipts.getAllValues().get(1).get("requestSha256"),receipt.path("generationRequest").path("sha256").asText());
-            ArgumentCaptor<String> bindings=ArgumentCaptor.forClass(String.class);verify(f.ledger,times(2)).reserve(anyString(),anyString(),anyString(),bindings.capture(),anyBoolean());
-            assertEquals(Arrays.asList(input.getSerializedInputSha256(),input.getSerializedInputSha256()),bindings.getAllValues());assertEquals(input.getSerializedInputSha256(),receipt.path("serializedInputSha256").asText());
+            ArgumentCaptor<Map> receipts=ArgumentCaptor.forClass(Map.class);verify(f.ledger).complete(any(),receipts.capture());
+            assertEquals(receipts.getValue().get("requestSha256"),receipt.path("generationRequest").path("sha256").asText());
+            ArgumentCaptor<String> bindings=ArgumentCaptor.forClass(String.class);verify(f.ledger).reserve(anyString(),anyString(),anyString(),bindings.capture(),eq(true));
+            assertEquals(input.getSerializedInputSha256(),bindings.getValue());assertEquals(input.getSerializedInputSha256(),receipt.path("serializedInputSha256").asText());
             for(String[] entity:new String[][]{{"boundInput","bound-input.utf8.json"},{"preflightRequest","preflight-request.utf8.json"},{"generationRequest","generation-request.utf8.json"}}){byte[] bytes=Files.readAllBytes(attempt.resolve(entity[1]));assertEquals(AdviceWireObservation.sha(bytes),receipt.path(entity[0]).path("sha256").asText());assertEquals(bytes.length,receipt.path(entity[0]).path("utf8Bytes").asInt());}
             assertEquals(SOURCE,receipt.path("sourceSnapshotSha256").asText());assertEquals(0,receipt.path("attempt").asInt());assertFalse(receipt.path("dispatchObservedByThisRecorder").asBoolean());assertTrue(receipt.path("httpEntityScope").asText().contains("TCP/TLS/framing bytes are unobserved"));
         }
+    }
+
+    @Test void validatedSectionsReachTheCallerBeforeProviderCompletion() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("incremental-qwen")),false,true);
+        String answer=f.contract();
+        int split=answer.indexOf("\"content\":\"Supported wording");
+        assertTrue(split>0,"The fixture must contain separate limits and analysis sections");
+        doAnswer(call->{
+            String body=call.getArgument(1);f.beforeDispatch(body);
+            Consumer<String> events=call.getArgument(6);
+            events.accept(delta(answer.substring(0,split),null));
+            assertEquals(1,f.sections.size(),"The validated limits section arrives before the remaining answer");
+            events.accept(delta(answer.substring(split)+"                        ",null));
+            assertEquals(2,f.sections.size(),"Both validated sections arrive before provider completion");
+            events.accept(delta("","stop"));events.accept("[DONE]");
+            return "authored stream receipt";
+        }).when(f.http).postJsonStream(anyString(),anyString(),anyLong(),anyString(),anyInt(),eq(true),any(),any());
+        f.complete("AUTHORED system",USER);
+        assertTrue(JsonUtils.parse(f.bodies.get(0)).path("stream").asBoolean());
+        assertEquals(2,f.sections.size());
+    }
+
+    @Test void provisionalDraftCanBeFullyRepairedWithoutAppendingASecondAnswer() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("provisional-draft-repair")),false,true);
+        ObjectNode invalid=(ObjectNode)JsonUtils.parse(f.contract());
+        invalid.put("basisScope","reference_only");
+        f.answers.add(JsonUtils.write(invalid));
+        f.answers.add(f.contract().replace("Supported wording", "Repaired wording"));
+        AdviceService.AnswerRecord repaired;
+        try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:provisional-draft",()->{})){
+            repaired=ReflectionTestUtils.invokeMethod(f.service,"completeAdvice","AUTHORED system",USER,null,null,f.operation,SOURCE,(Runnable)()->{},f.publication,"Explain the uploaded clause","draft",true);
+        }
+        assertNotNull(repaired);
+        assertTrue((Boolean)ReflectionTestUtils.getField(f.publication,"published"));
+        assertEquals(2,f.sections.size(),"Only the provisional first attempt is delivered as sections");
+        assertTrue(f.sections.get(1).contains("Supported wording"));
+        assertTrue(JsonUtils.write(repaired).contains("Repaired wording"));
+        assertTrue(JsonUtils.parse(f.bodies.get(0)).path("stream").asBoolean());
+        assertFalse(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
+        assertTrue(JsonUtils.parse(f.bodies.get(1)).path("messages").get(1).path("content").asText().contains("full complete answer"));
+    }
+
+    @Test void actualHttpContextRejectionFailsWithoutAnswerOrPreflight() throws Exception {
+        com.sun.net.httpserver.HttpServer server=com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<JsonNode> input=new java.util.concurrent.atomic.AtomicReference<>();
+        server.createContext("/v1/chat/completions",exchange->{
+            calls.incrementAndGet();input.set(JsonUtils.parse(new String(exchange.getRequestBody().readAllBytes(),StandardCharsets.UTF_8)));
+            byte[] body="{\"error\":{\"message\":\"maximum context length exceeded\"}}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(400,body.length);exchange.getResponseBody().write(body);exchange.close();
+        });
+        server.start();
+        try {
+            Fixture f=new Fixture(Files.createDirectory(root.resolve("context-http")),false,false,"qwen",false,true,"http://127.0.0.1:"+server.getAddress().getPort());
+            assertThrows(com.consense.common.BizException.class,()->f.complete("AUTHORED system",USER));
+            assertEquals(1,calls.get());assertEquals(16384,input.get().path("max_tokens").asInt());
+            assertTrue(f.sections.isEmpty());verify(f.ledger).unknown(any(),anyMap());verify(f.ledger,never()).complete(any(),anyMap());
+            verify(f.ledger,never()).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
+        } finally {server.stop(0);}
+    }
+
+    private static String delta(String content,String finishReason) {
+        ObjectNode event=JsonUtils.mapper().createObjectNode();event.put("model","qwen3.8-27b");
+        ObjectNode choice=event.putArray("choices").addObject();choice.put("index",0);
+        choice.putObject("delta").put("content",content);
+        if(finishReason==null)choice.putNull("finish_reason");else choice.put("finish_reason",finishReason);
+        return JsonUtils.write(event);
     }
 
     @Test void disabledObservationWritesNothingAndLeavesTheSameQwenWireEntities() throws Exception {
@@ -124,9 +192,9 @@ class AdviceQwenWireObservationTest {
     @Test void streamedAnswerRepairUsesACompleteNonstreamingQwenRequest() throws Exception {
         Fixture f=new Fixture(Files.createDirectory(root.resolve("full-repair")),true,true);
         f.answers.add("{\"basisScope\":}");f.answers.add(f.contract());f.complete("AUTHORED system",USER);
-        assertEquals(4,f.bodies.size());assertTrue(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
-        assertFalse(JsonUtils.parse(f.bodies.get(3)).path("stream").asBoolean());
-        assertTrue(JsonUtils.parse(f.bodies.get(3)).path("messages").get(1).path("content").asText().contains("full complete answer"));
+        assertEquals(2,f.bodies.size());assertTrue(JsonUtils.parse(f.bodies.get(0)).path("stream").asBoolean());
+        assertFalse(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
+        assertTrue(JsonUtils.parse(f.bodies.get(1)).path("messages").get(1).path("content").asText().contains("full complete answer"));
         assertEquals(2,attempts(f.directory).size());
     }
     @Test void lateGlobalBasisRejectionCannotResubmitAnAlreadyPublishedPrefix() throws Exception{
@@ -134,8 +202,8 @@ class AdviceQwenWireObservationTest {
         ObjectNode first=(ObjectNode)JsonUtils.parse(f.contract());first.put("basisScope","reference_only");f.answers.add(JsonUtils.write(first));f.answers.add(f.contract());
         com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->f.complete("AUTHORED system",USER));
         assertEquals(4205,rejected.getCode());assertTrue(rejected.getMessage().contains("application-owned accepted section ID"));assertFalse(f.sections.isEmpty(),"The earlier validated prefix remains visible; no completed answer may be returned");
-        assertEquals(4,f.bodies.size(),"Two admitted attempts use exactly two preflights and two answers");assertEquals(2,attempts(f.directory).size());assertTrue(f.answers.isEmpty());
-        assertTrue(JsonUtils.parse(f.bodies.get(3)).path("stream").asBoolean(),"A published prefix retains its existing streaming repair and immutable-ID guard");
+        assertEquals(2,f.bodies.size(),"Two admitted attempts use exactly two answers and no preflight");assertEquals(2,attempts(f.directory).size());assertTrue(f.answers.isEmpty());
+        assertTrue(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean(),"A published prefix retains its existing streaming repair and immutable-ID guard");
     }
 
     @Test void knownCredentialReflectionIsRejectedBeforeAnyEntityOrPaidDispatch() throws Exception {
@@ -176,12 +244,12 @@ class AdviceQwenWireObservationTest {
             assertEquals("qwen_observation_credential_differs",rejected.getMessage());assertTrue(attempts(mismatch.directory).isEmpty());assertTrue(mismatch.bodies.isEmpty());
             verifyNoInteractions(mismatch.http);verify(mismatch.ledger,never()).reserve(anyString(),anyString(),anyString(),anyString(),anyBoolean());
             Fixture same=new Fixture(Files.createDirectory(root.resolve("copied-same-"+profile)),true,false,profile,true,true);
-            same.complete("safe",USER);assertEquals(2,same.bodies.size());assertEquals(1,attempts(same.directory).size());
-            assertEquals(Arrays.asList("Bearer "+SECRET,"Bearer "+SECRET),same.authorizations);
+            same.complete("safe",USER);assertEquals(1,same.bodies.size());assertEquals(1,attempts(same.directory).size());
+            assertEquals(Collections.singletonList("Bearer "+SECRET),same.authorizations);
             Fixture disabled=new Fixture(Files.createDirectory(root.resolve("copied-disabled-"+profile)),false,false,profile,true,false);
             LlmProfiles.configuration(disabled.props,profile).setApiKey("AUTHORED-LIVE-CREDENTIAL-B");
-            disabled.complete("safe",USER+SECRET);assertEquals(2,disabled.bodies.size());assertTrue(attempts(disabled.directory).isEmpty());
-            assertEquals(Arrays.asList("Bearer "+SECRET,"Bearer "+SECRET),disabled.authorizations);
+            disabled.complete("safe",USER+SECRET);assertEquals(1,disabled.bodies.size());assertTrue(attempts(disabled.directory).isEmpty());
+            assertEquals(Collections.singletonList("Bearer "+SECRET),disabled.authorizations);
         }
     }
 
@@ -198,10 +266,15 @@ class AdviceQwenWireObservationTest {
 
     private final class Fixture {
         final Path directory;final boolean enabled,streaming,requireSavedBeforeDispatch;final ConsenseProperties props=new ConsenseProperties();final AdviceModelProperties settings=new AdviceModelProperties();
-        final HttpSupport http=mock(HttpSupport.class);final QwenGenerationLedger ledger=mock(QwenGenerationLedger.class);final List<String> bodies=new ArrayList<>(),authorizations=new ArrayList<>();final Queue<String> answers=new ArrayDeque<>();
+        final HttpSupport http;final QwenGenerationLedger ledger=mock(QwenGenerationLedger.class);final List<String> bodies=new ArrayList<>(),authorizations=new ArrayList<>();final Queue<String> answers=new ArrayDeque<>();
         final QwenChatUsagePreflight.Operation operation;final AdviceService service;final Object publication;final List<String> sections=new ArrayList<>();
         Fixture(Path path,boolean observe,boolean stream)throws Exception{this(path,observe,stream,"qwen",false,true);}
         Fixture(Path path,boolean observe,boolean stream,String profile,boolean productionCopy,boolean requireSaved)throws Exception{
+            this(path,observe,stream,profile,productionCopy,requireSaved,null);
+        }
+        Fixture(Path path,boolean observe,boolean stream,String profile,boolean productionCopy,boolean requireSaved,String endpoint)throws Exception{
+            http=endpoint==null?mock(HttpSupport.class):new HttpSupport();
+            if(endpoint!=null)LlmProfiles.configuration(props,profile).setBaseUrl(endpoint);
             directory=path.toAbsolutePath();enabled=observe;streaming=stream;requireSavedBeforeDispatch=requireSaved;if(observe)settings.setWireObservationRoot(directory.toString());
             LlmProfiles.configuration(props,profile).setEnabled(true);LlmProfiles.configuration(props,profile).setApiKey(SECRET);
             LlmClient adapter=productionCopy?("qwen".equals(profile)?new AiConfig().qwenChatClient(props,http):new AiConfig().qwenFlashChatClient(props,http)):new QwenChatClient(LlmProfiles.configuration(props,profile),http);
@@ -212,10 +285,12 @@ class AdviceQwenWireObservationTest {
             AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return streaming;}public void section(String content,List<String> aliases,List<CitationVO> sources){sections.add(content);}};
             CitationVO source=new CitationVO("Authored source",null,"body/authored","Keep a record.",1,"[1]","1",SOURCE,"tender",true);
             publication=pc.newInstance(service,Collections.singletonList(source),false,progress,(Runnable)()->{},qc.newInstance("Explain the uploaded clause",Collections.emptyList()));
+            if(endpoint==null) {
             doAnswer(call->{String body=call.getArgument(1);authorizations.add(call.getArgument(3));beforeDispatch(body);return envelope(JsonUtils.parse(body).path("max_tokens").asInt()==1?"{":nextAnswer());})
                     .when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
             doAnswer(call->{String body=call.getArgument(1);authorizations.add(call.getArgument(3));beforeDispatch(body);Consumer<String> events=call.getArgument(6);String event="{\"model\":\"qwen3.8-27b\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":"+JsonUtils.write(nextAnswer())+"},\"finish_reason\":\"stop\"}]}";events.accept(event);events.accept("[DONE]");return "data: "+event+"\n\ndata: [DONE]\n\n";})
                     .when(http).postJsonStream(anyString(),anyString(),anyLong(),anyString(),anyInt(),eq(true),any(),any());
+            }
         }
         String nextAnswer(){return answers.isEmpty()?contract():answers.remove();}
         void beforeDispatch(String body)throws Exception{if(enabled&&requireSavedBeforeDispatch){List<Path> saved=attempts(directory);assertFalse(saved.isEmpty(),"All sealed entities must be saved before the first paid dispatch");for(Path attempt:saved)for(String name:Arrays.asList("bound-input.utf8.json","preflight-request.utf8.json","generation-request.utf8.json","request-receipt.json"))assertTrue(Files.isRegularFile(attempt.resolve(name)));}bodies.add(body);}

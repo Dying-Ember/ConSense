@@ -29,6 +29,12 @@
 
 代码、网页的逐文件数来自本次私有清单；模型、数据库、原件及索引数分别来自 `.local/container-rehearsal-20261029/dual-ocr-identity/{receipt,marker-supplement}.json`、`.local/oer/model-publications/` manifest，以及 `.local/offline-ticket01-20261029/evidence/{summary,source-copy-summary,source-hash-check.private,source-preservation}.json`、`index-copy-candidate01/phase-a-receipt.private.json` 和 `phase-b/` 冷读回执。清单没有把 manifest 的登记等同于新一轮大资产核验。
 
+## 2026-10-29 索引导入目标更正
+
+原私有登记中的 5 条 `index-sqlite` 工作目标与对应项目 metadata 的工作目标重名；2 条 `qdrant-meta` 未登记工作目标。保留原登记及其原 SHA，不覆盖历史证据；补充的私有更正清单 `.local/container-rehearsal-20261029/asset-register-index-target-amendment.private.json` 绑定原登记 SHA，逐项列明原目标、新目标、基线及预期 SHA。更正清单 SHA-256 为 `73d6d6751b4aacbc3429804327d9671264e0c586b810c189eaf9fafbb4cf0ebe`。SQLite 工作目标改为 `instances/local01/index-import/<module>/<collection>/storage.sqlite`，两模块 Qdrant metadata 分别使用各模块目录下的 `qdrant-meta.json`；项目 metadata 目标不变。
+
+该更正只解决目标登记冲突，不表示文件已复制、Qdrant Server 已迁移或历史索引已通过复用验证。实际复制须按受控任务核验源、目标及两份清单，禁止覆盖既有文件。
+
 ## 受保护现有服务和范围
 
 | 现有职责 | 已核保护范围 | 本轮允许取用／排除及原因 |

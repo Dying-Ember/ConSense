@@ -7,7 +7,7 @@ import static org.mockito.Mockito.*;
 final class EnglishFileOutputNoopFixture {
     private EnglishFileOutputNoopFixture() { }
     static void configure(EnglishFileOutput output){
-        when(output.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{
+        when(output.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{
             ((Runnable)call.getArgument(2)).run();return ((byte[])call.getArgument(0)).clone();
         });
         when(output.text(anyString(),anyString(),any(Runnable.class))).thenAnswer(call->{

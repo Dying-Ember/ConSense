@@ -1550,7 +1550,13 @@ public final class DocxTemplateEditor {
         PackageModel model=new PackageModel();long total=0;byte[] buffer=new byte[8192];
         try(ZipInputStream in=new ZipInputStream(new ByteArrayInputStream(bytes))) {
             ZipEntry entry;
-            while((entry=in.getNextEntry())!=null) {
+            while(true) {
+                try {entry=in.getNextEntry();}
+                catch(IllegalArgumentException invalidName) {
+                    if(invalidName.getCause() instanceof java.nio.charset.MalformedInputException)throw error("INVALID_DOCX_PACKAGE","source");
+                    throw invalidName;
+                }
+                if(entry==null)break;
                 String name=entry.getName();
                 if(model.entries.size()>=COUNT_LIMIT||name.startsWith("/")||name.contains("\\")||name.contains("../")||name.contains(":"))throw error("UNSAFE_ZIP_ENTRY",name);
                 if(model.entries.containsKey(name))throw error("DUPLICATE_ZIP_ENTRY",name);
@@ -1563,6 +1569,10 @@ public final class DocxTemplateEditor {
                 }
                 model.entries.put(name,out.toByteArray());
             }
+        } catch(EditException e){throw e;}
+        catch(ZipException|EOFException invalid){throw error("INVALID_DOCX_PACKAGE","source");}
+        catch(IOException unavailable){throw new IllegalStateException("DOCX_INSPECTION_UNAVAILABLE",unavailable);}
+        try {
             if(!model.entries.containsKey(MAIN)||!model.entries.containsKey("[Content_Types].xml"))throw error("INVALID_DOCX_PACKAGE","source");
             model.xmlParts.put(CONTENT_TYPES,validateContentType(model.entries.get(CONTENT_TYPES)));
             List<Paragraph> paragraphs=new ArrayList<>(),all=new ArrayList<>();Map<String,NodeAnchor> anchors=new LinkedHashMap<>();List<Feature> features=new ArrayList<>();
@@ -1588,7 +1598,12 @@ public final class DocxTemplateEditor {
             }
             Map<String,String> hashes=new LinkedHashMap<>();for(Map.Entry<String,byte[]> e:model.entries.entrySet())hashes.put(e.getKey(),hash(e.getValue()));
             model.index=new TemplateIndex(hash(bytes),paragraphs,hashes,anchors,features,all);return model;
-        } catch(EditException e){throw e;} catch(Exception e){throw error("INVALID_DOCX_PACKAGE","source");}
+        } catch(EditException e){throw e;}
+        catch(org.xml.sax.SAXParseException invalid){
+            if(invalid.getCause()!=null||invalid.getException()!=null)throw new IllegalStateException("DOCX_INSPECTION_UNAVAILABLE",invalid);
+            throw error("INVALID_DOCX_PACKAGE","source");
+        }
+        catch(Exception unavailable){throw new IllegalStateException("DOCX_INSPECTION_UNAVAILABLE",unavailable);}
     }
     private static Document validateContentType(byte[] bytes) throws Exception {
         Document document=parse(bytes);String namespace="http://schemas.openxmlformats.org/package/2006/content-types";

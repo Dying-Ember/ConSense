@@ -96,12 +96,46 @@ class DraftCurrentDefinitionReviewViewTest {
         Fixture f=new Fixture();Map<String,Object> graph=DraftFixedBaseline.restore(fixedBlank()),root=fixedField(graph,"billNos");String rootId=text(root.get("id"));
         assertTrue(DraftFixedBaseline.installed(graph));assertTrue(DraftFixedBaseline.exactSource(graph,root));String before=JsonUtils.write(graph);
         DraftTemplateGraphRevision rev=f.install("probe-fixed",graph,"DRAFT","[]");Map<String,Object> review=map(f.service.revision(Fixture.PROJECT,rev.getId()).get("definitionGraphReview"));
+        assertEquals(true,review.get("fixedCandidateExtractionAllowed"));assertEquals(false,review.get("valid"));assertTrue(list(review.get("confirmedFieldIds")).isEmpty());
         assertTrue(list(review.get("fixedCandidateFieldIds")).contains(rootId));assertTrue(list(review.get("definitionGroupReadyFieldIds")).contains(rootId));assertFalse(list(review.get("currentDefinitionReviewFieldIds")).contains(rootId));
         Map<String,Object> direct=DraftFixedBaseline.confirmGroup(graph,Collections.singletonList(rootId),"Checked synthetic fixed group");
         assertEquals(true,map(fixedField(direct,"billNos.number").get("definitionReview")).get("confirmed"));assertEquals(true,map(fixedField(direct,"billNos.description").get("definitionReview")).get("confirmed"));
         Map<String,Object> confirmed=f.service.confirmDefinitions(Fixture.PROJECT,rev.getId(),null,"Checked synthetic fixed group",true,Collections.singletonList(rootId));
         assertTrue(list(map(confirmed.get("definitionGraphReview")).get("confirmedFieldIds")).contains(rootId));assertEquals(before,rev.getGraphJson());
         System.out.println("FIXED_PROBE complete standard children ready=true and confirmDefinitions=success");
+    }
+    @Test void fixedDraftCanReachCandidateExtractionWithoutPretendingHumanConfirmation(){
+        Fixture f=new Fixture();Map<String,Object> graph=DraftFixedBaseline.restore(fixedBlank());
+        DraftTemplateGraphRevision rev=f.install("fixed-extraction",graph,"DRAFT","[]");String before=rev.getGraphJson();
+        SourceDocument input=new SourceDocument();input.setId(123L);input.setProjectId(Fixture.PROJECT);input.setFileName("synthetic.txt");input.setCategory(SourceDocument.CATEGORY_PROJECT_INPUT);input.setParseStatus("PARSED");input.setTextContent("Synthetic project correspondence.");
+        when(f.sources.findByProjectIdAndCategoryOrderByIdAsc(Fixture.PROJECT,SourceDocument.CATEGORY_PROJECT_INPUT)).thenReturn(Collections.singletonList(input));
+        when(f.reader.archive(input)).thenReturn(JsonUtils.mapper().createObjectNode().put("sourceSha256","synthetic"));
+        java.util.concurrent.atomic.AtomicBoolean called=new java.util.concurrent.atomic.AtomicBoolean();
+        assertThrows(RuntimeException.class,()->f.service.extract(Fixture.PROJECT,rev.getId(),new DraftTemplateGraphService.ExtractionMonitor(){
+            @Override public boolean beforeCall(String system,String user,String fileName){called.set(true);assertTrue(system.contains("unconfirmed candidates"));throw new IllegalStateException("synthetic-stop-before-model");}
+        }));
+        assertTrue(called.get());assertEquals(before,rev.getGraphJson());verify(f.ai,never()).complete(anyString(),anyString());
+    }
+    @Test void unconfirmedDefinitionMarksReturnedCandidatesForReviewWithoutAdopting(){
+        com.consense.web.dto.DraftingDtos.VariableVO value=new com.consense.web.dto.DraftingDtos.VariableVO();
+        value.setCandidates(Collections.singletonList(new com.consense.web.dto.DraftingDtos.CandidateVO("sample",123L,"synthetic.txt","hash","quote","reason",0.9)));
+        value.setAdoptionState("suggested");DraftTemplateGraphService.markUnconfirmedCandidate(value,true);
+        assertTrue(value.isReviewRequired());assertEquals("needs_review",value.getAdoptionState());assertFalse(value.isConfirmed());assertFalse(value.isManuallyEdited());
+        com.consense.web.dto.DraftingDtos.VariableVO confirmed=new com.consense.web.dto.DraftingDtos.VariableVO();confirmed.setCandidates(value.getCandidates());confirmed.setAdoptionState("suggested");
+        DraftTemplateGraphService.markUnconfirmedCandidate(confirmed,false);assertFalse(confirmed.isReviewRequired());assertEquals("suggested",confirmed.getAdoptionState());
+    }
+    @Test void extractionEntryReturnsUnconfirmedFixedCandidateAsNeedsReview(){
+        Fixture f=new Fixture();Map<String,Object> graph=DraftFixedBaseline.restore(fixedBlank());
+        DraftTemplateGraphRevision revision=f.install("fixed-extraction-return",graph,"DRAFT","[]");String before=revision.getGraphJson();
+        SourceDocument input=new SourceDocument();input.setId(124L);input.setProjectId(Fixture.PROJECT);input.setFileName("synthetic.txt");input.setCategory(SourceDocument.CATEGORY_PROJECT_INPUT);input.setParseStatus("PARSED");input.setTextContent("The WTO GPA applies.");
+        when(f.sources.findByProjectIdAndCategoryOrderByIdAsc(Fixture.PROJECT,SourceDocument.CATEGORY_PROJECT_INPUT)).thenReturn(Collections.singletonList(input));
+        when(f.reader.archive(input)).thenReturn(JsonUtils.mapper().createObjectNode().put("sourceSha256","synthetic"));
+        when(f.transactions.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+        when(f.ai.complete(anyString(),anyString())).thenReturn("[{\"key\":\"fixed-wtoGpaApplies\",\"value\":true,\"sourceQuote\":\"The WTO GPA applies.\",\"reason\":\"synthetic\",\"confidence\":0.9}]");
+        List<com.consense.web.dto.DraftingDtos.VariableVO> result=f.service.extract(Fixture.PROJECT,revision.getId());
+        com.consense.web.dto.DraftingDtos.VariableVO value=result.stream().filter(item->"fixed-wtoGpaApplies".equals(item.getKey())).findFirst().orElseThrow();
+        assertFalse(value.getCandidates().isEmpty());assertTrue(value.isReviewRequired());assertEquals("needs_review",value.getAdoptionState());assertFalse(value.isConfirmed());assertFalse(value.isManuallyEdited());
+        assertEquals(before,revision.getGraphJson());verify(f.ai,atLeastOnce()).complete(anyString(),anyString());
     }
     @Test void probeFixedBaselineWithStaleCustomChild(){
         for(String variant:Arrays.asList("new","no-catalog")){
@@ -142,13 +176,13 @@ class DraftCurrentDefinitionReviewViewTest {
         static final String PROJECT="current-definition-review-view";
         final SourceDocumentRepository sources=mock(SourceDocumentRepository.class);final DraftReviewSources reader=mock(DraftReviewSources.class);
         final DraftTemplateGraphRevisionRepository revisions=mock(DraftTemplateGraphRevisionRepository.class);final DraftTemplateGraphHeadRepository heads=mock(DraftTemplateGraphHeadRepository.class);
-        final DraftGraphInputBindingRepository bindings=mock(DraftGraphInputBindingRepository.class);final DraftVariableRepository variables=mock(DraftVariableRepository.class);final AiGateway ai=mock(AiGateway.class);
+        final DraftGraphInputBindingRepository bindings=mock(DraftGraphInputBindingRepository.class);final DraftVariableRepository variables=mock(DraftVariableRepository.class);final AiGateway ai=mock(AiGateway.class);final PlatformTransactionManager transactions=mock(PlatformTransactionManager.class);
         final Map<String,DraftTemplateGraphRevision> stored=new LinkedHashMap<>();final DraftTemplateGraphHead head=new DraftTemplateGraphHead();final DraftTemplateGraphService service;
         Fixture(){
             ProjectService projects=mock(ProjectService.class);Project project=new Project();project.setId(PROJECT);EntityManager entityManager=mock(EntityManager.class);when(projects.require(PROJECT)).thenReturn(project);when(entityManager.find(Project.class,PROJECT,LockModeType.PESSIMISTIC_WRITE)).thenReturn(project);
             head.setProjectId(PROJECT);when(heads.findById(PROJECT)).thenReturn(Optional.of(head));when(heads.save(any())).thenAnswer(call->call.getArgument(0));when(revisions.findByIdAndProjectId(anyString(),eq(PROJECT))).thenAnswer(call->Optional.ofNullable(stored.get(call.getArgument(0))));when(revisions.save(any())).thenAnswer(call->{DraftTemplateGraphRevision revision=call.getArgument(0);stored.put(revision.getId(),revision);return revision;});
             ArrayNode empty=JsonUtils.mapper().createArrayNode();when(reader.sources(anyList())).thenReturn(empty);when(reader.sources(anyList(),anyMap())).thenReturn(empty);when(sources.findDraftReviewSourcesByProjectIdAndCategory(PROJECT,SourceDocument.CATEGORY_STANDARD_TEMPLATE)).thenReturn(Collections.emptyList());when(sources.findDraftReviewSourcesByProjectId(PROJECT)).thenReturn(Collections.emptyList());
-            service=new DraftTemplateGraphService(projects,sources,revisions,heads,bindings,variables,mock(DraftExtractionRunRepository.class),reader,ai,mock(DraftExtractionHarness.class),entityManager,mock(PlatformTransactionManager.class));
+            service=new DraftTemplateGraphService(projects,sources,revisions,heads,bindings,variables,mock(DraftExtractionRunRepository.class),reader,ai,mock(DraftExtractionHarness.class),entityManager,transactions);
         }
         Map<String,Object> save(Map<String,Object> graph){return service.save(PROJECT,graph,null,head.getDraftRevisionId(),true);}
         DraftTemplateGraphRevision install(String id,Map<String,Object> graph,String status,String archives){String json=JsonUtils.write(graph);DraftTemplateGraphRevision revision=new DraftTemplateGraphRevision(id,PROJECT,head.getDraftRevisionId(),status,DraftAdoption.hash(json),json,archives,Instant.EPOCH);stored.put(id,revision);head.setDraftRevisionId(id);return revision;}

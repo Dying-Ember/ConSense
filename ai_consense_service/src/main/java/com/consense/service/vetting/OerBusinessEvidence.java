@@ -37,8 +37,23 @@ public class OerBusinessEvidence {
     @Autowired private CanonicalCurrentSourceReader currentSources;
 
     public boolean enabled(){return !JsonUtils.isBlankText(properties.getBaseUrl());}
+    static String canonicalBaseIndexKey(String project,String module,Object projections,Map<String,String> pins){
+        return project+"::canonical::"+module+"::"+VettingCorpus.hash(JsonUtils.write(pins.isEmpty()?projections:Arrays.asList(projections,new TreeMap<>(pins))));
+    }
+    static String canonicalIndexGeneration(String base,String module,Map<String,String> generations){
+        if(!"vetting".equals(module)||generations==null||!generations.containsKey(base))return base;
+        String generation=generations.get(base);
+        require(generation!=null&&generation.matches("[a-f0-9]{32}"),"Vetting index generation must be a stable 32-character lowercase hex value");
+        String selected=base+"::g"+generation;
+        require(selected.length()<=200,"Vetting index generation exceeds the Source project key limit");
+        return selected;
+    }
+    private void assertIndexGeneration(Session session){
+        if(session.baseIndexKey!=null)require(session.indexKey.equals(canonicalIndexGeneration(session.baseIndexKey,session.module,properties.getVettingIndexGenerations())),"Vetting index generation changed; reload current sources");
+    }
     public static final class Session implements AutoCloseable {
         public final String projectId,module,indexKey;
+        private final String baseIndexKey;
         public final List<Long> documentIds;
         private final String bindingFingerprint;
         private final Map<String,String> sourceRenderPins;
@@ -71,13 +86,14 @@ public class OerBusinessEvidence {
         private final Set<String> deferredTextOrigins=new LinkedHashSet<>();
         private Session reviewQuery;
         private ReviewTextIndex reviewTextIndex;
-        private Session(String project,String module,List<Long> ids,List<CanonicalSourceBinding> bindings,Map<String,Chunk> views,Map<String,String> pins){
+        private Session(String project,String module,List<Long> ids,List<CanonicalSourceBinding> bindings,Map<String,Chunk> views,Map<String,String> pins,Map<String,String> generations){
             this.projectId=project;this.module=module;this.documentIds=Collections.unmodifiableList(new ArrayList<>(ids));
             this.bindingFingerprint=fingerprint(bindings);this.byId=views;
             this.sourceRenderPins=Collections.unmodifiableMap(new TreeMap<>(pins));
             this.viewPayloads=new LinkedHashMap<>();views.forEach((id,view)->viewPayloads.put(id,JsonUtils.serializedSha256(view)));
             Object projections=bindings.stream().map(CanonicalSourceBinding::getProjectionSha256).collect(Collectors.toList());
-            this.indexKey=project+"::canonical::"+module+"::"+VettingCorpus.hash(JsonUtils.write(pins.isEmpty()?projections:Arrays.asList(projections,sourceRenderPins)));
+            this.baseIndexKey=canonicalBaseIndexKey(project,module,projections,sourceRenderPins);
+            this.indexKey=canonicalIndexGeneration(baseIndexKey,module,generations);
             this.chunks=new Corpus(this,new ArrayList<>(views.values()));
         }
         private Session(String project,String module,CanonicalEvidenceService.CompactBindingScope scope,OerCanonicalRetrievalClient.SemanticSources sources,
@@ -85,7 +101,7 @@ public class OerBusinessEvidence {
             projectId=project;this.module=module;semanticScope=scope;semanticSources=sources;semanticDocuments=documents;semanticContexts=contexts;semanticAnchors=anchors;
             semanticRuleSources=rules;
             documentIds=Collections.unmodifiableList(new ArrayList<>(documents.keySet()));bindingFingerprint=fingerprint(scope.bindings());sourceRenderPins=Collections.unmodifiableMap(new TreeMap<>(pins));
-            byId=new LinkedHashMap<>();viewPayloads=new LinkedHashMap<>();chunks=new Corpus(this,new ArrayList<>());indexKey=project+"::semantic::"+module+"::"+sources.identitySha256();
+            byId=new LinkedHashMap<>();viewPayloads=new LinkedHashMap<>();chunks=new Corpus(this,new ArrayList<>());baseIndexKey=null;indexKey=project+"::semantic::"+module+"::"+sources.identitySha256();
         }
         /** Only an explicitly opened initial read owns a frame; later operations open fresh stages. */
         @Override public void close(){
@@ -166,14 +182,17 @@ public class OerBusinessEvidence {
             long started=System.nanoTime(),prepared=-1,framed=-1,semantic=-1,closed=-1;
             boolean compact=payloadFree(captured)&&SourceContentDigests.stamped(captured);
             try{
+                searchProgress(captured.getId(),"prepare_source");
                 SourceDocument source=compact?evidence.prepareVettingSource(captured):captured;
                 prepared=System.nanoTime();
                 source.setParseMessage(captured.getParseMessage());source.setPageCount(captured.getPageCount());source.setOcrUsed(captured.getOcrUsed());
                 CanonicalEvidenceService.CompactBindingScope scope;CurrentStage loaded=stage(projectId,module,Collections.singletonList(source.getId()),Collections.singletonList(source));
                 try(CurrentStage held=loaded){
+                    searchProgress(captured.getId(),"prepare_identity");
                     require(held.frame!=null,"semantic preparation requires an owned source frame");evidence.prepareCompactIdentities(held.frame,Collections.singletonList(source));held.bindings=held.frame.bindings();
                     require(held.bindings.size()==1&&source.getId().equals(held.bindings.get(0).getDocumentId()),"selected binding order differs");
                     framed=System.nanoTime();
+                    searchProgress(captured.getId(),"prepare_semantic");
                     prepareSemanticSource(projectId,module,source,held.bindings.get(0),held,contexts,anchors,headingLocations,locators,rules);
                     semantic=System.nanoTime();
                     scope=evidence.compactBindings(held.frame,Collections.singletonList(source));
@@ -184,9 +203,11 @@ public class OerBusinessEvidence {
                 admitted.put(source.getId(),pins);scopes.add(scope);
             }catch(com.consense.service.sources.CanonicalEvidenceException missing){
                 if(!compact||!"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING".equals(missing.getMessage()))throw missing;
-                LOG.warn("Selected Vetting source {} has no usable observed evidence and remains unreviewed",captured.getId());
+                try { LOG.warn("Selected Vetting source {} has no usable observed evidence and remains unreviewed",captured.getId()); }
+                catch(ThreadDeath fatal) { throw fatal; }
+                catch(Throwable ignored) { /* Diagnostics must not alter source admission. */ }
             }finally{
-                if(timedSources++<33)LOG.info("Vetting source timing documentId={} totalMs={} prepareMs={} bindingMs={} semanticMs={} closeMs={}",captured.getId(),(System.nanoTime()-started)/1_000_000,
+                if(timedSources++<33)safeInfo("Vetting source timing documentId={} totalMs={} prepareMs={} bindingMs={} semanticMs={} closeMs={}",captured.getId(),(System.nanoTime()-started)/1_000_000,
                         prepared<0?-1:(prepared-started)/1_000_000,framed<0?-1:(framed-prepared)/1_000_000,semantic<0?-1:(semantic-framed)/1_000_000,closed<0?-1:(closed-semantic)/1_000_000);
             }
         }
@@ -208,7 +229,7 @@ public class OerBusinessEvidence {
                 (source,graph)->prepareCompactNormalRuleSource(projectId,source,graph,byDocument.get(source.getId()),anchors,rules),record);
         if(prepared==null)return null;
         logCompactAdmission(bindings.size(),bindings.size(),"eligible");
-        LOG.info("OER compact normal Java preparation sources={} elapsedMs={}",bindings.size(),(System.nanoTime()-started)/1_000_000);
+        safeInfo("OER compact normal Java preparation sources={} elapsedMs={}",bindings.size(),(System.nanoTime()-started)/1_000_000);
         OerCanonicalRetrievalClient.SemanticSources sources=retrieval.prepareCompactNormalSources(module,prepared.bindings());
         evidence.attestCompactNormalSources(prepared,sources.normalProofs());
         CanonicalEvidenceService.CompactBindingScope scope=prepared.scope();evidence.assertCompactCurrent(scope);
@@ -218,7 +239,20 @@ public class OerBusinessEvidence {
         Session result=new Session(projectId,module,scope,sources,admitted,new LinkedHashMap<>(),anchors,rules,sourceRenderPins(bindings));
         current(result);return result;
     }
-    private static void logCompactAdmission(int selected,int qualified,String reason){LOG.info("Vetting compact normal admission selectedSources={} qualifiedPrefix={} reason={}",selected,qualified,reason);}
+    private static void searchProgress(Long documentId,String stage){
+        try {
+            String requestId=org.slf4j.MDC.get("vettingSearchRequestId");
+            if(requestId!=null&&requestId.matches("[0-9a-f-]{36}"))
+                LOG.info("Vetting search requestId={} documentId={} stage={}",requestId,documentId,stage);
+        } catch(ThreadDeath fatal) { throw fatal; }
+        catch(Throwable ignored) { /* Diagnostics must not interrupt source verification. */ }
+    }
+    private static void safeInfo(String message,Object... args){
+        try { LOG.info(message,args); }
+        catch(ThreadDeath fatal) { throw fatal; }
+        catch(Throwable ignored) { /* Diagnostics must not alter source admission. */ }
+    }
+    private static void logCompactAdmission(int selected,int qualified,String reason){safeInfo("Vetting compact normal admission selectedSources={} qualifiedPrefix={} reason={}",selected,qualified,reason);}
     private static void prepareCompactNormalRuleSource(String projectId,SourceDocument source,JsonNode graph,CanonicalSourceBinding binding,Map<String,List<String>> anchors,List<VettingRuleEngine.Source> rules){
         require(binding!=null&&Objects.equals(source.getId(),binding.getDocumentId()),"compact normal source outside selected bindings");
         List<com.consense.document.DocumentBlock> blocks=new ArrayList<>();Set<String> observed=new HashSet<>();RuleSourceRead read=new RuleSourceRead(source);
@@ -434,6 +468,7 @@ public class OerBusinessEvidence {
         require(!session.invalidated,"canonical session invalidated; reload current sources");
         CurrentStage stage=null;
         try{
+            assertIndexGeneration(session);
             if(session.readStage!=null&&session.readStage.frame!=null){
                 require(session.readOwner==this,"initial read session owner differs");
                 evidence.assertFrameOwner(session.readStage.frame,session.projectId,session.module);
@@ -493,11 +528,11 @@ public class OerBusinessEvidence {
             if(Arrays.asList("SOURCE_CONTENT_REVISION_UNAVAILABLE","CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE").contains(legacy.getMessage()))return sequentialAdvisoryRead(projectId,currentSelected,true,false).session;
             throw legacy;
         }
-        Session session=new Session(projectId,"advisory",new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
+        Session session=new Session(projectId,"advisory",new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings),properties.getVettingIndexGenerations());
         session.originalFileStates=originals;
         if(!retrieval.sourceGenerationLinked(session.module,session.indexKey,generation)){
             AdvisoryRead recovered=recoverAdvisoryQuerySession(session,bindings,generation,currentSelected);
-            return recovered==null?sequentialAdvisoryRead(projectId,currentSelected,true,false).session:recovered.session;
+            return recovered==null||!recovered.state.ready?sequentialAdvisoryRead(projectId,currentSelected,true,false).session:recovered.session;
         }
         session.queryScope=bindings;session.querySelection=currentSelected;session.querySourceGeneration=generation;
         requireAdviceOriginalBytes(session,selected);
@@ -523,7 +558,7 @@ public class OerBusinessEvidence {
         guard.run();int count=catalog.path("coverage").path("totalOrigins").asInt();if(count<=0)return null;
         OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryRecoveryAvailability(session.indexKey,bindings,count,generation,guard);
         if("canonical_index_bootstrap_unsupported".equals(state.reason))state=retrieval.advisoryCompactIndex(session.indexKey,bindings,count,Collections.emptySet(),generation,guard,guard,false,false);
-        if(!state.ready)return null;
+        if(!state.ready)return new AdvisoryRead(session,state);
         session.queryScope=bindings;session.querySelection=currentSelected;session.querySourceGeneration=generation;session.queryChunkCount=count;
         session.initialAskExit=()->{guard.run();JsonNode closed=retrieval.readSources("advisory",demand,bindings);
             require(catalog.path("sources").equals(closed.path("sources"))&&count==closed.path("coverage").path("totalOrigins").asInt(),"cold Advisory source catalog changed");guard.run();};
@@ -547,7 +582,7 @@ public class OerBusinessEvidence {
             }
             selected=currentSelected.get();originals=observeOriginals(selected);bindings=evidence.currentDisplayBindings(projectId,"advisory",selected,originals);
         }
-        Session session=new Session(projectId,"advisory",selected.stream().map(SourceDocument::getId).collect(Collectors.toList()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
+        Session session=new Session(projectId,"advisory",selected.stream().map(SourceDocument::getId).collect(Collectors.toList()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings),properties.getVettingIndexGenerations());
         session.originalFileStates=originals;
         session.initialSourceGeneration=sourceGeneration(selected);
         final List<CanonicalSourceBinding> captured=bindings;final String generation=session.initialSourceGeneration;
@@ -557,8 +592,14 @@ public class OerBusinessEvidence {
         guard.run();AdvisorySourceProof proof=verifySequentialAdvisory(session,captured);guard.run();
         Runnable fullExit=()->{AdvisorySourceProof after=verifySequentialAdvisory(session,captured);require(proof.chunks==after.chunks&&proof.kinds.equals(after.kinds),"cold Advisory source denominator or producer changed");guard.run();};
         boolean initialAsk=buildMissing&&!rebuild;Runnable operationExit=initialAsk?guard:fullExit;
-        OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,operationExit,rebuild,rebuild);
-        if(!state.ready&&buildMissing&&!rebuild)state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,fullExit,true,false);
+        OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,operationExit,false,false);
+        if(!state.ready&&buildMissing&&state.initializationAllowed){
+            state=retrieval.advisoryCompactInitialize(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,fullExit);
+        }else if(rebuild&&state.ready){
+            state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,fullExit,true,true);
+        }else if(!state.ready&&buildMissing){
+            require(false,"Canonical index initialization is not authorized");
+        }
         if(state.ready){session.queryScope=captured;session.querySelection=currentSelected;session.querySourceGeneration=generation;session.queryChunkCount=proof.chunks;session.closedSourceProof=true;currentQueryScope(session);}
         if(initialAsk)session.initialAskExit=fullExit;
         return new AdvisoryRead(session,state);
@@ -626,7 +667,7 @@ public class OerBusinessEvidence {
     }
     private List<CanonicalSourceBinding> currentQueryScope(Session session){
         require(!session.invalidated,"canonical session invalidated; reload current sources");
-        try{List<SourceDocument> selected=session.querySelection.get();assertSelectedScope(session,selected);
+        try{assertIndexGeneration(session);List<SourceDocument> selected=session.querySelection.get();assertSelectedScope(session,selected);
             List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
             require(session.bindingFingerprint.equals(fingerprint(current))&&session.sourceRenderPins.equals(sourceRenderPins(current)),"selected canonical source identity changed");
             require(session.querySourceGeneration.equals(sourceGeneration(selected))&&retrieval.sourceGenerationLinked(session.module,session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
@@ -686,7 +727,7 @@ public class OerBusinessEvidence {
                 require(canonicalViewStatus(view)==null,"canonical pointer and selected snapshot differ");
             }
         }
-        return new Session(projectId,module,ids,bindings,views,pins);
+        return new Session(projectId,module,ids,bindings,views,pins,properties.getVettingIndexGenerations());
     }
     /** Scalar result only: the verified frame and its source verdict never leave this request. */
     public static final class CurrentIndexStatus {
@@ -710,7 +751,8 @@ public class OerBusinessEvidence {
         }
         Map<String,String> pins=sourceRenderPins(before);String identity=renderFingerprint(fingerprint(before),pins);
         Object projections=before.stream().map(CanonicalSourceBinding::getProjectionSha256).collect(Collectors.toList());
-        String key=projectId+"::canonical::"+module+"::"+VettingCorpus.hash(JsonUtils.write(pins.isEmpty()?projections:Arrays.asList(projections,pins)));
+        String baseKey=canonicalBaseIndexKey(projectId,module,projections,pins);
+        String key=canonicalIndexGeneration(baseKey,module,properties.getVettingIndexGenerations());
         if(!retrieval.sourceGenerationLinked(module,key,sourceGeneration(new ArrayList<>(selected.values()))))return currentIndexStatus(projectId,module,currentSelected);
         for(SourceDocument source:selected.values()){currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,originals.get(source.getId()));}
         OerCanonicalRetrievalClient.IndexState state=retrieval.indexAvailable(key,module,before);
@@ -719,6 +761,7 @@ public class OerBusinessEvidence {
         require(contentRevisions.equals(sourceContentRevisions(after.values())),"current source content changed during availability check");
         List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(projectId,module,new ArrayList<>(after.values()),originals);
         require(identity.equals(renderFingerprint(fingerprint(current),sourceRenderPins(current))),"current source identity changed during availability check");
+        require(key.equals(canonicalIndexGeneration(baseKey,module,properties.getVettingIndexGenerations())),"Vetting index generation changed during availability check");
         retrieval.sourceGenerationLinked(module,key,sourceGeneration(new ArrayList<>(after.values())));
         if(state.ready)for(SourceDocument source:after.values()){
             currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,originals.get(source.getId()));
@@ -737,11 +780,11 @@ public class OerBusinessEvidence {
                 AdvisoryRead fallback=sequentialAdvisoryRead(projectId,currentSelected,false,false);
                 return new CurrentIndexStatus(fallback.session.indexKey,fallback.state.chunkCount,fallback.session.documentIds.size(),fallback.state);
             }
-            Session candidate=new Session(projectId,module,new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
+            Session candidate=new Session(projectId,module,new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings),properties.getVettingIndexGenerations());
             candidate.originalFileStates=originals;
             AdvisoryRead read=recoverAdvisoryQuerySession(candidate,bindings,sourceGeneration(selected),currentSelected);
             if(read==null)read=sequentialAdvisoryRead(projectId,currentSelected,false,false);
-            else{read.session.completeInitialAsk();currentQueryScope(read.session);}
+            else if(read.state.ready){read.session.completeInitialAsk();currentQueryScope(read.session);}
             return new CurrentIndexStatus(read.session.indexKey,read.state.chunkCount,read.session.documentIds.size(),read.state);
         }
         Map<Long,SourceDocument> documents=selectedDocuments(projectId,currentSelected.get());
@@ -759,16 +802,17 @@ public class OerBusinessEvidence {
         return new CurrentIndexStatus(session,state);
     }
     private void complete(Session session,CurrentStage stage){
+        assertIndexGeneration(session);
         if(stage.frame==null){current(session);return;}
         try{checkViews(session,stage.bindings);}catch(RuntimeException changed){session.invalidated=true;throw changed;}
     }
     public void index(Session session){
-        index(session,false);
+        index(session,false,false);
     }
     public void rebuildIndex(Session session){
-        index(session,true);
+        index(session,true,false);
     }
-    private void index(Session session,boolean rebuild){
+    private void index(Session session,boolean rebuild,boolean initialization){
         require(session.queryScope==null,"Index builds require the complete eager source session");
         CurrentStage loaded=stage(session);Runnable attest=null;
         try(CurrentStage stage=loaded){
@@ -778,10 +822,14 @@ public class OerBusinessEvidence {
             }catch(com.consense.service.sources.CanonicalEvidenceException legacy){
                 if(!"SOURCE_CONTENT_REVISION_UNAVAILABLE".equals(legacy.getMessage()))throw legacy;
             }
-            if(linked)attest=retrieval.indexAdvisory(session.indexKey,stage.frame,rebuild,()->sourceGeneration(session));
+            if(linked)attest=initialization?retrieval.initializeAdvisory(session.indexKey,stage.frame,()->sourceGeneration(session))
+                    :retrieval.indexAdvisory(session.indexKey,stage.frame,rebuild,()->sourceGeneration(session));
             else if(rebuild){
                 if(stage.frame==null)retrieval.rebuild(session.indexKey,session.module,stage.bindings);
                 else retrieval.rebuild(session.indexKey,session.module,stage.frame);
+            }else if(initialization){
+                if(stage.frame==null)retrieval.initialize(session.indexKey,session.module,stage.bindings);
+                else retrieval.initialize(session.indexKey,session.module,stage.frame);
             }else if(stage.frame==null)retrieval.index(session.indexKey,session.module,stage.bindings);
             else retrieval.index(session.indexKey,session.module,stage.frame);
         }
@@ -803,6 +851,7 @@ public class OerBusinessEvidence {
     /** Pure selected-scope identity check; callers fetch the current catalog anew at a remote boundary. */
     public void assertSelectedScope(Session session,List<SourceDocument> selected){
         try{require(!session.invalidated,"canonical session invalidated; reload current sources");
+            assertIndexGeneration(session);
             require(selected!=null&&selected.stream().allMatch(d->d!=null&&session.projectId.equals(d.getProjectId())),"selected scope identity differs");
             require(session.documentIds.equals(selected.stream().map(SourceDocument::getId).collect(Collectors.toList())),"current selected scope changed");
             if(session.initialSourceGeneration!=null)require(session.initialSourceGeneration.equals(sourceGeneration(selected)),"source content generation changed during initial Ask");
@@ -810,7 +859,8 @@ public class OerBusinessEvidence {
                     &&retrieval.sourceGenerationLinked(session.module,session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
         }catch(RuntimeException changed){session.invalidated=true;throw changed;}
     }
-    public void ensureIndex(Session session){if(!indexStatus(session).ready)index(session);}
+    public void ensureIndex(Session session){OerCanonicalRetrievalClient.IndexState state=indexStatus(session);if(!state.ready){
+        require(state.initializationAllowed,"Canonical index initialization is not authorized");index(session,false,true);}}
     /** Questions use live availability; explicit index/status actions keep complete vector verification. */
     public void ensureAvailable(Session session,Supplier<List<SourceDocument>> currentSelected){
         if(session.queryScope!=null){currentQueryScope(session);return;}
@@ -872,6 +922,7 @@ public class OerBusinessEvidence {
     }
     private List<CanonicalSourceBinding> current(Session session){
         require(!session.invalidated,"canonical session invalidated; reload current sources");
+        assertIndexGeneration(session);
         if(session.queryScope!=null){List<CanonicalSourceBinding> bindings=currentQueryScope(session);checkViews(session,bindings);return bindings;}
         if(session.semanticScope!=null)try{
             require(session.sourceRenderPins.equals(sourceRenderPins(session.semanticScope.bindings())),"source render identities changed");
@@ -991,21 +1042,23 @@ public class OerBusinessEvidence {
             require(session.documentIds.equals(bindings.stream().map(CanonicalSourceBinding::getDocumentId).collect(Collectors.toList()))
                     &&session.documentIds.equals(selected.stream().map(SourceDocument::getId).collect(Collectors.toList())),"compact review index scope differs");
             String generation=sourceGeneration(selected);
-            queryScope=new Session(session.projectId,"vetting",session.documentIds,bindings,new LinkedHashMap<>(),session.sourceRenderPins);
+            queryScope=new Session(session.projectId,"vetting",session.documentIds,bindings,new LinkedHashMap<>(),session.sourceRenderPins,properties.getVettingIndexGenerations());
+            final Session buildingScope=queryScope;
             queryScope.originalFileStates=observeOriginals(selected);
             OerCanonicalRetrievalClient.IndexState available=retrieval.compactRecoveryAvailability("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),generation,guard);
             if(!available.ready){
+                require(available.initializationAllowed,"Canonical index initialization is not authorized");
                 Set<String> kinds=new HashSet<>();for(JsonNode source:session.semanticSources.sourceCatalog()){
                     require(NormalObservedContract.PRODUCER.equals(source.path("producerKind").asText()),"compact review index source kind unsupported; refresh the source-bound index");kinds.add("normal");
                 }
                 Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originals=queryScope.originalFileStates;
-                Runnable buildProof=()->{guard.run();for(SourceDocument source:selected){
+                Runnable buildProof=()->{guard.run();assertIndexGeneration(buildingScope);for(SourceDocument source:selected){
                     currentSources.requireOriginalFreshness(source,originals.get(source.getId()));currentSources.requireOriginalBytes(source);
                     currentSources.requireOriginalFreshness(source,originals.get(source.getId()));
                 }evidence.revalidateCompactRegistry(session.semanticScope);guard.run();};
-                available=retrieval.compactIndex("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),kinds,generation,guard,buildProof,true,false);
+                available=retrieval.compactInitialize("vetting",queryScope.indexKey,bindings,session.semanticSources.totalOrigins(),kinds,generation,guard,buildProof);
             }
-            require(available.ready,"source-bound review index unavailable");
+            assertIndexGeneration(queryScope);require(available.ready,"source-bound review index unavailable");
             queryScope.queryScope=bindings;queryScope.querySelection=()->{guard.run();return selected;};queryScope.querySourceGeneration=generation;
             queryScope.queryChunkCount=available.chunkCount;session.reviewQuery=queryScope;
         }
@@ -1233,14 +1286,14 @@ public class OerBusinessEvidence {
         return Arrays.asList(chunk.getRole(),p.getProjectId(),p.getModule(),p.getDocumentId(),p.getOriginalSourceSha256(),p.getJavaParsedSourceHash(),p.getSourceRevisionSha256(),p.getCanonicalSourceHash(),p.getProjectionSha256(),p.getProjectionRevisionSha256(),p.getProjectionSchema(),p.getProducerKind(),p.getSourceRevisionKind(),p.getFamilyCompositionSha256(),p.getFamilyComponentSetSha256());
     }
     public JsonNode response(Session session,String query,String role){
-        return response(session,query,role,false);
+        return response(session,query,role,false,null);
     }
-    private JsonNode response(Session session,String query,String role,boolean textOnly){
+    private JsonNode response(Session session,String query,String role,boolean textOnly,java.util.function.Consumer<Runnable> onCancel){
         if(session.queryScope!=null){
             require(role==null,"initial Advisory query role must remain unfiltered");
             int[] admitted={0};
             try{JsonNode result=retrieval.retrieveAdvisory(session.indexKey,query,session.queryScope,session.querySourceGeneration,
-                    ()->currentQueryScope(session),ids->hydrateQueryDocuments(session,ids),textOnly?(ids,ranked)->{Map<String,JsonNode> parents=compactAdviceParents(session,ids,ranked);if(parents!=null)admitted[0]=ids.size();return parents;}:null);
+                    ()->currentQueryScope(session),ids->hydrateQueryDocuments(session,ids),textOnly?(ids,ranked)->{Map<String,JsonNode> parents=compactAdviceParents(session,ids,ranked);if(parents!=null)admitted[0]=ids.size();return parents;}:null,onCancel);
                 if(textOnly&&admitted[0]>0)logAdviceAdmission(admitted[0],admitted[0],result.path("hits").size(),session.byId.size(),"accepted_after_rank_validation");
                 else if(textOnly&&result.path("hits").isEmpty())logAdviceAdmission(0,0,0,0,"no_ranked_sources");return result;}
             catch(RuntimeException|Error rejected){try{session.close();}catch(RuntimeException|Error closing){rejected.addSuppressed(closing);}session.invalidated=true;throw rejected;}
@@ -1248,8 +1301,9 @@ public class OerBusinessEvidence {
         if(textOnly)logAdviceAdmission(session.documentIds.size(),session.documentIds.size(),0,session.byId.size(),"fallback_query_scope_unavailable");
         JsonNode response;
         CurrentStage loaded=stage(session);
-        try(CurrentStage stage=loaded){response=stage.frame==null?retrieval.retrieve(session.indexKey,session.module,query,role,stage.bindings)
-                :retrieval.retrieve(session.indexKey,session.module,query,role,stage.frame);}
+        try(CurrentStage stage=loaded){response=onCancel==null?(stage.frame==null?retrieval.retrieve(session.indexKey,session.module,query,role,stage.bindings)
+                :retrieval.retrieve(session.indexKey,session.module,query,role,stage.frame))
+                :retrieval.retrieve(session.indexKey,session.module,query,role,stage.frame==null?stage.bindings:stage.frame.bindings(),stage.frame,onCancel);}
         complete(session,loaded);return response;
     }
 
@@ -1349,14 +1403,20 @@ public class OerBusinessEvidence {
 
     /** One ranked hit carries the whole observed unit; its members receive no invented rerank scores. */
     public List<VectorStore.SearchHit> adviceHits(Session session,String question) {
-        return withWordSourceScopes(session,adviceHits(session,question,false));
+        return adviceHits(session,question,null);
+    }
+    public List<VectorStore.SearchHit> adviceHits(Session session,String question,java.util.function.Consumer<Runnable> onCancel) {
+        return withWordSourceScopes(session,adviceHits(session,question,false,onCancel));
     }
     public List<VectorStore.SearchHit> adviceTextHits(Session session,String question) {
-        session.adviceQuestion=question;
-        return adviceHits(session,question,true);
+        return adviceTextHits(session,question,null);
     }
-    private List<VectorStore.SearchHit> adviceHits(Session session,String question,boolean textOnly){
-        JsonNode result=response(session,question,null,textOnly);List<VectorStore.SearchHit> out=new ArrayList<>();
+    public List<VectorStore.SearchHit> adviceTextHits(Session session,String question,java.util.function.Consumer<Runnable> onCancel) {
+        session.adviceQuestion=question;
+        return adviceHits(session,question,true,onCancel);
+    }
+    private List<VectorStore.SearchHit> adviceHits(Session session,String question,boolean textOnly,java.util.function.Consumer<Runnable> onCancel){
+        JsonNode result=response(session,question,null,textOnly,onCancel);List<VectorStore.SearchHit> out=new ArrayList<>();
         for(int i=0;i<result.path("hits").size();i++) {
             JsonNode hit=result.path("hits").get(i),unit=result.path("sourceUnits").path("units").get(i);
             out.add(businessHit(session,hit.path("id").asText(),unit,hit.path("score").asDouble(),"reranked_seed"));
@@ -1455,7 +1515,7 @@ public class OerBusinessEvidence {
     }
     private List<VectorStore.SearchHit> compactAdviceContext(Session session,String query,Set<String> selectedSources){
         currentQueryScope(session);
-        Session selected=new Session(session.projectId,session.module,session.documentIds,session.queryScope,new LinkedHashMap<>(),session.sourceRenderPins);
+        Session selected=new Session(session.projectId,session.module,session.documentIds,session.queryScope,new LinkedHashMap<>(),session.sourceRenderPins,properties.getVettingIndexGenerations());
         selected.queryScope=session.queryScope;selected.querySelection=session.querySelection;selected.querySourceGeneration=session.querySourceGeneration;selected.originalFileStates=session.originalFileStates;
         selected.adviceQuestion=query;
         java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> noGraphs=ids->{throw new IllegalStateException("Advice scope text requires compact proof; complete source graphs were not loaded");};

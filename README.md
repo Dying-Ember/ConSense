@@ -1,8 +1,12 @@
 # ConSense
 
-Private source snapshot of the current ConSense application: contract drafting, vetting, evidence inspection and advice. The Vue frontend and Spring Boot service are kept together so that the reviewed UI, extraction harness, business bindings and document-generation APIs can be developed against the same snapshot.
+Source snapshot of the current ConSense application: contract drafting, vetting, evidence inspection and advice. The Vue frontend and Spring Boot service are kept together so that the reviewed UI, extraction harness, business bindings and document-generation APIs can be developed against the same snapshot.
 
 Before working on competition source scope, OCR, embedding, rerank or their deployment/indexes, read the [confirmed OER scope and rules](ai_consense_service/docs/oer-scope-and-rules.md), then the [current implementation handoff](ai_consense_service/docs/HANDOFF-ocr-embedding-rerank-20261008.md). These entry points distinguish current decisions from historical experiments.
+
+## 比赛容器交付
+
+五镜像打包、目标部署、外置资产、相对路径、端口和已知未完成项见 [比赛五容器部署说明](docs/COMPETITION-DEPLOYMENT.md)。冻结镜像不包含完整应用、模型或数据库；当前交付资产和三个模块的端到端验收仍在整理。
 
 ## Repository layout
 
@@ -14,7 +18,7 @@ Before working on competition source scope, OCR, embedding, rerank or their depl
 | `SOURCE-INTEGRATION.json` | Oct 9 integration sources, current checks and unresolved acceptance |
 | `docs/PRIVATE-REPOSITORY-SYNC.md` | Code synchronization procedure and source boundaries |
 
-This is a new repository with a clean initial history. It does not import the original repositories' history, local databases, uploaded documents, private correspondence, model weights, credentials or generated runtime outputs. Authored synthetic fixtures remain explicitly test-only. Existing verification documents describe historical local observations; a fresh clone must establish its own runtime and business-output acceptance.
+The source snapshot has a separate Git history. The competition-assets directory contains the verified five frozen image archives and four default templates; its PDF graph files are historical candidates, not an approved graph. Other model weights, runtime dependencies and the pure SL database are inventoried separately and are not yet confirmed present in this branch. Credentials, live project databases and private correspondence are excluded. Authored synthetic fixtures remain test-only. Existing observations do not replace runtime or business acceptance of a fresh deployment.
 
 ## Start locally
 

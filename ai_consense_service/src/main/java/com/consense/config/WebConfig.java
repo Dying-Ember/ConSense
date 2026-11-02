@@ -1,6 +1,10 @@
 package com.consense.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.web.server.MimeMappings;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.boot.web.servlet.server.AbstractServletWebServerFactory;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -10,6 +14,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 
     private final ConsenseProperties props;
+
+    @Bean
+    public WebServerFactoryCustomizer<AbstractServletWebServerFactory> moduleJavascriptMime() {
+        return factory -> {
+            MimeMappings mappings = new MimeMappings(factory.getMimeMappings());
+            mappings.add("mjs", "application/javascript");
+            factory.setMimeMappings(mappings);
+        };
+    }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {

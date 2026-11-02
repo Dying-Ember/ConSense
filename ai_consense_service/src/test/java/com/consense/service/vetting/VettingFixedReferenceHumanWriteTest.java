@@ -42,7 +42,8 @@ class VettingFixedReferenceHumanWriteTest {
         VettingRun run=new VettingRun();run.setId(runId);run.setProjectId(project);run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setCoverageJson("{\"documents\":[]}");run.setResultJson("{}");run.setSourceSnapshotSha256(VettingCorpus.hash("competition-review-package-v2\n[]"));runs.saveAndFlush(run);
         JsonNode payload=JsonUtils.parse("{\"fixedBaselineManifestSha256\":\"fixture-manifest\",\"fixedBaselineVersion\":\"fixture-version\",\"originalSourceSha256\":\"fixture-original\",\"pageNo\":1,\"sourceQuality\":{\"family\":\"GCC\"}}");
         FixedReferenceEvidence reference=new FixedReferenceEvidence("fixed-gcc",0,payload,null,null);
-        VectorStore.SearchHit hit=reference.asHit();when(fixed.readOnlyHitById("fixed-gcc")).thenReturn(hit);when(fixed.evidence(hit)).thenReturn(reference);
+        VectorStore.SearchHit hit=reference.asHit();when(fixed.readOnlyHitsForProject(eq(project),anyCollection())).thenReturn(Collections.singletonList(hit));when(fixed.evidence(hit)).thenReturn(reference);
+        when(fixed.currentReadGuardForProject(eq(project),anyList(),isNull())).thenReturn(()->{});
         FindingEvidence evidence=new FindingEvidence();evidence.setFixedBaselineEvidence(reference.pointer());
         VettingFinding finding=new VettingFinding();finding.setProjectId(project);finding.setCode("VT-001");finding.setRunId(runId);finding.setActive(true);finding.setStatus("Open");finding.setGroupKey("risk");finding.setScope("intra");finding.setSeverity("medium");finding.setTitleEn("Fixture fixed reference");finding.setCreatedAt(Instant.now());finding.setEvidenceJson(JsonUtils.write(Collections.singletonList(evidence)));findings.saveAndFlush(finding);
         JsonNode loaded=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/findings")).andReturn().getResponse().getContentAsString()).path("data").get(0);
@@ -52,7 +53,7 @@ class VettingFixedReferenceHumanWriteTest {
         JsonNode initial=JsonUtils.parse(http.perform(get(checklist)).andReturn().getResponse().getContentAsString()).path("data");assertTrue(initial.path("writable").asBoolean());
         Map<String,Object> body=new LinkedHashMap<>();body.put("expectedRunId",runId);body.put("expectedSourceSnapshotSha256",run.getSourceSnapshotSha256());body.put("runSnapshotSha256",initial.path("runSnapshotSha256").asText());body.put("items",Collections.singletonList(Map.of("id","APP-I-001","status","fulfilled","remarks","original checklist decision")));
         http.perform(put(checklist).contentType("application/json").content(JsonUtils.write(body))).andExpect(jsonPath("$.code").value(0));
-        when(fixed.readOnlyHitById("fixed-gcc")).thenThrow(new IllegalStateException("fixed_reference_original_sha_changed"));
+        when(fixed.readOnlyHitsForProject(eq(project),anyCollection())).thenThrow(new IllegalStateException("fixed_reference_original_sha_changed"));
         review.put("reviewRemarks","must not overwrite");http.perform(put(base+"/review").contentType("application/json").content(JsonUtils.write(review))).andExpect(jsonPath("$.code").value(4104));
         http.perform(post(base+"/status").param("status","Handled").param("expectedRunId",runId).param("expectedGeneratedRevisionSha256",loaded.path("generatedRevisionSha256").asText()).param("expectedSourceSnapshotSha256",run.getSourceSnapshotSha256())).andExpect(jsonPath("$.code").value(4104));
         body.put("items",Collections.singletonList(Map.of("id","APP-I-001","status","unchecked","remarks","must not overwrite")));http.perform(put(checklist).contentType("application/json").content(JsonUtils.write(body))).andExpect(jsonPath("$.code").value(4104));

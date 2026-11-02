@@ -163,8 +163,9 @@ public class EnglishFileOutput {
             List<List<String>> batches=new ArrayList<>();List<String> batch=new ArrayList<>();int size=0,foreign=0;
             for(String text:pending){int extra=hasNonEnglishText(text)?text.length():0;if(!batch.isEmpty()&&(size+text.length()>32000||foreign+extra>8000||batch.size()>=32)){batches.add(batch);batch=new ArrayList<>();size=0;foreign=0;}batch.add(text);size+=text.length();foreign+=extra;}
             if(!batch.isEmpty())batches.add(batch);
-            summary("translation_batches",batches.size()>24?"batch_limit_exceeded":"admitted",Map.of("batchCount",batches.size(),"batchLimit",24,"pendingSegments",pending.size(),"segmentLimit",32));
-            if(batches.size()>24)throw failure("The English export exceeds the bounded translation call limit. No partial file was returned.");
+            int batchLimit=QwenChatUsagePreflight.FILE_EXPORT_MAX_BATCHES;
+            summary("translation_batches",batches.size()>batchLimit?"batch_limit_exceeded":"admitted",Map.of("batchCount",batches.size(),"batchLimit",batchLimit,"pendingSegments",pending.size(),"segmentLimit",32));
+            if(batches.size()>batchLimit)throw failure("The English export exceeds the bounded translation call limit. No partial file was returned.");
             String sourceSha=sha(JsonUtils.write(texts).getBytes(StandardCharsets.UTF_8));
             Runnable frozenGuard=()->{currentGuard.run();if(!sourceSha.equals(sha(JsonUtils.write(texts).getBytes(StandardCharsets.UTF_8))))throw failure("The translation input changed.");};
             try(QwenChatUsagePreflight.Operation.ActionScope action=qwen==null?null:qwen.openAction("file-export:"+UUID.randomUUID(),frozenGuard)){
@@ -283,13 +284,7 @@ public class EnglishFileOutput {
     private List<Translation> completeBatch(QwenChatUsagePreflight.Operation qwen,String system,String user,JsonNode schema,String sourceSha,String phase,Runnable guard,List<String> raw){
         if(qwen==null)return ai.completeStructuredJsonList(system,user,Translation.class,schema,raw);
         VettingInputBudget.Input request=qwen.input(system,user,schema,sourceSha);
-        VettingInputBudget.Result budget=VettingInputBudget.check(request,in->qwen.observe(in,phase,guard,null));
-        if(!budget.isExtraDispatchPermitted()){
-            if("over_budget".equals(budget.getStatus()))throw failure("The English translation input exceeds the model budget. No file was returned.");
-            String reason=budget.getReason();String status=reason!=null&&reason.matches("qwen_preflight_http_[1-5][0-9]{2}")?" (HTTP "+reason.substring(reason.length()-3)+")":"";
-            throw failure("The English translation model usage check failed"+status+". No file was returned.");
-        }
-        return qwen.complete(request,budget,system,user,schema,Translation.class,raw,new LinkedHashMap<>(),null);
+        return qwen.complete(request,null,system,user,schema,Translation.class,raw,new LinkedHashMap<>(),null);
     }
     private static List<Integer> uncertainWords(List<String> texts,List<Translation> rows){
         if(rows==null||rows.size()!=texts.size())return List.of();
@@ -424,6 +419,7 @@ public class EnglishFileOutput {
     private static final class Slot {final List<Node> nodes;final String text;final boolean mark,supported;Slot(List<Node> n,boolean m){this(n,m,true);}Slot(List<Node> n,boolean m,boolean supported){nodes=n;mark=m;this.supported=supported;StringBuilder s=new StringBuilder();for(Node node:n)s.append(node.getTextContent());text=s.toString();}}
     private static List<Slot> slots(Document document){
         List<Slot> out=new ArrayList<>();Set<Node> used=Collections.newSetFromMap(new IdentityHashMap<>());
+        used.addAll(tocStyleInstructions(document));
         for(String ns:Arrays.asList(W,A)){NodeList paragraphs=document.getElementsByTagNameNS(ns,"p");for(int i=0;i<paragraphs.getLength();i++){
             Element paragraph=(Element)paragraphs.item(i);List<Node> texts=new ArrayList<>();
             paragraphSlots(paragraph,ns,texts,out,used);flushSlot(texts,out);
@@ -461,6 +457,25 @@ public class EnglishFileOutput {
             }
         }
         return out;
+    }
+    private static Set<Node> tocStyleInstructions(Document document){
+        Set<Node> mechanical=Collections.newSetFromMap(new IdentityHashMap<>());
+        Deque<List<Node>> fields=new ArrayDeque<>();Set<List<Node>> separated=Collections.newSetFromMap(new IdentityHashMap<>());
+        NodeList nodes=document.getElementsByTagName("*");
+        for(int i=0;i<nodes.getLength();i++){
+            Element element=(Element)nodes.item(i);
+            if(!W.equals(element.getNamespaceURI()))continue;
+            if("fldChar".equals(element.getLocalName())){
+                String type=element.getAttributeNS(W,"fldCharType");
+                if("begin".equals(type))fields.push(new ArrayList<>());
+                else if("separate".equals(type)&&!fields.isEmpty())separated.add(fields.peek());
+                else if("end".equals(type)&&!fields.isEmpty()){
+                    List<Node> field=fields.pop();StringBuilder text=new StringBuilder();field.forEach(node->text.append(node.getTextContent()));
+                    if(separated.remove(field)&&text.toString().matches("(?is)\\s*TOC(?:\\s+\\\\[fhzu])*\\s+\\\\t\\s*\"[\\p{L}\\p{N}_ .-]+,[1-9](?:,[\\p{L}\\p{N}_ .-]+,[1-9])*\"\\s*"))mechanical.addAll(field);
+                }
+            }else if("instrText".equals(element.getLocalName())&&!fields.isEmpty()&&!separated.contains(fields.peek()))fields.peek().add(element);
+        }
+        return mechanical;
     }
     private static boolean mechanicalLeaf(Element element,String value){
         String local=element.getLocalName();

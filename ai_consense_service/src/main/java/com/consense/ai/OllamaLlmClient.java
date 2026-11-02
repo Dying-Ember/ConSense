@@ -1,6 +1,7 @@
 package com.consense.ai;
 
 import com.consense.common.BizException;
+import com.consense.common.DiagnosticSummary;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -149,7 +150,7 @@ public class OllamaLlmClient implements LlmClient, EmbeddingAvailability {
                 return toVectors(embeddings);
             }
         } catch (Exception e) {
-            log.warn("Ollama /api/embed 不可用，回退到 /api/embeddings: {}", e.getMessage());
+            log.warn("Ollama /api/embed 不可用，回退到 /api/embeddings: {}", DiagnosticSummary.of(e));
         }
 
         // 旧版逐个 embedding
@@ -172,7 +173,7 @@ public class OllamaLlmClient implements LlmClient, EmbeddingAvailability {
             String raw = http.get(trim(cfg.getBaseUrl()) + "/api/tags", 4000);
             return JsonUtils.parse(raw).has("models");
         } catch (Exception e) {
-            log.debug("Ollama 不可达: {}", e.getMessage());
+            log.debug("Ollama 不可达: {}", DiagnosticSummary.of(e));
             return false;
         }
     }
@@ -191,7 +192,7 @@ public class OllamaLlmClient implements LlmClient, EmbeddingAvailability {
             }
             return false;
         } catch (Exception e) {
-            log.debug("Ollama configured embedding model is unavailable: {}",e.getMessage());
+            log.debug("Ollama configured embedding model is unavailable: {}",DiagnosticSummary.of(e));
             return false;
         }
     }

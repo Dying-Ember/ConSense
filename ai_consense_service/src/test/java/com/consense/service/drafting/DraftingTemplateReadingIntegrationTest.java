@@ -64,6 +64,57 @@ class DraftingTemplateReadingIntegrationTest {
         assertEquals("inline; filename*=UTF-8''uploaded%20template.docx",response.getHeader("Content-Disposition"));
     }
 
+    @Test void unavailableDocxParserStillReturnsExactSourceWithSafeDiagnostic() throws Exception {
+        String id=project();byte[] uploaded=docx("private-test-source-content");
+        replace(id,"NTT","private-test-source-name.docx",DOCX,uploaded);
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(DraftingService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> capture=new ch.qos.logback.core.read.ListAppender<>();
+        capture.start();logger.addAppender(capture);
+        String key="javax.xml.parsers.DocumentBuilderFactory",previous=System.getProperty(key);
+        try {
+            System.setProperty(key,DraftSnapshotIntegrityCandidateTest.BrokenXmlFactory.class.getName());
+            MockHttpServletResponse response=mvc.perform(get("/api/drafting/{id}/templates/NTT/source",id))
+                    .andExpect(content().contentTypeCompatibleWith("application/octet-stream")).andReturn().getResponse();
+            assertArrayEquals(uploaded,response.getContentAsByteArray());
+            assertTrue(capture.list.stream().anyMatch(e->e.getFormattedMessage().contains("template source format inspection unavailable")));
+            assertTrue(capture.list.stream().noneMatch(e->e.getFormattedMessage().contains("private-test-source")||e.getFormattedMessage().contains("synthetic parser configuration failure")));
+        } finally {
+            if(previous==null)System.clearProperty(key);else System.setProperty(key,previous);
+            logger.detachAppender(capture);capture.stop();
+        }
+    }
+
+    @Test void parserUnavailableRemainsASystemFailureForReadingBindingsAndPreview() throws Exception {
+        String id=project();byte[] uploaded=docx("read-only failure fixture");
+        replace(id,"NTT","source.docx",DOCX,uploaded);
+        String key="javax.xml.parsers.DocumentBuilderFactory",previous=System.getProperty(key);
+        try {
+            System.setProperty(key,DraftSnapshotIntegrityCandidateTest.BrokenXmlFactory.class.getName());
+            for(String endpoint:new String[]{"reading","bindings","preview.pdf"}) {
+                String response=mvc.perform(get("/api/drafting/{id}/templates/NTT/"+endpoint,id))
+                        .andExpect(jsonPath("$.code").value(5000)).andReturn().getResponse().getContentAsString();
+                assertFalse(response.contains("EDITABLE_DOCX_REQUIRED"));
+                assertFalse(response.contains("SOURCE_DOCX_INVALID"));
+                assertFalse(response.contains("synthetic parser configuration failure"));
+            }
+        } finally {if(previous==null)System.clearProperty(key);else System.setProperty(key,previous);}
+        assertArrayEquals(uploaded,mvc.perform(get("/api/drafting/{id}/templates/NTT/source",id))
+                .andReturn().getResponse().getContentAsByteArray());
+    }
+
+    @Test void missingStoredSourceStillReportsUnavailableWhenParserIsUnavailable() throws Exception {
+        String id=project();replace(id,"NTT","missing.docx",DOCX,docx("storage fixture"));
+        Path stored;
+        try(Stream<Path> files=Files.walk(STORAGE.resolve(id))) {stored=files.filter(Files::isRegularFile).findFirst().get();}
+        Files.delete(stored);
+        String key="javax.xml.parsers.DocumentBuilderFactory",previous=System.getProperty(key);
+        try {
+            System.setProperty(key,DraftSnapshotIntegrityCandidateTest.BrokenXmlFactory.class.getName());
+            mvc.perform(get("/api/drafting/{id}/templates/NTT/source",id)).andExpect(jsonPath("$.code").value(4011))
+                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("SOURCE_UNAVAILABLE")));
+        } finally {if(previous==null)System.clearProperty(key);else System.setProperty(key,previous);}
+    }
+
     @Test void readingIncludesNativeTableParagraphsAndDoesNotChangeTheSourceOrAdoptedValues() throws Exception {
         String id=project();byte[] uploaded=orderedDocx();
         replace(id,"SCT","current edition.docx",DOCX,uploaded);

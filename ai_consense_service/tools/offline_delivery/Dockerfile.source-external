@@ -1,0 +1,7 @@
+ARG SOURCE_RUNTIME_IMAGE
+FROM ${SOURCE_RUNTIME_IMAGE}
+ENV HOME=/home/consense PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 CONSENSE_MODEL_OFFLINE=1
+USER consense:consense
+WORKDIR /runtime
+ENTRYPOINT ["/runtime/envs/source/bin/python", "-u"]
+CMD ["/runtime/tools/offline_delivery/source_service_entrypoint.py"]

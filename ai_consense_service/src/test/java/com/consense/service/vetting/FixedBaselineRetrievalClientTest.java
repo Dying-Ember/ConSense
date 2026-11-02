@@ -142,6 +142,49 @@ class FixedBaselineRetrievalClientTest {
             assertThrows(IllegalStateException.class,()->f.client.search("vetting","GCC 1.1",10),defect);
         }
     }
+    @Test void archivedWindowsDescriptorsKeepExistingEnabledGate()throws Exception {
+        Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));
+        ObjectNode manifest=manifest(f);
+        ((ObjectNode)manifest.path("runtimePlan")).put("path","D:\\Archive\\plan.json");
+        ((ObjectNode)manifest.path("corpus")).put("path","D:\\Archive\\corpus.jsonl");
+        ((ObjectNode)manifest.path("originalSources").path("gccSource")).put("path","D:\\Archive\\original.pdf");
+        writeManifest(f,manifest);f.p.setEnabled(true);
+        f.p.setLegacyPathPrefix("D:\\Archive");f.p.setLegacyMountRoot(temp.toString());
+        assertTrue(f.client.enabled());
+        assertEquals("parent-a",f.client.readOnlyHitById("parent-a").getId());
+        assertEquals("parent-a",f.client.evidence(f.client.readOnlyHitById("parent-a")).getId());
+        f.p.setEnabled(false);
+        assertThrows(IllegalStateException.class,()->f.client.readOnlyHitById("parent-a"));
+        assertThrows(IllegalStateException.class,()->f.client.search("vetting","GCC 1.1",1));
+        verifyNoInteractions(f.http);
+        f.p.setEnabled(true);
+        Files.write(f.original,"changed source".getBytes(StandardCharsets.UTF_8));
+        assertThrows(IllegalStateException.class,()->f.client.readOnlyHitById("parent-a"));
+    }
+    @Test void normalEnabledRetrievalUsesSameMappedDescriptors()throws Exception {
+        Fixture f=headerOnly();snapshot(f,Arrays.asList(f.first,f.second));
+        ObjectNode manifest=manifest(f);
+        ((ObjectNode)manifest.path("runtimePlan")).put("path","D:\\Archive\\plan.json");
+        ((ObjectNode)manifest.path("corpus")).put("path","D:\\Archive\\corpus.jsonl");
+        ((ObjectNode)manifest.path("originalSources").path("gccSource")).put("path","D:\\Archive\\original.pdf");
+        writeManifest(f,manifest);f.p.setLegacyPathPrefix("D:\\Archive");f.p.setLegacyMountRoot(temp.toString());
+        assertTrue(f.client.enabled());assertFalse(f.client.search("vetting","GCC 1.1",1).isEmpty());
+        verify(f.http,times(1)).postJson(endsWith("/retrieve"),anyString(),anyLong());
+    }
+    @Test void archiveMappingRejectsTraversalAndOtherWindowsRoots()throws Exception {
+        Fixture f=headerOnly();f.p.setLegacyPathPrefix("D:\\Archive");f.p.setLegacyMountRoot(temp.toString());
+        assertEquals(f.original.toRealPath(),f.client.resolveDescriptorPath("D:\\Archive\\original.pdf"));
+        assertThrows(IllegalStateException.class,()->f.client.resolveDescriptorPath("D:\\Archive\\..\\escape.pdf"));
+        assertThrows(IllegalStateException.class,()->f.client.resolveDescriptorPath("D:\\Other\\original.pdf"));
+    }
+    @Test @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void archiveMappingRejectsSymlinkEscape()throws Exception {
+        Fixture f=headerOnly();f.p.setLegacyPathPrefix("D:\\Archive");f.p.setLegacyMountRoot(temp.toString());
+        Path outside=Files.createTempFile("fixed-reference-outside-", ".pdf");
+        try {Files.createSymbolicLink(temp.resolve("outside.pdf"),outside);
+            assertThrows(IllegalStateException.class,()->f.client.resolveDescriptorPath("D:\\Archive\\outside.pdf"));
+        } finally {Files.deleteIfExists(temp.resolve("outside.pdf"));Files.deleteIfExists(outside);}
+    }
     private Fixture headerOnly()throws Exception {
         Fixture f=new Fixture(false);String header="General Conditions of Contract for Building Works 2013 Edition (version 1.1)";
         f.first.put("content",header);((ObjectNode)f.first.path("parts").get(0)).put("text",header);observed(f.first,null);f.first.put("observedNodeKind","document").put("observedSourceRole","content");
@@ -291,9 +334,70 @@ class FixedBaselineRetrievalClientTest {
         assertThrows(IllegalStateException.class,()->f.client.searchEvidence("advisory","q",1,selection));
         selection.withArray("slSources").addObject().put("editionId","edition-b").put("sha256",b.path("sha256").asText());
         f.response.withArray("selectedSourceSha256").add(b.path("sha256").asText());
-        assertEquals(2,f.client.searchEvidence("advisory","q",2,selection).size());
+        assertThrows(IllegalStateException.class,()->f.client.searchEvidence("advisory","q",2,selection));
         selection.withArray("slSources").remove(1);((ObjectNode)selection.path("slSources").get(0)).put("editionId","wrong-edition");
         assertThrows(IllegalStateException.class,()->f.client.searchEvidence("advisory","q",1,selection));
+    }
+
+    @Test void sameManifestSelectionSwitchRejectsOldHitAndExport() throws Exception {
+        Fixture f=headerOnly();Path one=slOriginal("one"),two=slOriginal("two");configureSl(f,one,two);
+        snapshot(f,Arrays.asList(f.first,slBody("sl-one","SL:one",one),slBody("sl-two","SL:two",two)));
+        com.consense.repository.ProjectRepository repository=mock(com.consense.repository.ProjectRepository.class);
+        com.consense.domain.Project project=new com.consense.domain.Project();project.setId("project-a");
+        when(repository.findById("project-a")).thenReturn(Optional.of(project));
+        org.springframework.test.util.ReflectionTestUtils.setField(f.client,"projectRepository",repository);
+        f.client.saveProjectSelection("project-a",slSelection(f,one,"one"));
+        VectorStore.SearchHit old=f.client.readOnlyHitById("sl-one");
+        Runnable guard=f.client.currentReadGuardForProject("project-a",Collections.singletonList(old),null);
+        f.client.saveProjectSelection("project-a",slSelection(f,two,"two"));
+        assertThrows(IllegalStateException.class,guard::run);
+        assertThrows(IllegalStateException.class,()->f.client.currentReadGuardForProject("project-a",Collections.singletonList(old),null));
+        assertThrows(IllegalStateException.class,()->f.client.readOnlyHitsForProject("project-a",Collections.singletonList("sl-one")));
+        assertEquals("sl-two",f.client.readOnlyHitsForProject("project-a",Collections.singletonList("sl-two")).get(0).getId());
+    }
+
+    @Test void twoCatalogRoutesCurrentAndHistoricalSingleEditionWithoutMixing() throws Exception {
+        Path root=temp;Fixture primary=new Fixture(false);Path one=slOriginal("one");configureSl(primary,one,null);
+        ObjectNode primaryManifest=manifest(primary);primaryManifest.putObject("sourceLineage").put("frozenManifestSha256",sha("old-one"));writeManifest(primary,primaryManifest);
+        snapshot(primary,Arrays.asList(primary.first,slBody("sl-a","SL:one",one)));
+        temp=root.resolve("other");Files.createDirectories(temp);Fixture other=new Fixture(false);Path two=slOriginal("two");configureSl(other,two,null);
+        ObjectNode secondaryManifest=manifest(other);((ObjectNode)secondaryManifest.path("originalSources").path("slSources").get(0)).put("editionId","two");
+        secondaryManifest.putObject("sourceLineage").put("frozenManifestSha256",sha("old-two"));
+        Path plan=Paths.get(secondaryManifest.path("runtimePlan").path("path").asText());ObjectNode planJson=(ObjectNode)JsonUtils.parse(Files.readString(plan));
+        planJson.put("projectId","other-fixed");write(plan,planJson);secondaryManifest.set("runtimePlan",descriptor(plan));writeManifest(other,secondaryManifest);
+        ObjectNode otherBody=slBody("sl-b","SL:two",two);snapshot(other,Arrays.asList(other.first,otherBody));
+        primary.p.setSecondaryManifestPath(other.p.getManifestPath());primary.p.setSecondaryManifestSha256(other.p.getManifestSha256());
+        primary.p.setSecondaryProjectId("other-fixed");primary.p.setSecondaryIndexSignature(other.p.getIndexSignature());
+        com.consense.repository.ProjectRepository repository=mock(com.consense.repository.ProjectRepository.class);
+        com.consense.domain.Project project=new com.consense.domain.Project();project.setId("project-a");
+        when(repository.findById("project-a")).thenReturn(Optional.of(project));
+        org.springframework.test.util.ReflectionTestUtils.setField(primary.client,"projectRepository",repository);
+        JsonNode available=primary.client.selectionStatus("project-a").path("availableSlSources");assertEquals(2,available.size());
+        assertEquals(primary.p.getManifestSha256(),available.get(0).path("manifestSha256").asText());
+        assertEquals(other.p.getManifestSha256(),available.get(1).path("manifestSha256").asText());
+        JsonNode second=slSelection(other,two,"two");primary.client.saveProjectSelection("project-a",second);
+        assertEquals(other.p.getManifestSha256(),primary.client.selectionStatus("project-a").path("manifestSha256").asText());
+        assertEquals("two",primary.client.projectSelection("project-a").path("slSources").get(0).path("editionId").asText());
+        assertEquals(sha("old-two"),primary.client.frozenManifestForProject("project-a").path("sourceLineage").path("frozenManifestSha256").asText());
+        other.response.put("projectId","other-fixed");other.response.putArray("selectedSourceSha256").add(sha(Files.readAllBytes(two))).add(ORIGINAL);
+        other.response.putArray("hits").addObject().put("id","sl-b").put("score",.8).set("payload",otherBody);headerUnit(other,otherBody);
+        when(primary.http.postJson(endsWith("/retrieve"),anyString(),anyLong())).thenAnswer(call->{
+            JsonNode request=JsonUtils.parse(call.getArgument(1));assertEquals("other-fixed",request.path("projectId").asText());return JsonUtils.write(other.response);
+        });
+        List<VectorStore.SearchHit> routed=primary.client.searchForProject("project-a","advisory","ordinary query",1);
+        assertEquals("sl-b",routed.get(0).getId());assertEquals(other.p.getManifestSha256(),routed.get(0).getPayload().get("fixedBaselineManifestSha256"));
+        VectorStore.SearchHit hit=primary.client.readOnlyHitById("sl-b");assertEquals(other.p.getManifestSha256(),hit.getPayload().get("fixedBaselineManifestSha256"));
+        assertEquals("sl-b",primary.client.evidence(hit).getId());
+        Runnable guard=primary.client.currentReadGuardForProject("project-a",Collections.singletonList(hit),null);
+        JsonNode first=slSelection(primary,one,"one");primary.client.saveProjectSelection("project-a",first);assertThrows(IllegalStateException.class,guard::run);
+        assertThrows(IllegalStateException.class,()->primary.client.currentReadGuardForProject("project-a",Collections.singletonList(hit),null));
+        assertThrows(IllegalStateException.class,()->primary.client.readOnlyHitById("parent-a"));
+        ObjectNode old=((ObjectNode)second).deepCopy();old.put("manifestSha256",sha("old-two"));((ObjectNode)old.path("slSources").get(0)).put("editionId","legacy:"+sha(Files.readAllBytes(two)));
+        project.setFixedReferenceSelectionJson(JsonUtils.write(old));assertEquals("two",primary.client.projectSelection("project-a").path("slSources").get(0).path("editionId").asText());
+        old.put("manifestSha256",other.p.getManifestSha256());project.setFixedReferenceSelectionJson(JsonUtils.write(old));assertThrows(IllegalStateException.class,()->primary.client.projectSelection("project-a"));
+        ObjectNode multi=((ObjectNode)first).deepCopy();multi.withArray("slSources").add(second.path("slSources").get(0));project.setFixedReferenceSelectionJson(JsonUtils.write(multi));
+        assertEquals(2,primary.client.selectionStatus("project-a").path("selection").path("slSources").size());
+        assertThrows(IllegalStateException.class,()->primary.client.projectSelection("project-a"));
     }
 
     @Test void projectSelectionIsPersistedAndPinsTheExactManifest() throws Exception {
