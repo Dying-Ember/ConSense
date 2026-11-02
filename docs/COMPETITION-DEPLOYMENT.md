@@ -89,6 +89,19 @@ printf '%s\n' "$DEPLOY_ROOT"
 
 ### 配置键示例与相对路径（需现场填值）
 
+仓库中提供 [App 环境变量样例](../competition-assets/config/app.env.example) 和 [Source 环境变量样例](../competition-assets/config/source.env.example)。在目标机仓库外的部署根目录准备非版本控制的私有配置目录，将样例复制后填写所有占位符：
+
+```sh
+# REPO_ROOT 为仓库绝对路径，DEPLOY_ROOT 为上文的实际交付目录。
+mkdir -p "$DEPLOY_ROOT/config"
+cp "$REPO_ROOT/competition-assets/config/app.env.example" "$DEPLOY_ROOT/config/app.env"
+cp "$REPO_ROOT/competition-assets/config/source.env.example" "$DEPLOY_ROOT/config/source.env"
+chmod 600 "$DEPLOY_ROOT/config/app.env" "$DEPLOY_ROOT/config/source.env"
+# 编辑两个文件并填入现场路径、服务地址及单独提供的凭据。
+```
+
+这些文件是供 Docker `--env-file` 读取的样例，并非完整的五角色创建配置；不要直接用 shell `source` 执行含 `<...>` 占位符的文件。实际创建容器时把填写完成的文件作为 `--env-file "$DEPLOY_ROOT/config/app.env"` 或 `--env-file "$DEPLOY_ROOT/config/source.env"` 传给对应角色，同时准备上文所需的全部挂载。App 文件含密钥，Source 文件只含密钥文件的容器内路径；填写后的文件不要提交仓库。复制和填值不会更新已经创建的容器，必须在目标机创建对应容器前完成。
+
 现有 [`ai_consense_service/.env.example`](../ai_consense_service/.env.example) 用于普通 H2/MiniMax relay，Spring Boot 不会自动读取它；[`app-rehearsal-source.env`](../ai_consense_service/tools/offline_delivery/app-rehearsal-source.env) 只含本机 OCR 三项，不是比赛完整配置。以下是需提供的**部分键名**，`<...>` 为占位符，不能原样启动；五角色的完整挂载、manifest、OCR、GPU 设备、cgroup 和权限仍须按上文配置。系统变量是容器环境变量或外置配置中的键值，配置文件需实际挂载并传入进程，创建前修改的值才会进入该容器。
 
 ```dotenv
@@ -127,7 +140,7 @@ CONSENSE_QDRANT_URL=http://127.0.0.1:28683
 CONSENSE_QDRANT_API_KEY_FILE=<容器内独立密钥文件绝对路径>
 ```
 
-两个 Source 状态目录必须分别存在、可写且不能互为父目录，端口必须不同；Qdrant 凭据文件须非链接、由运行用户拥有、权限 `0600`，不得以 `CONSENSE_QDRANT_API_KEY` 环境变量直接传给 Source。Source 固定监听 `127.0.0.1`，以上地址只适用于共用网络命名空间的方案；依据 `source_service_entrypoint.py`。其他实际必需项包括 `CONSENSE_COMPLETE_OCR_CONFIG` / `CONSENSE_COMPLETE_OCR_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_URL` / `CONSENSE_FIXED_GPU_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_PROFILE_MANIFEST` / `CONSENSE_FIXED_GPU_PROFILE_MANIFEST_SHA256` 与模型路径；这些 SHA 必须针对**最终的目标配置内容**计算并经部署记录核对，不能照抄本机值。
+两个 Source 状态目录必须分别存在、可写且不能互为父目录，端口必须不同；Qdrant 凭据文件须非链接、由运行用户拥有、权限 `0600`，不得以 `CONSENSE_QDRANT_API_KEY` 环境变量直接传给 Source。Source 固定监听 `127.0.0.1`，以上地址只适用于共用网络命名空间的方案；依据 `source_service_entrypoint.py`。其他实际必需项包括 `CONSENSE_COMPLETE_OCR_CONFIG` / `CONSENSE_COMPLETE_OCR_CONFIG_SHA256`、`CONSENSE_MODEL_DEVICE=cuda`、`CONSENSE_FIXED_GPU_URL`、`CONSENSE_FIXED_GPU_TOKEN_FILE`、`CONSENSE_FIXED_GPU_TIMEOUT_SECONDS`、`CONSENSE_FIXED_GPU_CONFIG_SHA256`、`CONSENSE_FIXED_GPU_PROFILE_MANIFEST` / `CONSENSE_FIXED_GPU_PROFILE_MANIFEST_SHA256` 与模型路径；固定 GPU 连接的 URL、token 文件、超时及 profile/哈希须一并设置，URL 使用 `unix:///` 私有 socket。所有 SHA 必须针对**最终的目标配置内容**计算并经部署记录核对，不能照抄本机值。
 
 部署根路径在目标宿主机解析成绝对路径后用于 `docker --mount` 的 `src=`；示例 `"$DEPLOY_ROOT/release/app"` 不会自动生成发布目录。容器内部应用、配置和 manifest 使用上文的固定目标路径；改路径必须同步重绑配置和原件来源身份。密钥和目标 UUID、CID、socket、数据库位置使用现场独立注入的值。
 
